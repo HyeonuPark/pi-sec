@@ -1,0 +1,18 @@
+{
+  "json": {
+    "data": {
+      "node": {
+        "__typename": "IssueComment",
+        "body": "My first note.",
+        "viewerCanUpdate": true,
+        "viewerDidAuthor": true,
+        "pullRequest": {
+          "number": 10,
+          "repository": {
+            "nameWithOwner": "other/tool"
+          }
+        }
+      }
+    }
+  }
+}

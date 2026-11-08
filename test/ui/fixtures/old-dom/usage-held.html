@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" data-theme="auto"><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+    <meta name="color-scheme" content="light dark">
+    <!-- The external mount prefix, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-base" content="">
+    <!-- The harness time zone, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-timezone" content="">
+    <title>Usage · pi-sec</title>
+    <link rel="stylesheet" href="/theme.css">
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/usage.css">
+  </head>
+  <body class="usage-page">
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">π</span>
+          <span class="brand-name">usage</span>
+        </div>
+      </div>
+      <div class="header-status">
+        <!-- The cards are read once at load; this reads them again in place, so a
+             provider logged in from another tab appears without a reload. -->
+        <button id="reload-usage" class="button" type="button">↻ reload</button>
+        <a class="pill pill-muted" id="stats-link" href="/usage/stats">speed stats</a>
+        <a class="pill pill-muted" id="chat-link" href="/basic-chat">← chat</a>
+        <button id="theme-toggle" class="button" type="button">◐ auto</button>
+      </div>
+    </header>
+
+    <main class="usage-scroll">
+      <p id="usage-status" class="usage-status hidden"></p>
+      <!-- One card per provider that has auth, drawn by usage.js from GET /api/usage. -->
+      <section id="usage-cards" class="usage-cards" aria-live="polite"><article class="usage-card" data-provider="anthropic"><header class="usage-card-head"><div class="usage-card-title"><h2 class="usage-card-name">Anthropic</h2><span class="usage-chip">subscription</span></div><div class="usage-card-meta"><span class="usage-received">value received 2026-10-25 07:30</span><button class="usage-card-refresh" type="button" aria-label="Refresh Anthropic">↻</button></div></header><div class="usage-card-body"><p class="usage-hold">kept value from 07:30 · next refresh after 08:10</p><div class="usage-field"><span class="usage-field-name">5-hour limit</span><div class="usage-field-value"><div class="usage-quota"><div class="usage-field-head"><span class="usage-value">28%</span><span class="usage-muted usage-small">resets 2026-10-26 20:59</span></div><div class="usage-bar" data-level="ok"><div class="usage-bar-fill" style="width: 28%;"></div></div></div></div></div><div class="usage-field"><span class="usage-field-name">Weekly limit</span><div class="usage-field-value"><div class="usage-quota"><div class="usage-field-head"><span class="usage-value">72%</span><span class="usage-muted usage-small">reset time not stated</span></div><div class="usage-bar" data-level="warn"><div class="usage-bar-fill" style="width: 72%;"></div></div></div></div></div><div class="usage-field"><span class="usage-field-name">Credits</span><div class="usage-field-value"><div class="usage-credits"><div class="usage-line"><span>Usage credits: off</span><span class="usage-muted"> (out of credits)</span><span class="usage-muted"> · used $0.00</span><span class="usage-muted"> · monthly limit none</span><span class="usage-muted"> · Balance not available</span></div><div class="usage-line"><span>Monthly API credits: No API</span><span class="usage-muted"> · </span><a class="usage-link" href="https://platform.claude.com/settings/billing" target="_blank" rel="noreferrer noopener">Console billing</a></div></div></div></div></div></article></section>
+
+      <!-- The slot an extension puts its own usage card in. The server fills it,
+           the way the chat page fills `sidebar.bottom`. This page opens no event
+           stream, so a card here hears no `ui_event`. -->
+      <section class="usage-slot" aria-label="Usage cards from extensions">
+        <div class="ui-slot" data-ui-slot="usage.cards"></div>
+      </section>
+    </main>
+
+    <div id="usage-toast" class="toast hidden" role="alert" aria-live="assertive"></div>
+
+    
+    
+    
+  
+
+</body></html>

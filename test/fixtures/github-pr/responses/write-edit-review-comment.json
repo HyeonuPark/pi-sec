@@ -1,0 +1,12 @@
+{
+  "json": {
+    "data": {
+      "updatePullRequestReviewComment": {
+        "pullRequestReviewComment": {
+          "id": "PRRC_mine",
+          "body": "My line note, edited."
+        }
+      }
+    }
+  }
+}

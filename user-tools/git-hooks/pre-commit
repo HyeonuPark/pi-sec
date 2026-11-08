@@ -1,0 +1,27 @@
+#!/bin/sh
+# pi-sec install hook. Refuse a commit whose staged files carry a value of this
+# install: a registered secret, the home path, the host name, a word of the
+# word list, the personality name or the account name of the install, a
+# generated id, or a real-looking address. It also refuses a commit whose author
+# or committer is not in commit-identities.txt of the pi-sec home. It runs
+# scripts/scan-tree.mjs and scripts/check-identity.mjs from a copy of the index,
+# so it reads what the commit will hold and nothing else.
+home_dir="${PI_SEC_HOME:-$HOME/.pi/sec}"
+words="$home_dir/scan-words.txt"
+identities="$home_dir/commit-identities.txt"
+[ -r "$words" ] || { echo "pre-commit: cannot read the word list $words" >&2; exit 1; }
+[ -r "$identities" ] || { echo "pre-commit: cannot read the identity list $identities" >&2; exit 1; }
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+git checkout-index --all --prefix="$tmp/tree/" || exit 1
+[ -f "$tmp/tree/scripts/scan-tree.mjs" ] || { echo "pre-commit: the index holds no scripts/scan-tree.mjs" >&2; exit 1; }
+[ -f "$tmp/tree/scripts/check-identity.mjs" ] || { echo "pre-commit: the index holds no scripts/check-identity.mjs" >&2; exit 1; }
+for role in AUTHOR COMMITTER; do
+  ident=$(git var "GIT_${role}_IDENT" | sed 's/ [0-9][0-9]* [+-][0-9][0-9]*$//') || exit 1
+  if ! node "$tmp/tree/scripts/check-identity.mjs" --identities "$identities" "$ident" 2>/dev/null; then
+    echo "pre-commit: this commit: $(echo "$role" | tr A-Z a-z) is not in $identities" >&2
+    exit 1
+  fi
+done
+env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR \
+  node "$tmp/tree/scripts/scan-tree.mjs" --root "$tmp/tree" --words "$words"

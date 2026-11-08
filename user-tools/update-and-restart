@@ -1,0 +1,380 @@
+#!/usr/bin/env bash
+# Advance the execution (snapshot) tree to the workspace tree's HEAD and
+# cold-restart pi-sec from it.
+#
+# Layout: one repository, two worktrees.
+#   ~/.pi/sec/workspace  modification tree, branch `main`      (never executed)
+#   ~/.pi/sec/snapshot   execution tree,    branch `snapshot`  (what the daemon boots)
+#
+# Update brings `snapshot` up to `main` — a fast-forward, refused loudly when the
+# two have diverged — then rebuilds and restarts. A plain run uses no remote: no
+# fetch, no push, no second clone in the path, so there is no hop that can
+# silently not happen. That hop is why an update once restarted the daemon on the
+# old code and said nothing.
+#
+# `--pull` adds exactly one hop, and only when you ask for it: it fetches `origin`
+# into the workspace tree and fast-forwards `main` onto `origin/main`, then the
+# update runs as it does without the option. It never pushes. A `main` that
+# carries commits of its own — the agent's self-edit commits are the usual ones —
+# is refused instead of merged, because a conflict left in the workspace by a
+# script nobody watched is worse than a refusal. `--check --pull` fetches and says
+# how far `main` is from `origin/main`, and moves neither ref.
+#
+# The daemon is stopped for the whole update: `npm ci` and `npm run build` rewrite
+# the very tree it loads modules from, and doing that under a live process is how
+# a run freezes half-way. The cost is a few seconds of downtime; the alternative
+# is a process that may stop answering for reasons nobody can see.
+#
+# Without a systemd unit there is nothing to stop, so the script checks whether a
+# daemon of this home runs and refuses before it changes anything. A running
+# daemon under `user-tools/run` is restarted from the web UI instead: that path
+# stops the daemon, runs this script, and starts the daemon again.
+#
+# `--reinstall` deletes the execution tree's node_modules and installs it again
+# from `package-lock.json`, even when the lock did not change. That is the repair
+# for a tree that no longer matches its lock. A plain run does not do it.
+#
+# This script always rebuilds and restarts, even when the two trees are already
+# in sync. A restart is sometimes the whole point of running it: the web UI's
+# restart command runs this same script, and there "apply whatever is committed
+# and come back" is the request. `--check` stays read-only and restarts nothing.
+#
+# Each applied update also runs `install-git-hooks --update` of the execution
+# tree on the workspace, so the commit hooks of the applied commit are the
+# installed hooks. A refusal of the installer prints a note and the update goes on.
+#
+# The snapshot tree is read-only by convention. Never commit there: the next
+# update fast-forwards over it, and an uncommitted tree is refused outright.
+#
+# Run as the pi-sec user. Never calls sudo.
+set -euo pipefail
+
+HOME_DIR="${PI_SEC_HOME:-$HOME/.pi/sec}"
+WORKSPACE="$HOME_DIR/workspace"
+SNAPSHOT="$HOME_DIR/snapshot"
+SOURCE_BRANCH="${PI_SEC_SOURCE_BRANCH:-main}"
+SNAPSHOT_BRANCH="${PI_SEC_SNAPSHOT_BRANCH:-snapshot}"
+
+USAGE="usage: $0 [--check] [--pull] [--reinstall]"
+CHECK_ONLY=0
+PULL=0
+REINSTALL=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --check) CHECK_ONLY=1 ;;
+    --pull) PULL=1 ;;
+    --reinstall) REINSTALL=1 ;;
+    *) echo "$USAGE" >&2; exit 2 ;;
+  esac
+  shift
+done
+# `--check` changes nothing, so it has nothing to reinstall. It stays refused the
+# way it was when the parser took one argument.
+if [ "$CHECK_ONLY" = "1" ] && [ "$REINSTALL" = "1" ]; then
+  echo "$USAGE" >&2
+  echo "  --check changes nothing, so it cannot take --reinstall" >&2
+  exit 2
+fi
+
+say() { printf '  %s\n' "$*"; }
+
+# Written by the daemon when a restart is requested from the web UI, removed here
+# before the service is started again. A marker still present on the next boot is
+# how the operator learns that the last one failed, without having watched a
+# terminal. It is removed *before* the start, never after: the process that boots
+# reads this file, and a restart that comes back up is not a failure.
+MARKER="$HOME_DIR/run/restart-pending"
+
+# Held for the length of the run: a click in the UI and the same script in a
+# terminal must not interleave a stop, a build, and a start.
+LOCK="$HOME_DIR/run/update-and-restart.lock"
+STOPPED=0
+
+# After the service has been stopped, a failure must not leave it down: nobody is
+# watching the output when the run came from the UI. Try to start it again, and
+# leave the marker only if the service stays down.
+leave_marker() {
+  mkdir -p "$(dirname "$MARKER")"
+  printf '{"at": %s, "source": "script"}\n' "$(date +%s%3N)" > "$MARKER"
+}
+
+leave_a_trace() {
+  local code=$?
+  if [ "$STOPPED" = "1" ] && [ "$(service_unit)" = "runner" ]; then
+    # The runner starts the daemon again whatever this script did, and the daemon
+    # it starts reads the marker. Overwriting it is what keeps the failure on
+    # record: this script may have removed the marker already.
+    leave_marker
+    say "the update failed (exit $code); the runner starts the daemon again anyway"
+    say "$MARKER is left for the next boot to report"
+  elif [ "$STOPPED" = "1" ]; then
+    say "failed after stopping the service (exit $code); starting it again"
+    # Away first, because the service about to be started reads this file at boot.
+    rm -f "$MARKER"
+    if ! svc_start; then
+      leave_marker
+      say "the service is still down; $MARKER is left for the next boot to report"
+    fi
+  elif [ -f "$MARKER" ]; then
+    say "the update did not finish (exit $code); $MARKER is left for the next boot to report"
+  fi
+  exit "$code"
+}
+trap leave_a_trace ERR
+
+if [ ! -d "$WORKSPACE/.git" ] && [ ! -f "$WORKSPACE/.git" ]; then
+  echo "error: no repository at $WORKSPACE" >&2
+  exit 1
+fi
+
+service_unit() {
+  # Asked first, and without a probe: under the runner there is no unit to find,
+  # and `systemctl` from a session without a user bus is a slow failure.
+  if [ "${PI_SEC_RUNNER:-}" = "1" ]; then echo "runner"
+  elif systemctl --user is-enabled pi-sec >/dev/null 2>&1; then echo "user"
+  elif command -v systemctl >/dev/null 2>&1 && systemctl is-enabled pi-sec >/dev/null 2>&1; then echo "system"
+  else echo "none"; fi
+}
+
+svc_stop() {
+  case "$(service_unit)" in
+    runner) say "the daemon stopped for this update: it ran under user-tools/run" ;;
+    user) say "stopping pi-sec (systemctl --user)"; systemctl --user stop pi-sec ;;
+    system) say "stopping pi-sec (system unit)"; sudo systemctl stop pi-sec ;;
+    none) say "no systemd unit found; if you supervise 'pi-sec start' yourself, stop it now" ;;
+  esac
+  STOPPED=1
+}
+
+svc_start() {
+  case "$(service_unit)" in
+    runner) say "the runner starts the daemon again when this script exits" ;;
+    user) say "starting pi-sec (systemctl --user)"; systemctl --user start pi-sec ;;
+    system) say "starting pi-sec (system unit)"; sudo systemctl start pi-sec ;;
+    none) say "no systemd unit found; start your supervised 'pi-sec start' process" ;;
+  esac
+}
+
+# Is a daemon of this home running? `pi-sec status` is the one place that decides
+# it: it reads the pid file and asks whether that pid is alive. Nothing here takes
+# the daemon's start lock, because a probe that holds it for a moment can make a
+# daemon that is starting right then give up.
+#
+# Without a build in the execution tree no daemon can run from it, so a missing
+# pid file or a dead pid means one is not running. A live pid still counts: the
+# cost of believing it wrongly is a script that stops and says so.
+daemon_running() {
+  if [ -f "$SNAPSHOT/dist/cli.js" ]; then
+    PI_SEC_HOME="$HOME_DIR" node "$SNAPSHOT/dist/cli.js" status >/dev/null 2>&1
+    return $?
+  fi
+  local pid
+  pid="$(cat "$HOME_DIR/run/pi-sec.pid" 2>/dev/null || true)"
+  case "$pid" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  kill -0 "$pid" 2>/dev/null
+}
+
+fetch_origin() {
+  say "fetching origin"
+  git -C "$WORKSPACE" fetch origin
+}
+
+# "1 commit" / "2 commits", so a refusal reads as a sentence.
+n_commits() {
+  if [ "$1" = "1" ]; then printf '1 commit'; else printf '%s commits' "$1"; fi
+}
+
+# `--pull`: take the remote's new commits, and only as a fast-forward. The agent
+# commits its own edits to `main`, so the two sides do diverge in normal use, and
+# a merge here would leave a conflict in a tree nobody is watching.
+pull_origin() {
+  local branch ahead behind
+  branch="$(git -C "$WORKSPACE" branch --show-current)"
+  if [ "$branch" != "$SOURCE_BRANCH" ]; then
+    echo "error: $WORKSPACE is on branch '${branch}', not $SOURCE_BRANCH" >&2
+    echo "  --pull fast-forwards $SOURCE_BRANCH only; nothing was changed" >&2
+    exit 1
+  fi
+  # Checked before the fetch: every refusal here changes nothing, and a fetch
+  # does change this repository's reference state.
+  if [ -n "$(git -C "$WORKSPACE" status --porcelain)" ]; then
+    echo "error: $WORKSPACE has uncommitted changes" >&2
+    echo "  commit them or move them aside first; nothing was changed" >&2
+    exit 1
+  fi
+  fetch_origin
+  ahead="$(git -C "$WORKSPACE" rev-list --count "origin/$SOURCE_BRANCH..$SOURCE_BRANCH")"
+  behind="$(git -C "$WORKSPACE" rev-list --count "$SOURCE_BRANCH..origin/$SOURCE_BRANCH")"
+  if [ "$ahead" != "0" ]; then
+    echo "error: $SOURCE_BRANCH has $(n_commits "$ahead") that origin/$SOURCE_BRANCH does not have," >&2
+    echo "  and origin/$SOURCE_BRANCH has $behind that $SOURCE_BRANCH does not; merge them by hand, then run this again" >&2
+    echo "  nothing was changed" >&2
+    exit 1
+  fi
+  if [ "$behind" = "0" ]; then
+    say "$SOURCE_BRANCH is already at origin/$SOURCE_BRANCH"
+    return 0
+  fi
+  say "fast-forwarding $SOURCE_BRANCH to origin/$SOURCE_BRANCH: $(n_commits "$behind")"
+  git -C "$WORKSPACE" merge --ff-only "origin/$SOURCE_BRANCH"
+}
+
+# `--check --pull`: the fetch stays on the read-only side of the check. It writes
+# this repository's remote-tracking ref and nothing else, so no branch moves, no
+# tree changes, no build runs, and it works while the daemon serves.
+report_vs_origin() {
+  local ahead behind
+  fetch_origin
+  ahead="$(git -C "$WORKSPACE" rev-list --count "origin/$SOURCE_BRANCH..$SOURCE_BRANCH")"
+  behind="$(git -C "$WORKSPACE" rev-list --count "$SOURCE_BRANCH..origin/$SOURCE_BRANCH")"
+  say "origin     $SOURCE_BRANCH is $behind behind and $ahead ahead of origin/$SOURCE_BRANCH"
+}
+
+# Is the snapshot already a worktree of *this* repository?
+same_repository() {
+  [ -e "$SNAPSHOT/.git" ] || return 1
+  local snap_common workspace_common
+  snap_common="$(git -C "$SNAPSHOT" rev-parse --git-common-dir 2>/dev/null || echo x)"
+  workspace_common="$(git -C "$WORKSPACE" rev-parse --git-common-dir 2>/dev/null || echo y)"
+  [ "$(cd "$SNAPSHOT" && cd "$snap_common" && pwd)" = "$(cd "$WORKSPACE" && cd "$workspace_common" && pwd)" ]
+}
+
+# One-time: replace a separate clone with a worktree of the workspace repository.
+convert_to_worktree() {
+  local aside="$SNAPSHOT.pre-worktree-$(date +%Y%m%d-%H%M%S)"
+  echo "one-time conversion: $SNAPSHOT becomes a worktree of $WORKSPACE"
+  say "stopping the daemon first: the tree it runs from is about to be replaced"
+  svc_stop
+  if [ -e "$SNAPSHOT" ]; then
+    say "moving the old checkout aside: $aside"
+    mv "$SNAPSHOT" "$aside"
+  fi
+  git -C "$WORKSPACE" worktree prune
+  if ! git -C "$WORKSPACE" show-ref --verify --quiet "refs/heads/$SNAPSHOT_BRANCH"; then
+    say "creating branch $SNAPSHOT_BRANCH from $SOURCE_BRANCH"
+    git -C "$WORKSPACE" branch "$SNAPSHOT_BRANCH" "$SOURCE_BRANCH"
+  fi
+  say "creating the worktree at $SNAPSHOT"
+  git -C "$WORKSPACE" worktree add "$SNAPSHOT" "$SNAPSHOT_BRANCH"
+  say "the old checkout is kept at $aside — delete it once the daemon is healthy:"
+  say "  rm -rf $aside"
+}
+
+if [ "$CHECK_ONLY" = "0" ]; then
+  mkdir -p "$HOME_DIR/run"
+  exec 9>"$LOCK"
+  if ! flock -n 9; then
+    echo "error: another update-and-restart run is in progress ($LOCK)" >&2
+    exit 1
+  fi
+
+  # Before the first change: with no unit to stop, the tree a running daemon
+  # loads from would be rebuilt under it. `--check` is read-only, so it skips
+  # this and keeps working while the daemon serves.
+  case "$(service_unit)" in
+    runner | none)
+      if daemon_running; then
+        echo "error: a pi-sec daemon is running for $HOME_DIR" >&2
+        if [ "$(service_unit)" = "runner" ]; then
+          echo "  it runs under user-tools/run: use the restart button in the web UI, which stops it," >&2
+          echo "  runs this script, and starts it again" >&2
+        else
+          echo "  stop it first, then run this script again" >&2
+        fi
+        echo "  nothing was changed" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
+
+# After the lock and the stop check, so nothing moves under a running daemon, and
+# before the snapshot merge, so the merge applies what the fetch brought.
+if [ "$PULL" = "1" ]; then
+  if [ "$CHECK_ONLY" = "1" ]; then report_vs_origin; else pull_origin; fi
+fi
+
+if ! same_repository; then
+  [ "$CHECK_ONLY" = "1" ] && { echo "snapshot is not yet a worktree of the workspace repository"; exit 1; }
+  convert_to_worktree
+fi
+
+if [ -n "$(git -C "$SNAPSHOT" status --porcelain --untracked-files=no)" ]; then
+  echo "error: $SNAPSHOT has uncommitted changes to tracked files" >&2
+  echo "the execution tree is read-only by convention; move the change to $WORKSPACE" >&2
+  exit 1
+fi
+if [ "$CHECK_ONLY" = "0" ] && [ -n "$(git -C "$SNAPSHOT" status --porcelain --untracked-files=normal | grep '^??' || true)" ]; then
+  say "note: untracked files in the execution tree (left alone; git will refuse if one collides)"
+fi
+
+FROM="$(git -C "$SNAPSHOT" rev-parse --short HEAD)"
+FROM_BRANCH="$(git -C "$SNAPSHOT" branch --show-current)"
+TO="$(git -C "$WORKSPACE" rev-parse --short "$SOURCE_BRANCH")"
+BEHIND="$(git -C "$WORKSPACE" rev-list --count "$FROM..$TO" 2>/dev/null || echo "?")"
+
+echo "pi-sec update"
+say "workspace  $SOURCE_BRANCH @ $TO ($(git -C "$WORKSPACE" log -1 --format=%s "$SOURCE_BRANCH" | cut -c1-60))"
+say "snapshot   $FROM_BRANCH @ $FROM"
+say "commits to apply: $BEHIND"
+
+if [ "$FROM" = "$TO" ]; then
+  echo "  already in sync"
+  say "restarting anyway: this script always rebuilds and restarts"
+fi
+[ "$CHECK_ONLY" = "1" ] && exit 0
+
+UNCOMMITTED="$(git -C "$WORKSPACE" status --porcelain | wc -l)"
+if [ "$UNCOMMITTED" != "0" ]; then
+  say "note: $UNCOMMITTED uncommitted file(s) in the workspace are NOT applied — only commits run"
+fi
+
+LOCK_BEFORE="$(git -C "$SNAPSHOT" rev-parse "HEAD:package-lock.json" 2>/dev/null || echo none)"
+
+svc_stop
+
+if ! git -C "$SNAPSHOT" merge --ff-only "$SOURCE_BRANCH"; then
+  echo "error: $SNAPSHOT_BRANCH has diverged from $SOURCE_BRANCH; refusing to guess" >&2
+  echo "  the tree was not changed; starting the daemon again"
+  svc_start
+  echo "  to make the snapshot match the workspace exactly:" >&2
+  echo "    git -C $SNAPSHOT reset --hard $SOURCE_BRANCH" >&2
+  echo "  then run this script again" >&2
+  exit 1
+fi
+
+# The commit hooks of the commit just applied. A refusal prints its note, and
+# the update goes on, as user-tools/install does.
+if [ -x "$SNAPSHOT/user-tools/install-git-hooks" ]; then
+  if ! "$SNAPSHOT/user-tools/install-git-hooks" --update "$WORKSPACE"; then
+    say "note: the commit hooks were not updated; read the lines above, and run"
+    say "  $WORKSPACE/user-tools/install-git-hooks --update"
+    say "again when the cause is fixed"
+  fi
+fi
+
+LOCK_AFTER="$(git -C "$SNAPSHOT" rev-parse "HEAD:package-lock.json" 2>/dev/null || echo none)"
+if [ "$REINSTALL" = "1" ]; then
+  say "forced reinstall (--reinstall): removing node_modules and running npm ci"
+  rm -rf "$SNAPSHOT/node_modules"
+  (cd "$SNAPSHOT" && npm ci)
+elif [ "$LOCK_BEFORE" != "$LOCK_AFTER" ]; then
+  say "dependencies changed ($(echo "$LOCK_BEFORE" | cut -c1-8) -> $(echo "$LOCK_AFTER" | cut -c1-8)); npm ci"
+  (cd "$SNAPSHOT" && npm ci)
+elif [ ! -d "$SNAPSHOT/node_modules" ]; then
+  say "no node_modules in the execution tree yet; npm ci"
+  (cd "$SNAPSHOT" && npm ci)
+else
+  say "dependencies unchanged; reusing node_modules"
+fi
+
+say "building"
+(cd "$SNAPSHOT" && npm run build)
+
+# Before the start, never after: the process that boots reads this file.
+rm -f "$MARKER"
+svc_start
+
+echo "done: $FROM -> $TO"

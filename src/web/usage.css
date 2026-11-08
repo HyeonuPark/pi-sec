@@ -1,0 +1,327 @@
+/*
+ * The usage page. The shell, the header and the theme come from styles.css, the
+ * theme variables from theme.css; this file adds the cards and nothing else, so a
+ * rule here cannot reach another page: every selector starts with
+ * `.usage-page`.
+ *
+ * One card per row, at every width. The provider cards and the cards an extension
+ * puts in the slot below share one column, so all of them have the same left edge
+ * and the same width, and a bar of one card can be read against a bar of another.
+ */
+
+.usage-page {
+  height: 100%;
+  min-height: 100dvh;
+}
+
+.usage-page .usage-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-5) var(--space-4);
+  overflow-y: auto;
+}
+
+.usage-page .usage-status {
+  margin: 0 auto var(--space-4);
+  max-width: 72rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* One column of full-width rows. `minmax(0, 1fr)` rather than `1fr`: a plain
+   fraction keeps the wide content of a row as its floor, and one long line then
+   widens the whole card past the screen. */
+.usage-page .usage-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+/* The extension slot is the same column: a card is somebody else's drawing and
+   takes the whole width it is given, the way the sidebar's slot does. */
+.usage-page .usage-slot > .ui-slot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.usage-page .usage-slot > .ui-slot > * {
+  min-width: 0;
+}
+
+.usage-page .usage-slot {
+  max-width: 72rem;
+  margin: var(--space-5) auto 0;
+}
+
+.usage-page .usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+}
+
+/* The head wraps: when the line runs out of room the badge, the received time and
+   the refresh button move to the next line. The name keeps its letters and wraps
+   inside itself; it is never cut short with an ellipsis. */
+.usage-page .usage-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.usage-page .usage-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.usage-page .usage-card-name {
+  margin: 0;
+  min-width: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.usage-page .usage-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  min-width: 0;
+}
+
+.usage-page .usage-received {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.usage-page .usage-card-refresh {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.usage-page .usage-card-refresh:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.usage-page .usage-card-refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.usage-page .usage-chip {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+/* What a held value is: the refusal, or the kept value and its next attempt. */
+.usage-page .usage-hold {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.usage-page .usage-card-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.usage-page .usage-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.usage-page .usage-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.usage-page .usage-field-name {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.usage-page .usage-field-value {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The labels that sit beside a bar: the number, and the note next to it. */
+.usage-page .usage-field-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.usage-page .usage-value {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.usage-page .usage-small {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+/* A bar: a track the width of the field, and a fill whose width the script sets
+   from the share. The colour comes from the level of that share. */
+.usage-page .usage-bar {
+  width: 100%;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--border);
+  overflow: hidden;
+}
+
+.usage-page .usage-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.usage-page .usage-bar[data-level="warn"] .usage-bar-fill {
+  background: var(--status-waiting);
+}
+
+.usage-page .usage-bar[data-level="danger"] .usage-bar-fill {
+  background: var(--danger);
+}
+
+.usage-page .usage-line {
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+/* A balance has no maximum, so it has no bar: it is the number, made large. */
+.usage-page .usage-balance {
+  font-size: 1.6rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+/* The value of a field, when it is a sentence and a link rather than a number:
+   a prepaid balance no API states. It keeps the line's own size, because a
+   sentence set at the size of a balance is a headline. */
+.usage-page .usage-balance-notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.usage-page .usage-balance-note {
+  color: var(--text-muted);
+}
+
+/* One column per day, oldest on the left, standing on a shared floor. The track
+   has a fixed height, so a column's height is a share of it. */
+.usage-page .usage-days {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 4.5rem;
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--border);
+}
+
+.usage-page .usage-day {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 0%;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* The last seven days, the window the 7-day line sums. */
+.usage-page .usage-day--recent {
+  background: var(--accent);
+}
+
+.usage-page .usage-days-label {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.usage-page .usage-muted {
+  color: var(--text-muted);
+}
+
+.usage-page .usage-wip {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+/* A provider value the page was served before it arrived. */
+.usage-page .usage-reading {
+  color: var(--text-muted);
+}
+
+.usage-page .usage-error {
+  color: var(--danger);
+}
+
+.usage-page .usage-link {
+  color: var(--accent);
+}
+
+.usage-page .usage-note {
+  margin: 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+/* An empty slot takes no room at all. */
+.usage-page .usage-slot > .ui-slot:empty {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .usage-page .usage-scroll {
+    padding: var(--space-4) var(--space-3) var(--space-5);
+  }
+}

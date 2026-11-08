@@ -1,0 +1,18 @@
+{
+  "json": {
+    "data": {
+      "node": {
+        "__typename": "PullRequestReviewComment",
+        "body": "My line note.",
+        "viewerCanUpdate": true,
+        "viewerDidAuthor": true,
+        "pullRequest": {
+          "number": 10,
+          "repository": {
+            "nameWithOwner": "acme/widgets"
+          }
+        }
+      }
+    }
+  }
+}

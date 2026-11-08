@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Run pi-sec in the foreground, without systemd, and start it again when the web
+# UI asks for a restart.
+#
+# Why this exists: the update script rewrites the tree the daemon loads its
+# modules from, so it must not run under a live daemon. Under systemd the script
+# is a unit of its own and the unit file starts the service again. Without
+# systemd there is no process to do either half, so this runner does both: it
+# starts the daemon, and when the daemon ends with the code that means "update
+# and come back", it runs the update and starts the daemon again.
+#
+# The contract with the daemon is one exit code (`RUNNER_EXIT_CODE` in
+# src/runtime/restart-helper.ts, 75) and one marker file
+# (`<home>/run/restart-pending`). The daemon writes the marker before it answers
+# the button, so the marker survives a runner that never gets to run the update.
+#
+# Any other exit code ends the runner with that code. The daemon refuses a second
+# start on the same home and ends with its own code when the port is taken; a
+# runner that started it again would loop on a failure the operator has to see.
+#
+# Run as the pi-sec user. Never calls sudo.
+set -euo pipefail
+
+HOME_DIR="${PI_SEC_HOME:-$HOME/.pi/sec}"
+SNAPSHOT="$HOME_DIR/snapshot"
+WORKSPACE="$HOME_DIR/workspace"
+CLI="$SNAPSHOT/dist/cli.js"
+MARKER="$HOME_DIR/run/restart-pending"
+UPDATE_LOG="$HOME_DIR/logs/update-and-restart.log"
+
+# The daemon reads its home here, and the restart button asks whether it runs
+# under this runner. Without the flag the button refuses, because nothing above
+# the daemon would start it again.
+export PI_SEC_HOME="$HOME_DIR"
+export PI_SEC_RUNNER=1
+# This process has no unit, so the daemon it starts must not answer one: an
+# inherited socket would take this process's readiness for another unit's.
+unset NOTIFY_SOCKET WATCHDOG_USEC WATCHDOG_PID
+
+say() { printf '  %s\n' "$*"; }
+
+if [ ! -f "$CLI" ]; then
+  echo "error: no build at $CLI" >&2
+  echo "  install the execution tree first: user-tools/install, then user-tools/update-and-restart" >&2
+  exit 1
+fi
+
+umask 077
+mkdir -p "$HOME_DIR/run" "$HOME_DIR/logs"
+
+CHILD=0
+
+# A signal to the runner goes to the daemon it supervises. The daemon decides
+# what to do with it, so the runner does not stop a daemon that is writing its
+# own shutdown: it forwards, and then waits for the code that comes back.
+forward() {
+  if [ "$CHILD" -ne 0 ]; then
+    kill -"$1" "$CHILD" 2>/dev/null || true
+  fi
+}
+trap 'forward INT' INT
+trap 'forward TERM' TERM
+
+# The source names the entry the operator chose: `ui-reinstall` is the dropdown
+# entry that asks for the dependencies to be installed again.
+marker_source() {
+  if [ -f "$MARKER" ]; then
+    sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([A-Za-z][A-Za-z-]*\)".*/\1/p' "$MARKER"
+  fi
+}
+
+# Written when the update failed and the script has removed the marker already:
+# the next boot reads it and says that the last restart did not finish.
+leave_marker() {
+  mkdir -p "$(dirname "$MARKER")"
+  printf '{"at": %s, "source": "runner"}\n' "$(date +%s%3N)" > "$MARKER"
+}
+
+# The same order the daemon uses to find the script (restartScriptPath): the
+# workspace tree first, so a fix in the modification tree is used before it is
+# committed, then the execution tree.
+update_script() {
+  if [ -f "$WORKSPACE/user-tools/update-and-restart" ]; then
+    echo "$WORKSPACE/user-tools/update-and-restart"
+  elif [ -f "$SNAPSHOT/user-tools/update-and-restart" ]; then
+    echo "$SNAPSHOT/user-tools/update-and-restart"
+  fi
+}
+
+# The output goes to the terminal and to the log the restart answer names, so a
+# restart nobody watched still has a record.
+run_update() {
+  local script="$1"
+  shift
+  bash "$script" "$@" 2>&1 | tee -a "$UPDATE_LOG"
+}
+
+echo "pi-sec runner"
+say "home:     $HOME_DIR"
+say "daemon:   node $CLI start $*"
+say "update:   $UPDATE_LOG"
+
+while :; do
+  set +e
+  node "$CLI" start "$@" &
+  CHILD=$!
+  # A trapped signal interrupts `wait`, and bash then reports 128+signal while the
+  # daemon is still shutting down. Waiting again gives the daemon's own code, which
+  # is what a stop has to report: the runner forwards, the daemon decides.
+  while :; do
+    wait "$CHILD"
+    CODE=$?
+    if [ "$CODE" -le 128 ] || ! kill -0 "$CHILD" 2>/dev/null; then break; fi
+  done
+  CHILD=0
+  set -e
+
+  if [ "$CODE" -ne 75 ]; then
+    # A refusal to start, a crash, or a stop: starting again would repeat it.
+    exit "$CODE"
+  fi
+
+  SOURCE="$(marker_source)"
+  echo "[$(date -Is)] restart requested (source: ${SOURCE:-unknown})"
+  SCRIPT="$(update_script)"
+  if [ -z "$SCRIPT" ]; then
+    echo "error: user-tools/update-and-restart was not found in either tree" >&2
+    leave_marker
+  else
+    echo "[$(date -Is)] applying the update: $SCRIPT"
+    FAILED=0
+    if [ "$SOURCE" = "ui-reinstall" ]; then
+      run_update "$SCRIPT" --reinstall || FAILED=1
+    else
+      run_update "$SCRIPT" || FAILED=1
+    fi
+    if [ "$FAILED" -ne 0 ]; then
+      echo "error: the update failed; starting the daemon from the tree as it is" >&2
+      echo "  the marker is left in place, so the next boot reports the unfinished restart" >&2
+      if [ ! -f "$MARKER" ]; then
+        leave_marker
+      fi
+    fi
+  fi
+  echo "[$(date -Is)] starting the daemon again"
+done

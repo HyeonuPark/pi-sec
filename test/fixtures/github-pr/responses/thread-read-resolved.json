@@ -1,0 +1,16 @@
+{
+  "json": {
+    "data": {
+      "node": {
+        "isResolved": true,
+        "viewerCanResolve": true,
+        "pullRequest": {
+          "number": 10,
+          "repository": {
+            "nameWithOwner": "acme/widgets"
+          }
+        }
+      }
+    }
+  }
+}

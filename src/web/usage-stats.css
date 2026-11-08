@@ -1,0 +1,17 @@
+/* The model speed page. Every selector starts with `.usage-stats-page`. */
+.usage-stats-page { height: 100%; min-height: 100dvh; }
+.usage-stats-page .stats-scroll { flex: 1 1 auto; min-height: 0; padding: var(--space-5) var(--space-4); overflow-y: auto; }
+.usage-stats-page .stats-root { max-width: 72rem; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-4); }
+.usage-stats-page .stats-status, .usage-stats-page .stats-note, .usage-stats-page .stats-empty { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
+.usage-stats-page .stats-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.usage-stats-page .stats-controls select { font: inherit; background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px var(--space-2); max-width: 100%; }
+.usage-stats-page .stats-switch { display: inline-flex; gap: var(--space-1); }
+.usage-stats-page .stats-pct.active { background: var(--accent-soft); border-color: var(--accent); }
+.usage-stats-page .stats-chart { margin: 0; padding: var(--space-4); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-1); min-width: 0; }
+.usage-stats-page .stats-chart-title { font-weight: 650; margin-bottom: var(--space-2); }
+.usage-stats-page .stats-unit { color: var(--text-muted); font-weight: 400; }
+.usage-stats-page .stats-svg { width: 100%; height: auto; display: block; }
+.usage-stats-page .stats-grid { stroke: var(--border); stroke-width: 1; }
+.usage-stats-page .stats-axis { fill: var(--text-muted); font-size: 11px; }
+.usage-stats-page .stats-legend { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-2) 0 0; padding: 0; font-size: 0.8rem; color: var(--text-muted); }
+.usage-stats-page .stats-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }

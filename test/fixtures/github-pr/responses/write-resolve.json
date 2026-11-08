@@ -1,0 +1,12 @@
+{
+  "json": {
+    "data": {
+      "resolveReviewThread": {
+        "thread": {
+          "id": "PRRT_1",
+          "isResolved": true
+        }
+      }
+    }
+  }
+}

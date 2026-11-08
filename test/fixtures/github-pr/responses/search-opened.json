@@ -1,0 +1,24 @@
+{
+  "json": {
+    "data": {
+      "search": {
+        "nodes": [
+          {
+            "number": 20,
+            "title": "Own work, open",
+            "url": "https://github.example.com/acme/widgets/pull/20",
+            "isDraft": false,
+            "state": "OPEN",
+            "updatedAt": "2026-10-30T01:00:00Z",
+            "author": { "login": "example-user" },
+            "headRefName": "feature/own",
+            "baseRefName": "main",
+            "reviewDecision": "APPROVED",
+            "labels": { "nodes": [{ "name": "ready", "color": "1d76db" }] },
+            "commits": { "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }] }
+          }
+        ]
+      }
+    }
+  }
+}

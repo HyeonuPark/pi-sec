@@ -1,0 +1,70 @@
+# pi-sec systemd user unit template.
+#
+# This file is a template, not a unit. user-tools/install fills in the four
+# placeholders below (the account's home, the control directory, the absolute
+# path of node, and a PATH with that directory first) and writes the result to
+# ~/.config/systemd/user/pi-sec.service. It stays a user unit, so it names no
+# User= or Group=: the user manager of the installing account runs it.
+#
+# A system unit (one with User=, installed with root into /etc/systemd/system)
+# runs without a user manager of its own. The restart button in the web UI does
+# not work under it; docs/security.md keeps that route and the reason.
+
+[Unit]
+Description=pi-sec autonomous personal agent
+# No After=network-online.target: that is a system target, not a user one. The
+# app needs the network only when it calls the model, long after boot.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=notify
+# The app notifies by spawning `systemd-notify`, a child process, so NotifyAccess
+# must be `all`. With `main`, systemd ignores the message, the unit never reports
+# ready, and it is stopped with "a timeout was exceeded".
+NotifyAccess=all
+# --watchdog on ExecStart makes the process send WATCHDOG=1 every 30 seconds.
+# Drop the flag and WatchdogSec has to go too, or systemd stops the unit every
+# 60 seconds.
+WatchdogSec=60
+
+WorkingDirectory=@PI_SEC_HOME@/snapshot
+
+Environment=HOME=@HOME@
+Environment=PI_SEC_HOME=@PI_SEC_HOME@
+# Private tmp directory under the home, so a cleanup never touches /tmp files
+# that another process owns.
+Environment=PI_SEC_PRIVATE_TMP=1
+# The node that built the tree is first, so the app runs on the runtime that
+# built it.
+Environment=PATH=@PATH@
+
+ExecStart=@NODE@ @PI_SEC_HOME@/snapshot/dist/cli.js start --watchdog
+# `systemctl --user reload pi-sec` re-reads the runtime extensions without
+# stopping the daemon. It is not a restart: nothing in flight is dropped.
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+
+# --- sandbox ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# The home is the only place the app writes: state, memory, logs, secrets and
+# both code trees.
+ReadWritePaths=@HOME@
+PrivateDevices=true
+CapabilityBoundingSet=
+UMask=0077
+# Both are verified with this app in a user manager.
+RestrictNamespaces=true
+SystemCallFilter=@system-service
+
+# --- resources ---
+MemoryMax=4G
+TasksMax=512
+
+[Install]
+WantedBy=default.target

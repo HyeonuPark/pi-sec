@@ -1,0 +1,3054 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  /* The left block takes the room the status does not, so the status and the
+     toggle hold the bar's right side together. On a narrow bar it gives way
+     rather than pushing the toggle off the edge. */
+  flex: 1 1 auto;
+}
+
+/* The bar's last element, on the edge the work panel sits on: the panel is the
+   right-hand column on a wide screen and a drawer from the right on a narrow one.
+   The press keeps its own width and never shrinks with the status beside it. */
+.app-header > #sidebar-toggle {
+  flex: none;
+}
+
+/* Opening the drawer covers the transcript instead of squeezing it. Only shown
+   at drawer widths, where it is the way out of the drawer. */
+.scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.45);
+  z-index: 30;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 650;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: white;
+}
+
+/*
+ * The chat's name, in the slot the app's name used to take. It is a button
+ * because a focused chat's title is the operator's to change, and it is drawn as
+ * text until it is hovered or focused so the bar reads as a heading.
+ *
+ * A long title ends in an ellipsis: the top bar has the model, the connection and
+ * the banners to hold as well, and a title that wraps would grow the bar. The
+ * whole title is in the element's `title` attribute (see renderChatHeader).
+ */
+.chat-title {
+  font: inherit;
+  font-weight: 650;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.35rem;
+  max-width: min(46vw, 30rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-title:hover:not(:disabled),
+.chat-title:focus-visible {
+  border-color: var(--border);
+  background: var(--bg-sunken);
+}
+
+/* The root's name and an archived chat's title are not for changing. */
+.chat-title:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+/* The mark in front of a focused chat's title. It carries the words, so the
+   colour of the bar is not the only thing saying which conversation is open. */
+.chat-mark {
+  flex: none;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--chat-header-border);
+  background: var(--bg-elevated);
+  color: var(--chat-header-text);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* A focused chat's top bar takes its own fill, so which conversation is on screen
+   is visible without reading the title. The two values per theme are the palette's
+   (see theme.css). */
+body[data-chat="focused"] .app-header {
+  background: var(--chat-header-bg);
+  border-bottom-color: var(--chat-header-border);
+}
+
+/*
+ * Where the composer goes when this chat cannot be written to: an archived chat
+ * that is still readable, or a number the server does not know. It takes the
+ * composer's place in the shell rather than floating over the transcript.
+ */
+.chat-notice {
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  padding: var(--space-3) var(--space-4);
+  text-align: center;
+}
+
+.chat-notice a {
+  color: var(--accent);
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  /* The status and the toggle share the bar's right side, so the status wraps
+     its own pills onto more rows rather than pushing the toggle off the edge. */
+  min-width: 0;
+}
+
+/*
+ * The activity ring beside the connection pill. It turns while the agent is
+ * working: blue while the model is waited on or answering, green while a tool
+ * runs. It is not drawn at rest, so it changes nothing about the header until
+ * there is something to say.
+ */
+.spinner {
+  flex: none;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: activity-spin 800ms linear infinite;
+}
+
+.spinner[data-stage="tool"] {
+  border-color: color-mix(in srgb, var(--status-active) 30%, transparent);
+  border-top-color: var(--status-active);
+}
+
+/*
+ * A lost connection, which outranks a run: the ring turns red until the stream
+ * is back, so a page that cannot reach the server reads differently from a page
+ * that is merely waiting on the agent.
+ */
+.spinner[data-stage="offline"] {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  border-top-color: var(--danger);
+}
+
+@keyframes activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pill {
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+
+.pill-online {
+  color: #1c7a4d;
+  border-color: #9bd9bd;
+  background: #e6f6ee;
+}
+
+.pill-offline {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .pill-online,
+[data-theme="auto"] .pill-online {
+  background: rgba(47, 158, 107, 0.16);
+  border-color: rgba(47, 158, 107, 0.4);
+  color: #7fe0b3;
+}
+
+.pill-muted {
+  color: var(--text-muted);
+}
+
+.banner {
+  /* A banner is a long line of text in a row that may be narrow: it shortens
+     with an ellipsis instead of widening the bar (see `.banner-error`). */
+  min-width: 0;
+  background: #fff4d6;
+  border: 1px solid #e6c260;
+  color: #6b4e00;
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Same shape as the restart banner, in the danger colour: this one says the
+   config on disk is broken, not that a restart is waiting. */
+.banner-error {
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+  max-width: 32rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-button,
+.button {
+  font: inherit;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion), transform var(--motion);
+}
+
+.icon-button:hover,
+.button:hover {
+  background: var(--bg-sunken);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.button-primary:hover {
+  background: #3f68e0;
+}
+
+.button-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.app-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  min-height: 0;
+  /* The anchor for the report panel, which floats over the transcript. */
+  position: relative;
+}
+
+.transcript-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+}
+
+/* A row far from the viewport costs no layout until it comes near it. The
+   transcript keeps a conversation's whole history, and a draw used to lay out
+   every row above the one that changed. `auto` keeps the height a row had the
+   last time it was on screen, and the 80px is the first estimate for a row that
+   has never been near: an average bubble, close enough that the scrollbar does
+   not jump the first time a long conversation is opened. */
+#transcript > [data-row-key] {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}
+
+/* The cap is the readable measure, but the transcript is narrower than that on
+   a phone. Capped at 80ch alone, a bubble with a code block grew to the measure
+   and pushed the whole transcript sideways; `min-width: 0` lets it shrink to the
+   row it sits in. */
+.message {
+  max-width: min(80ch, 100%);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+  /* markdown-it decides line breaks; a source newline is not layout any more. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+/* What a sent message carried: a picture at the width of the bubble, anything
+   else a chip that names it, says its type and size, and downloads it. */
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.message-image {
+  display: block;
+  line-height: 0;
+}
+
+.message-image img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.message-file {
+  display: inline-flex;
+  flex-direction: column;
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.message-file:hover {
+  background: var(--bg-sunken);
+}
+
+.message-file-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.message-file-meta {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.message.assistant {
+  align-self: flex-start;
+}
+
+/* A note pushed in from the report viewer: distinguished from both, so a review
+   is never read as something the operator typed. */
+.message.review {
+  align-self: stretch;
+  background: var(--bg-sunken);
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+/* An answered question: the record that stays after the sidebar card is gone, so
+   it reads as the operator's answer and not as a bubble they typed. The
+   question is the quiet half and the answer carries the weight, because the
+   question was already read once on the card that asked it. */
+.message.answer {
+  align-self: stretch;
+  background: var(--bg-sunken);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.answer-question {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.answer-choice {
+  margin-top: var(--space-2);
+  white-space: pre-wrap;
+}
+
+/* A sealed section's change note, written into the history by the `sections`
+   extension. Not something the operator typed, and not an assistant turn. The
+   body holds the whole new value of the section, so the note is folded by
+   default: the summary keeps the fact of the change in sight and the value is
+   one click away. The padding moves to the summary and the body, so the folded
+   note is the height of its summary line. */
+.message.section-note {
+  align-self: stretch;
+  background: var(--bg-sunken);
+  border-style: dashed;
+  padding: 0;
+}
+
+.message.section-note > summary {
+  cursor: pointer;
+  padding: var(--space-3) var(--space-4);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.message.section-note[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.section-note-body {
+  padding: var(--space-3) var(--space-4);
+}
+
+.review-head {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.review-body {
+  white-space: pre-wrap;
+}
+
+/* The words the user wrote with Done, under the one-line approval card. They are
+   the follow-up request, and the card is where the user reads back what they
+   asked for, so they take the same measure as a review's body. */
+.approval-body {
+  margin-top: var(--space-2);
+  white-space: pre-wrap;
+}
+
+/* The row that stands in for an answer while it is being written. It takes the
+   place the finished answer will land in, so the transcript does not jump when
+   the answer arrives: same bubble, the word instead of the text. */
+.message.writing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* The row is drawn on every draw, idle or not, so the tail of the transcript
+   keeps one height. Hidden, not removed: `visibility: hidden` draws nothing but
+   keeps the box, so the rows above do not move when the answer starts. Do not
+   set `visibility: visible` on the children: that would show them again. */
+.message.writing.idle {
+  visibility: hidden;
+}
+
+.writing-dots {
+  display: inline-flex;
+  gap: 0.18rem;
+}
+
+.writing-dots > span {
+  width: 0.32rem;
+  height: 0.32rem;
+  border-radius: 50%;
+  background: currentColor;
+  animation: writing-dot 1.2s ease-in-out infinite;
+}
+
+.writing-dots > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.writing-dots > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* The idle row is hidden and holds a place at the tail; its dots keep still
+   while it waits, so a tab nobody is looking at runs no animation for it. The
+   row that is writing is not idle, so its dots keep moving. */
+.message.writing.idle .writing-dots > span {
+  animation-play-state: paused;
+}
+
+@keyframes writing-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Three dots that hold still are still three dots: the row says the same thing
+   without motion. */
+@media (prefers-reduced-motion: reduce) {
+  .writing-dots > span {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+.message pre {
+  background: var(--bg-sunken);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  /* A long line wraps at the bubble's edge instead of widening it. `anywhere`
+     is what folds a path or a URL with no space in it; `pre-wrap` keeps the
+     line breaks and the indentation the block was written with. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message code {
+  background: var(--bg-sunken);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+/* A table too wide for the bubble scrolls inside its own box, so the transcript
+   keeps its width. Nothing else about the table changes. */
+.message table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: var(--space-2) 0;
+  font-size: 0.92rem;
+}
+
+.message th,
+.message td {
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.5rem;
+  vertical-align: top;
+}
+
+.message th {
+  background: var(--bg-sunken);
+  font-weight: 650;
+}
+
+.message blockquote {
+  margin: var(--space-2) 0;
+  padding: 0 var(--space-3);
+  border-left: 2px solid var(--border);
+  color: var(--text-muted);
+}
+
+.message blockquote p {
+  margin: 0.2rem 0;
+}
+
+.message ul,
+.message ol {
+  margin: var(--space-2) 0;
+  padding-left: 1.4rem;
+}
+
+.message hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--space-3) 0;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+
+/* The row above the transcript's first session line: the press that brings the
+   session stored before this one. It is a row of the transcript, so it takes the
+   list's gap and scrolls with the conversation; the button stays the width of its
+   own text and sits at the left edge, where the rows begin. */
+.load-earlier {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.load-earlier-button {
+  font-size: 0.82rem;
+  padding: 0.3rem 0.7rem;
+  color: var(--text-muted);
+}
+
+.load-earlier-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.tool-card,
+.run-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  overflow: hidden;
+  font-size: 0.9rem;
+}
+
+.tool-card summary,
+.run-group summary {
+  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.tool-card pre {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--bg-sunken);
+  max-height: 18rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* One working stretch: its tool calls and its messages that are not the
+   operator's, in one card, collapsed by default. */
+.run-group > summary {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.run-group[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.run-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-sunken);
+}
+
+.tool-item,
+.message-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.tool-item-name,
+.message-item-name {
+  padding: var(--space-1) var(--space-3);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* A background call that did not finish cleanly: failed, interrupted, cancelled. */
+.tool-item-status {
+  margin-left: var(--space-2);
+  color: var(--warn, var(--text-muted));
+}
+
+.run-group .tool-item pre,
+.run-group .message-item pre {
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  background: transparent;
+  max-height: 14rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.compaction {
+  padding: var(--space-2) var(--space-4);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Collapsed by the header toggle, at any width where the sidebar is in flow. */
+body[data-sidebar="closed"] .app-main {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body[data-sidebar="closed"] .sidebar {
+  display: none;
+}
+
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: auto;
+  padding-top: var(--space-2);
+}
+
+/* One label and one value, on the right edge of the panel. */
+.sidebar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* The context readout: tabular so the row does not twitch as the number grows. */
+.sidebar-value {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.sidebar-label {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* The Pages dropdown and its toggle, anchored together so the menu opens from
+   the button rather than from the edge of the panel. */
+.sidebar-more {
+  position: relative;
+  display: flex;
+}
+
+/* Folded away until the toggle opens it, and upward: the footer is the bottom of
+   the panel, so a menu below the button would leave the panel. The colours and
+   the shape are the composer menu's, because both are one small list of
+   actions over the page. */
+.sidebar-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  min-width: 8rem;
+  padding: var(--space-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  z-index: 20;
+}
+
+.sidebar-menu.open {
+  display: flex;
+}
+
+/* A link, not a button, so it keeps the button's shape without the underline. */
+.sidebar-menu .button {
+  display: inline-flex;
+  align-items: center;
+  text-align: left;
+  text-decoration: none;
+}
+
+/*
+ * Where an extension puts a card, under the rows the footer always carries. The
+ * footer already gaps its children, so an empty slot is taken out of the flow
+ * rather than left to add a row of space of its own.
+ */
+.ui-slot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ui-slot:empty {
+  display: none;
+}
+
+/*
+ * A card is somebody else's drawing in a shadow root of its own. Its layout and
+ * its paint stay inside it, so a card that grows cannot move the panel around it
+ * and a card that repaints cannot repaint the sidebar.
+ */
+.ui-card {
+  contain: layout paint;
+}
+
+/* The one line the page writes into a card that failed: plain, small and muted,
+   so it reads as a note about the card rather than as part of it. */
+.ui-card-failed {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/*
+ * The report panel covers the left of the transcript instead of taking a column
+ * of its own: opening a document must not reflow the conversation or move the
+ * reader's place in it. It is anchored to the transcript area only, so the
+ * composer stays reachable while a report is open.
+ */
+.report-pane {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(30rem, 92%);
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  z-index: 25;
+}
+
+body[data-report="open"] .report-pane {
+  display: flex;
+}
+
+.report-pane-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.report-pane-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.report-pane-title {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.report-pane-meta {
+  margin-top: 0.15rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.report-pane-actions {
+  flex: none;
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* `Open page` is a link, so it keeps the button's shape without the underline. */
+.report-pane-actions .button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.report-pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+  font-size: 0.92rem;
+}
+
+/*
+ * The snippet panel takes the same slot as the report panel, and the two are
+ * never open together: one place, one document. It is drawn the same way, so a
+ * reader who has seen a report knows where this one came from, and the body is
+ * the only part that grows.
+ */
+.snippet-pane,
+.login-pane {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(30rem, 92%);
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  z-index: 25;
+}
+
+body[data-snippet="open"] .snippet-pane,
+body[data-login="open"] .login-pane {
+  display: flex;
+}
+
+.snippet-pane-head,
+.login-pane-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.snippet-pane-title,
+.login-pane-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.snippet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* The body is the one field that takes the room the others do not need. */
+.snippet-field-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.snippet-input,
+.snippet-body,
+.login-input,
+.login-select {
+  font: inherit;
+  font-size: 0.92rem;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.snippet-body {
+  flex: 1;
+  min-height: 6rem;
+  resize: none;
+}
+
+/* The name field starts empty. The word it would be filed under is the
+   placeholder, so it is muted and never becomes a value. */
+#snippet-name::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.snippet-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.88rem;
+}
+
+.snippet-hint,
+.snippet-error,
+.login-hint,
+.login-status,
+.login-error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* A line of its own that is there before it has something to say, so a refusal
+   does not move the button under the pointer. */
+.snippet-error,
+.login-error {
+  min-height: 1.2em;
+}
+
+.snippet-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/*
+ * The model login panel takes the same slot, and adds only what a form and a
+ * running flow need: a field per row, a choice list, and the outcome line. The
+ * panel scrolls, because a device code flow can print several notifications
+ * before it asks anything.
+ */
+.login-pane {
+  overflow-y: auto;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.login-field .login-select {
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.login-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.login-events,
+.login-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.login-event {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.login-link {
+  color: var(--accent, var(--text));
+  overflow-wrap: anywhere;
+}
+
+.login-code {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+}
+
+.login-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.login-answer-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.login-answer-row .login-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.login-warning {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-1);
+}
+
+.panel h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.badge {
+  background: var(--accent);
+  color: white;
+  border-radius: 999px;
+  padding: 0 0.45rem;
+  font-size: 0.72rem;
+}
+
+/*
+ * A control that belongs to a panel heading, pushed to the right end of it. The
+ * heading is a flex row, so the button can sit at the far right without an
+ * extra wrapper: `margin-left: auto` takes the free space on its left.
+ */
+.panel-action {
+  margin-left: auto;
+  font: inherit;
+  font-size: 0.72rem;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  padding: 0.05rem 0.4rem;
+  cursor: pointer;
+}
+
+.panel-action:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+/* The same control as a link (the chats list). An anchor carries an underline of
+   its own, which the bordered chip beside it does not. */
+a.panel-action {
+  text-decoration: none;
+}
+
+.panel-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/*
+ * The heading of a panel that folds: the panel's name and a caret, as one button.
+ * It keeps the heading's own type (small, upper case, muted) and takes the width
+ * it needs, so the badges and controls beside it stay where they were. The
+ * button has no box of its own until it is pointed at or reached by the keyboard,
+ * which is when it has to say that it is a press.
+ *
+ * The padding and the negative margin keep the words on the same line they sat
+ * on before the heading became a control.
+ */
+.panel-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0.05rem 0.2rem 0.05rem 0;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.panel-fold:hover {
+  color: var(--text);
+}
+
+.panel-fold:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: var(--radius-sm, 4px);
+}
+
+/* The caret is the only thing the fold adds to the heading, so it is sized to the
+   type beside it and never wraps on its own. It is drawn, like the marks in the
+   composer and the inbox, so no font decides what it looks like. */
+.panel-fold-caret {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.panel-fold-caret svg {
+  width: 0.7em;
+  height: 0.7em;
+}
+
+/*
+ * A folded panel keeps its heading and hides its list. The sheet reads one
+ * attribute: `body[data-folded]` holds the folded panels' names, space separated,
+ * and every child of the named section except the heading goes. That is the shape
+ * the whole-sidebar toggle uses (`body[data-sidebar]`).
+ */
+body[data-folded~="inbox"] .panel[data-panel="inbox"] > :not(h2),
+body[data-folded~="jobs"] .panel[data-panel="jobs"] > :not(h2),
+body[data-folded~="machines"] .panel[data-panel="machines"] > :not(h2) {
+  display: none;
+}
+
+/* A folded heading sits on its own: the space under it belonged to the list. */
+body[data-folded~="inbox"] .panel[data-panel="inbox"] > h2,
+body[data-folded~="jobs"] .panel[data-panel="jobs"] > h2,
+body[data-folded~="machines"] .panel[data-panel="machines"] > h2 {
+  margin-bottom: 0;
+}
+
+/* `hide all` hides a list the operator cannot see, so it goes while folded. The
+   unread count beside it stays: that is what a folded inbox is for. */
+body[data-folded~="inbox"] #inbox-hide-all {
+  display: none;
+}
+
+/* The count of jobs with an agent on them, on a folded job tree. */
+.badge-working {
+  background: var(--status-active);
+}
+
+/* A stopped machine, on a folded Machines panel: the alarm keeps the colour it
+   has in the panel's own red line. */
+.badge-stopped {
+  background: var(--danger);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.job-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.2rem 0;
+}
+
+/*
+ * Nesting, as stylesheet rules rather than an inline `style` attribute: the
+ * pages are served under `style-src 'self'`, which blocks the attribute, and the
+ * block was silent — every nested row simply lost its indent. The depth travels
+ * as `data-depth`, and deeper than this clamps to the last rule.
+ */
+.job-row[data-depth="1"] { padding-left: 0.9rem; }
+.job-row[data-depth="2"] { padding-left: 1.8rem; }
+.job-row[data-depth="3"] { padding-left: 2.7rem; }
+.job-row[data-depth="4"] { padding-left: 3.6rem; }
+.job-row[data-depth="5"] { padding-left: 4.5rem; }
+.job-row[data-depth="6"] { padding-left: 5.4rem; }
+.job-row[data-depth="7"] { padding-left: 6.3rem; }
+.job-row[data-depth="8"] { padding-left: 7.2rem; }
+
+.status-chip {
+  font-size: 0.68rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  /*
+   * The ink a status class names. A status the stylesheet does not know (a name
+   * the server adds later) has no class here, and without this default the fill
+   * and the knocked-out label would come out the same colour. The palette rules
+   * below override it: they have the same specificity and come later.
+   */
+  --status-ink: var(--text);
+  border: 1px solid currentColor;
+  text-transform: lowercase;
+  background: none;
+  font-family: inherit;
+}
+
+button.status-chip {
+  cursor: pointer;
+}
+
+button.status-chip:hover {
+  background: var(--bg);
+}
+
+/*
+ * A chip that opens and closes a group carries a caret before the status word.
+ * It stays on one line: the sidebar is narrow, and a caret wrapped onto a second
+ * line reads as a separate control from the one it belongs to.
+ */
+.status-chip[data-toggle-children] {
+  white-space: nowrap;
+}
+
+.status-planned { --status-ink: var(--status-planned); color: var(--status-ink); }
+.status-active { --status-ink: var(--status-active); color: var(--status-ink); }
+.status-waiting { --status-ink: var(--status-waiting); color: var(--status-ink); }
+.status-paused { --status-ink: var(--status-paused); color: var(--status-ink); }
+.status-done { --status-ink: var(--status-done); color: var(--status-ink); }
+.status-failed { --status-ink: var(--status-failed); color: var(--status-ink); }
+.status-cancelled { --status-ink: var(--status-cancelled); color: var(--status-ink); }
+/* A report that is set aside, not closed: it takes the waiting colour, which is
+   the one the job tree already uses for work nothing is happening to right now. */
+.status-pending { color: var(--status-waiting); }
+
+/* A result report is open work of a third kind: it waits for the user's Done or
+   Feedback rather than for an approval, so it takes the accent, which no other
+   standing uses. */
+.status-result { --status-ink: var(--accent); color: var(--status-ink); }
+
+/* A briefing is the morning read rather than work, so it takes the paused purple:
+   beside the active green and the waiting amber it reads as a colour of its own. */
+.status-briefing { --status-ink: var(--status-paused); color: var(--status-ink); }
+
+/*
+ * A working job is shown in its own chip, filled: a second chip pushed the title
+ * to the right by its own width, and the row already carries the status word. The
+ * fill is the status colour, mixed toward black in a light theme and toward white
+ * in a dark one, so the knocked-out label keeps at least 4.5:1 against it.
+ */
+.status-chip.job-working {
+  --chip-fill: color-mix(in srgb, var(--status-ink, currentColor) 70%, var(--chip-fill-partner));
+  background: var(--chip-fill);
+  border-color: var(--chip-fill);
+  color: var(--bg-elevated);
+}
+
+/* `button.status-chip:hover` is one specificity step higher and would repaint the
+   fill under the knocked-out label, so a working chip keeps its fill on hover. */
+button.status-chip.job-working:hover {
+  background: var(--chip-fill);
+}
+
+.job-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Clicking a title opens it in place. The title itself moves to the panel-width
+   block below the row, so the button keeps only its caret: one fixed token that
+   shrinks for nobody, drawn by the stylesheet so the row text stays empty. */
+.job-title.expanded {
+  flex: 0 0 auto;
+}
+
+.job-title.expanded::before {
+  content: "▾";
+}
+
+/* The opened title. A direct child of the jobs panel, so it is as wide as the
+   panel's content box and wraps there instead of inside a quarter of the row.
+   It is a button, because pressing the title the operator can see now folds the
+   job the way the caret does. These declarations keep the box the div was: the
+   panel's width, left-aligned text, and no button chrome of its own. */
+.job-open {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  padding: 0 0 var(--space-2);
+  cursor: pointer;
+}
+
+/* A focus stop of its own now, so it has to show where the keyboard is. */
+.job-open:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.job-open-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.job-row:has(.job-title.expanded) {
+  align-items: flex-start;
+}
+
+.job-stats {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+/*
+ * The jobs panel's own banner: a `config.scheduler.jobs` list that is still
+ * populated. It is an error rather than a note, because nothing fires from that
+ * list any more. The text names the entries it ignored, so it wraps where the
+ * page banners elide to one line.
+ */
+.jobs-banner {
+  margin: 0 0 var(--space-2);
+  padding: 0.3rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
+  color: var(--danger);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A scheduled row carries two more things than a plain one: a badge that names
+ * the kind of schedule, and the one strip of time that kind needs. The badge is
+ * one English word (`routine`, `once`), so it has nowhere to break, and the
+ * stamp is a month, a day and a time that belong on one line. `nowrap` holds
+ * each of them whole, and an ellipsis marks a row too narrow to show it all. The
+ * time strip never shrinks: the title gives way first, and keeps a floor below.
+ */
+.job-badge,
+.job-once,
+.job-last-run {
+  flex: 0 0 auto;
+  margin-left: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A badge names a kind, not a status, so it borrows no chip colour and does not
+   look clickable: a thin outline in the muted ink. */
+.job-badge {
+  font-size: 0.58rem;
+  line-height: 1.5;
+  padding: 0 0.24rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--text-muted);
+}
+
+.job-once,
+.job-last-run {
+  font-size: 0.62rem;
+}
+
+/* Six items in a 22rem row: the tighter gap and the slimmer link are what pay
+   for the title. Only a scheduled row pays them. */
+.job-row:has(.job-badge) {
+  gap: 0.1875rem;
+}
+
+.job-row:has(.job-badge) .job-reports {
+  padding: 0 0.1rem;
+}
+
+/* The run counts are the row's oldest field and sit at the right edge. They give
+   way last: an expanded row keeps the caret and the chip, and a narrow one can
+   elide the count rather than push the panel into a horizontal scroll. */
+.job-counts {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 0.2rem;
+}
+
+/* A scheduled row carries one more token than the panel has width for at 390px.
+   The time strip used to hold its full width at every cost, which pushed the
+   row past the panel and the panel past the sidebar. It may elide now; the full
+   stamp is in its `title`. */
+.job-row:has(.job-badge) .job-last-run {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* The title is the row's one reason to exist, so a scheduled row keeps a floor
+   under it instead of crushing it for the time strip. A plain row keeps the
+   stylesheet's own `min-width: 0`. An expanded row has no title text left: the
+   floor would only be the caret's width, so it goes. */
+.job-row:has(.job-badge) .job-title {
+  min-width: 4.5rem;
+}
+
+.job-row:has(.job-badge) .job-title.expanded {
+  min-width: 0;
+}
+
+/* The way from a job to its reports. Sits with the title, not with the stats. */
+.job-reports {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  text-decoration: none;
+  padding: 0 var(--space-1);
+}
+
+.job-reports:hover {
+  color: var(--accent);
+}
+
+.list-clear {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: 0.2rem 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.list-clear:hover:not(:disabled) {
+  color: var(--text);
+}
+
+/* An empty revert queue: the button stays to show the state, and it does not
+   look pressable. */
+.list-clear:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.note {
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) 0;
+}
+
+.note:last-child {
+  border-bottom: none;
+}
+
+.note-meta {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.note-body {
+  overflow-wrap: anywhere;
+}
+
+.inbox-item {
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) 0;
+}
+
+.inbox-item:last-child {
+  border-bottom: none;
+}
+
+.inbox-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The title is the control that opens the item, so the row stays one line until
+   the operator asks for the body. */
+.inbox-title {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inbox-title:hover .inbox-title-text {
+  text-decoration: underline;
+}
+
+.inbox-caret {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+/* The row's leftmost pictogram. The shape says report or not, the colour says
+   which event. The box is the icon size, so the mark never sets the row height. */
+.inbox-mark {
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+.inbox-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.inbox-mark--report {
+  color: var(--text-muted);
+}
+
+.inbox-mark--other {
+  color: var(--text-muted);
+}
+
+.inbox-mark--published {
+  color: var(--approve);
+}
+
+.inbox-mark--updated {
+  color: var(--accent);
+}
+
+.inbox-mark--answered {
+  color: var(--feedback);
+}
+
+.inbox-title-text {
+  overflow-wrap: anywhere;
+}
+
+/* Folded, the row is one line: a notice is scanned by its title, and the body is
+   a click away. Opening it lets the title wrap. */
+.inbox-title[aria-expanded="false"] .inbox-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-item.read .inbox-title-text {
+  color: var(--text-muted);
+}
+
+/* A notice about a set-aside report: listed, and quieter than the rest, because
+   the operator asked not to be asked about it yet. */
+.inbox-item.pending .inbox-title-text {
+  color: var(--text-muted);
+}
+
+.inbox-item.pending .severity-dot {
+  opacity: 0.4;
+}
+
+.inbox-item.unread .inbox-title-text {
+  font-weight: 650;
+}
+
+.inbox-age {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+/* Clearing an item is its own button, never a second meaning for the title. */
+.inbox-hide {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.inbox-hide:hover {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+.inbox-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 0.15rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.severity-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.severity-info {
+  color: var(--text-muted);
+}
+
+.severity-warn {
+  color: var(--status-waiting);
+}
+
+.severity-error {
+  color: var(--danger);
+}
+
+.inbox-body {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  white-space: pre-wrap;
+}
+
+.query {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+/* When the question was asked. A fact, so no colour and no countdown: the same
+   stamp as a deadline would hurry the answer. */
+.query-age {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: var(--space-1);
+}
+
+.query-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.other-input {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.other-input input {
+  flex: 1;
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* The fallback anchor for the menu: above 400px the toggle is the anchor, below
+   it the composer is, because the label then needs the room to the page edge. */
+.composer {
+  display: flex;
+  /* The tray above the field is a flex item of this row, not a wrapper around
+     it, so it takes a line of its own by asking for the full width. Wrapping is
+     what lets it, and it changes nothing while the tray is hidden. */
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+
+/* The picker buttons beside the field. Out of `.composer-actions` on purpose:
+   that row's three controls keep their order and their weight. */
+.composer-tools {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.composer-tools .button {
+  display: grid;
+  place-items: center;
+  padding: 0.45rem 0.5rem;
+  line-height: 1;
+}
+
+/* The drawn mark fills the button without setting its height by more than the
+   text buttons beside it. */
+.composer-tool-mark {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+}
+
+/*
+ * The context bar: one line above the composer, filled by the fraction of the
+ * usable context that is in use — the model's window less the room the harness
+ * holds back for the answer, which is where compaction fires. So a bar at 100%
+ * means compaction is next, not that the window is full. It keeps the same
+ * green at every fill: this is a reading, and a colour that changed near the end
+ * would be an alarm the operator did not ask for.
+ */
+.context-bar {
+  height: 3px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.context-fill {
+  height: 100%;
+  width: 0;
+  background: var(--status-active);
+  transition: width var(--motion);
+}
+
+.composer textarea {
+  flex: 1;
+  resize: none;
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  max-height: 12rem;
+  /* The field grows with its content, so its scrollbar is noise. Long input still
+     scrolls; the bar is just not drawn. */
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.composer textarea::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* The dropdown and its toggle, anchored together so the menu opens from the
+   button rather than from the corner of the row. */
+.composer-more {
+  position: relative;
+  display: flex;
+}
+
+/* Folded away by default and opened by the menu button, at every width: what is
+   in here used to sit beside Send on a wide screen and fold on a narrow one. */
+.composer-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  /* The widest label decides the width, so a label does not fold: "Force
+     reinstall and restart" is longer than the 11rem this menu used to be, and
+     broke into three lines inside it at every width. The page edge caps the menu
+     instead of letting it reach off screen, so a label folds again only on a
+     screen narrower than that label plus the margins around it. */
+  width: max-content;
+  min-width: 11rem;
+  max-width: calc(100vw - 2 * var(--space-3));
+  padding: var(--space-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  z-index: 20;
+}
+
+.composer-menu.open {
+  display: flex;
+}
+
+.composer-menu .button {
+  text-align: left;
+}
+
+/* -------------------------------------------------------- attachments */
+
+/* The chips above the field: what the next message carries. In this base row
+   layout it asks for the whole width, so the field and the actions follow on the
+   line below it. The 860px block gives it its own full-width row instead,
+   because the basis below would become a height once the composer stacks. */
+.attachment-tray {
+  flex: 1 0 100%;
+  /* A name longer than the row is cut at its chip, not carried out to the page
+     edge: `min-width: 0` lets the row be narrower than its longest chip. */
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: min(100%, 24rem);
+  padding: 0.2rem 0.4rem 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 0.82rem;
+}
+
+/* On its way: the outline is broken, so the chip reads as unfinished. */
+.attachment-chip.is-uploading {
+  border-style: dashed;
+}
+
+.attachment-chip.is-failed {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+
+.attachment-name {
+  font-weight: 600;
+  /* The ellipsis needs the room to be allowed to shrink under the name. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-meta {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.attachment-chip.is-failed .attachment-meta {
+  color: inherit;
+  white-space: normal;
+}
+
+.attachment-chip button {
+  font: inherit;
+  padding: 0 0.2rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.attachment-chip button:hover {
+  color: var(--accent);
+}
+
+.attachment-retry {
+  text-decoration: underline;
+}
+
+/* Under 400px the longest label cannot hold one line under the toggle: the menu
+   needs some 289px and the toggle sits about 88px from the right edge. The menu
+   opens from the composer's edge there, which keeps it on screen. */
+@media (max-width: 400px) {
+  .composer-more {
+    position: static;
+  }
+
+  .composer-menu {
+    right: var(--space-4);
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+@media (max-width: 860px) {
+  /* On a phone the bar keeps the mark, the chat's name, the connection pill and
+     the toggle, and the active model is the one thing left out of it. */
+  #model {
+    display: none;
+  }
+
+  /* The status pills wrap onto more rows at this width and the bar grows taller.
+     The toggle keeps the bar's top line, at its right end, instead of sliding to
+     the middle of the taller bar. */
+  #sidebar-toggle {
+    align-self: flex-start;
+  }
+
+  /* The sidebar stops taking a row of its own — at this width it left the
+     transcript only a few lines tall. It becomes a drawer over the transcript,
+     opened from the header and closed by the scrim, or by the toggle again. */
+  .app-main {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(22rem, 88vw);
+    padding: var(--space-4);
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow-2);
+    transform: translateX(105%);
+    transition: transform var(--motion);
+    z-index: 40;
+  }
+
+  body[data-sidebar="open"] .sidebar {
+    transform: none;
+  }
+
+  body[data-sidebar="open"] .scrim {
+    display: block;
+  }
+
+  /* The page behind the drawer does not scroll while it is open. */
+  body[data-sidebar="open"] {
+    overflow: hidden;
+  }
+
+  /* The field keeps a row of its own and the pickers sit at the left end of the
+     row below it, under the field's left edge, while the actions stay at the
+     right end of that row. */
+  .composer {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  #message {
+    order: 1;
+    flex: 1 0 100%;
+  }
+
+  .composer-tools {
+    order: 2;
+    flex: 0 0 auto;
+  }
+
+  .composer-actions {
+    order: 3;
+    margin-left: auto;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+  }
+
+  /* In a stacked column the tray's `100%` basis became a height and pushed the
+     field sideways. As its own full-width row it wraps inside the composer. */
+  .attachment-tray {
+    order: 0;
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  /* The panel is the only thing on screen at this width, so it takes the whole
+     of it rather than a fraction that leaves a sliver of transcript behind. */
+  .snippet-pane,
+  .login-pane {
+    width: 100%;
+    border-right: 0;
+  }
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 5.5rem;
+  transform: translateX(-50%);
+  max-width: min(90vw, 40rem);
+  background: var(--danger);
+  color: white;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  z-index: 50;
+  font-size: 0.9rem;
+}
+
+/* The same toast, for something on its way rather than something broken. */
+.toast.toast-info {
+  background: var(--accent);
+}
+
+/* ------------------------------------------------------------- reports */
+
+/*
+ * The report page reuses the app's header, buttons, and status chips. What it
+ * adds is a document surface: one column, a readable measure, and a diff view
+ * that stays monospaced and never reflows into the prose around it.
+ */
+
+/*
+ * A flex child of `body` refuses to shrink below its min-content width unless it
+ * is told to, and one unbreakable token — the job id in the header, a URL in a
+ * table cell — is enough to stretch the whole page past the viewport. `.app-main`
+ * has had these two guards from the start; this page inherited the body layout
+ * without them. Measured before: 507px of page in a 390px viewport.
+ */
+.report-view {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) 6rem;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.report-h1 {
+  font-size: 1.5rem;
+  line-height: 1.3;
+  margin: 0 0 var(--space-3);
+}
+
+.report-h2 {
+  font-size: 1.05rem;
+  margin: var(--space-5) 0 var(--space-2);
+  color: var(--text-muted);
+}
+
+.report-hint,
+.report-dim {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.report-empty {
+  color: var(--text-muted);
+  padding: var(--space-3) 0;
+}
+
+.report-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.report-row {
+  display: block;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  text-decoration: none;
+  color: inherit;
+}
+
+.report-row:hover {
+  border-color: var(--accent);
+}
+
+.report-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.report-row-title {
+  font-weight: 600;
+}
+
+.report-row-name {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.report-row-meta {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-1);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.report-archive {
+  margin-top: var(--space-5);
+}
+
+.report-archive summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------- chats list */
+
+/* The list page's two presses, above the lists they act on. */
+.chats-tools {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: var(--space-3) 0 var(--space-4);
+}
+
+/* One chat: the row is the link, and Rename sits beside it rather than inside
+   it, because a button inside an anchor is a press no browser agrees on. */
+.chat-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.chat-row:hover {
+  border-color: var(--accent);
+}
+
+.chat-row-open {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.chat-row-title {
+  display: block;
+  font-weight: 600;
+  /* A long title ends in an ellipsis: the row's other facts keep their place. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-row-meta {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* The one fact about a row that is not a time. It takes the running colour the
+   job tree uses, so "working" reads the same everywhere on this UI. */
+.chat-row-running {
+  color: var(--status-active);
+  font-weight: 600;
+}
+
+.chat-rename {
+  flex: none;
+}
+
+/* The `Test` heading is the press that opens and closes its rows. It is drawn as
+   the heading it sits in, so the section reads like `Active` and `Archived`, and
+   the caret says which way it is. */
+.chats-test-toggle {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chats-test-toggle::before {
+  content: "▸ ";
+}
+
+.chats-test-toggle[aria-expanded="true"]::before {
+  content: "▾ ";
+}
+
+.chats-test-toggle:hover,
+.chats-test-toggle:focus-visible {
+  color: var(--text);
+}
+
+/* The title search, above the archived list. */
+.chats-search {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.chats-search-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+/* The next page, under the rows it continues. */
+#load-more {
+  margin-top: var(--space-3);
+}
+
+.report-head {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.report-tools {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+  font-size: 0.85rem;
+}
+
+.report-tool {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  /* A flex item does not shrink below its content unless it is allowed to, and
+     the control inside this label is as wide as its widest option. */
+  min-width: 0;
+}
+
+/* The word inside the label is not the thing that may shrink. */
+.report-tool-name {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* Option text does not wrap, so the control must never be wider than its box. */
+.report-tools select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.report-body {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.report-body pre {
+  overflow-x: auto;
+  padding: var(--space-2);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.report-body table {
+  border-collapse: collapse;
+  /* A wide table scrolls inside itself instead of widening the page. */
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* A picture in markdown (a report body, the report panel beside the chat, a
+   chat bubble) is never wider than its text column. It keeps its shape, and a
+   picture narrower than the column keeps its own size. */
+.report-body img,
+.message img {
+  max-width: 100%;
+  height: auto;
+}
+
+.report-body th,
+.report-body td {
+  border: 1px solid var(--border);
+  padding: var(--space-1) var(--space-2);
+}
+
+.report-feedback-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/*
+ * The feedback bar rides the bottom of the viewport instead of sitting at the end
+ * of the document: feedback is usually written about what is on screen right now,
+ * and scrolling to the foot of a long report to write it loses that place. The
+ * viewer's own bottom padding is what keeps the last entry clear of it.
+ */
+.note-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: var(--space-2) 0;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  z-index: 20;
+}
+
+/* The same measure and the same side padding as the document above it, so the
+   box lines up with the prose it belongs to. */
+.note-bar .report-feedback-form {
+  flex-direction: row;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+.note-bar textarea {
+  flex: 1;
+  max-height: 8rem;
+  resize: none;
+  overflow-y: auto;
+}
+
+.note-bar button {
+  flex: none;
+}
+
+.report-feedback-form textarea {
+  width: 100%;
+  font: inherit;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: inherit;
+}
+
+.report-feedback-form button {
+  align-self: flex-start;
+}
+
+/*
+ * A result report's bar carries two buttons, Done and Feedback, and they sit in
+ * one row of their own, `.report-feedback-buttons`, so the stylesheet can put
+ * that row under the field wherever the field takes the whole width. On the
+ * viewer's wide screen the row is the last column of the bar's own row, beside
+ * the field, which is where the two buttons already were.
+ */
+.report-feedback-buttons {
+  display: flex;
+  flex: none;
+  align-self: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Natural widths while the row shares the bar with the field, and half each once
+   the row has a line of its own (see the two blocks below). */
+.report-feedback-buttons .button {
+  flex: none;
+}
+
+/*
+ * The one button has two states, and neither is carried by colour alone: the
+ * label and the aria-label change with it (see src/web/feedback.js). The green
+ * state approves, the orange state sends what is in the field.
+ */
+.button.button-approve {
+  background: var(--approve);
+  border-color: var(--approve);
+  color: white;
+}
+
+.button.button-approve:not(:disabled):hover {
+  background: var(--approve-strong);
+}
+
+.button.button-feedback {
+  background: var(--feedback);
+  border-color: var(--feedback);
+  color: white;
+}
+
+.button.button-feedback:not(:disabled):hover {
+  background: var(--feedback-strong);
+}
+
+/* The line under the bar says which state the button is in and why. */
+.feedback-hint {
+  max-width: 60rem;
+  margin: var(--space-1) auto 0;
+  padding: 0 var(--space-4);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.feedback-hint:empty {
+  display: none;
+}
+
+/*
+ * The sentence that says what the two buttons do is hidden at every width: the
+ * button labels say it, and `docs/ui.md` is where it is written down. Only that
+ * sentence is marked (`data-hint="explanation"` in
+ * `src/ui/components/feedback.tsx`), so every other line the bar can show — the
+ * approval record, a refusal, the newer revision, the finished job — stays at
+ * every width. This rule is outside the width blocks on purpose.
+ */
+.feedback-hint[data-hint="explanation"] {
+  display: none;
+}
+
+/*
+ * The report panel carries the same control at its own foot. Only the box it
+ * lands in is styled here: the form itself is built by the shared module
+ * (src/web/feedback.js), so the two surfaces cannot drift apart. The box does
+ * not grow with the report — the body above it is what scrolls — so the control
+ * stays reachable however long the revision is.
+ */
+.report-pane-feedback {
+  flex: none;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+/* The panel is already the form's measure, so the bar's own margins and side
+   padding would only take width away from the field. */
+.report-pane-feedback .report-feedback-form {
+  margin-top: 0;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/*
+ * The panel takes the field on one row and the buttons on the next, at every
+ * width: the panel is narrower than the bar's own row needs, so a button beside
+ * the field would leave the field too little to write in. The two buttons share
+ * the second row half each and are at least 44px tall, and a plan's one button
+ * takes that row whole. Nothing here depends on the screen's width, so the same
+ * rules hold in the drawer a narrow screen opens.
+ */
+.report-pane-feedback .report-feedback-buttons {
+  align-self: stretch;
+}
+
+.report-pane-feedback .report-feedback-buttons .button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.report-pane-feedback .report-feedback-form > button {
+  align-self: stretch;
+  width: 100%;
+  min-height: 44px;
+}
+
+.report-pane-feedback .feedback-hint {
+  max-width: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+}
+
+/*
+ * The panel's button rule above holds at every width, and the drawer a narrow
+ * screen opens gets the same one from here: the panel is the drawer there, and
+ * its buttons keep the full width and the 44px tap target the drawer has always
+ * given them.
+ */
+@media (max-width: 860px) {
+  .report-pane-feedback .report-feedback-form button {
+    align-self: stretch;
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+/*
+ * On a narrow screen the bar stacks: the field takes the row, and the buttons
+ * sit under it on one line of their own. A result report's Done and Feedback
+ * share that line half each and a plan's one button takes it whole, so the bar
+ * is two rows instead of three. Every button is at least 44px tall, and the
+ * label is what names the state — `Approve`, `Approved`, `Feedback` — so colour
+ * is never the only signal.
+ *
+ * This block has to come after the rules above. Media queries add no
+ * specificity, so the same selectors are decided by source order.
+ */
+@media (max-width: 860px) {
+  .note-bar .report-feedback-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* `flex: 1` is horizontal growth. In a column it would take the field down to
+     its zero basis, so the height the field grows to is what stands instead. */
+  .note-bar .report-feedback-form textarea {
+    flex: none;
+    width: 100%;
+  }
+
+  .note-bar .report-feedback-form > button {
+    align-self: stretch;
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .note-bar .report-feedback-buttons {
+    align-self: stretch;
+  }
+
+  .note-bar .report-feedback-buttons .button {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  .feedback-hint {
+    padding: 0 var(--space-3);
+  }
+}
+
+.report-note {
+  border-left: 2px solid var(--border);
+  padding: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.report-note-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.diff-hunk {
+  margin: var(--space-3) 0;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+
+.diff-head {
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  padding: var(--space-1) var(--space-2);
+}
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 1ch 1fr;
+}
+
+/*
+ * The mark column holds one character, a space included. Without `pre` a blank
+ * line collapses to no line box and the row loses its height.
+ */
+.diff-mark {
+  white-space: pre;
+}
+
+.diff-body {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-word {
+  background: rgba(214, 69, 69, 0.34);
+}
+
+.diff-add .diff-word {
+  background: rgba(47, 158, 107, 0.34);
+}
+
+.diff-add {
+  background: rgba(47, 158, 107, 0.16);
+}
+
+.diff-remove {
+  background: rgba(214, 69, 69, 0.16);
+}
+
+/*
+ * A browser with no `color-mix()` does not take the plain value the rule carried
+ * before it: a declaration that holds a `var()` is not checked against the
+ * property's grammar at parse time, so the value is rejected only after the
+ * variables are substituted, and the property then goes unset rather than to the
+ * earlier declaration. Measured with the function made unknown to the browser,
+ * the activity ring loses its border and is not drawn, the error banner loses
+ * its fill, and the working chip keeps its knocked-out label over no fill at
+ * all. The plain values below stand in on those browsers and change nothing
+ * where `color-mix()` works.
+ */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .spinner {
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+  }
+
+  .spinner[data-stage="tool"] {
+    border-color: var(--border);
+    border-top-color: var(--status-active);
+  }
+
+  .spinner[data-stage="offline"] {
+    border-color: var(--border);
+    border-top-color: var(--danger);
+  }
+
+  /* The banner keeps a panel to read: the elevated background under the danger
+     edge and the danger text. */
+  .banner-error {
+    background: var(--bg-elevated);
+    border-color: var(--danger);
+  }
+
+  /* The jobs panel's banner is the same shape, one panel lower. */
+  .jobs-banner {
+    background: var(--bg-elevated);
+    border: 1px solid var(--danger);
+  }
+
+  .button-danger {
+    border-color: var(--danger);
+  }
+
+  /* One accent edge for the three messages, in place of the tinted one. */
+  .message.user,
+  .message.review,
+  .message.answer {
+    border-color: var(--accent);
+  }
+
+  /* A failed attachment keeps the danger colour whole, which is what the mix
+     was toning down to sit next to the other borders. */
+  .attachment-chip.is-failed {
+    border-color: var(--danger);
+  }
+
+  /* Nothing to darken the fill with, so the chip takes the status colour as it
+     comes. The label stays readable at about 3:1 rather than the 4.5:1 the mix
+     reaches. */
+  .status-chip.job-working {
+    --chip-fill: var(--status-ink, currentColor);
+  }
+}
+
+/*
+ * The report page is a shell of a fixed height: the header and the feedback bar
+ * are rows, and the body scrolls between them. The bar used to ride the bottom
+ * of the layout viewport (`position: fixed`), so a keyboard that shrinks only
+ * the visual viewport left it behind the keyboard, and the document, not the
+ * report, was what scrolled. `--app-h` is written by report.js from
+ * visualViewport when the browser has one; 100dvh is the fallback that follows
+ * the address bar, and 100% is for engines with neither.
+ *
+ * Scoped to the page: the chat's report panel mounts the same shared bar
+ * (feedback.js) and keeps its floating one.
+ */
+body.report-page {
+  height: 100%;
+  height: 100dvh;
+  height: var(--app-h, 100dvh);
+  overflow: hidden;
+}
+
+.report-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scroll-padding-bottom: var(--space-4);
+}
+
+body.report-page .report-view {
+  padding-bottom: var(--space-5);
+}
+
+body.report-page #note-bar {
+  position: static;
+  flex: none;
+  padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+}
+
+/* The toast sat at a fixed offset from the foot and covered the field. In this
+   shell the foot is the bar, so it belongs under the header instead. */
+body.report-page .toast {
+  top: 4.5rem;
+  bottom: auto;
+}
+
+/* ------------------------------------------------------- remote machines */
+
+/*
+ * The Machines panel: one row per machine, each with a three-position slider and
+ * one line per ssh user. The narrow sidebar is what shapes these rules: the
+ * slider is a row of three equal buttons rather than a track with a thumb,
+ * because three words fit and a thumb on a 14rem track does not.
+ */
+.machine-row {
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) 0;
+}
+
+.machine-row:last-child {
+  border-bottom: none;
+}
+
+.machine-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.machine-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machine-address {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machine-level {
+  margin-top: 0.2rem;
+}
+
+.machine-slider {
+  display: flex;
+  gap: 2px;
+}
+
+.machine-level-button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.15rem 0;
+  font: inherit;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.machine-level-button:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+/* The level the machine holds. The word is the label, so the fill is an
+   addition and not the only thing that says which level is on. */
+.machine-level-button.marked {
+  color: var(--bg-elevated);
+  background: var(--accent);
+  border-color: var(--accent);
+  cursor: default;
+}
+
+/*
+ * The level a tightening is waiting to apply. It is the same button as the marked
+ * one, so this rule comes after `.marked` and sets the fill, the border and the
+ * ink. The deep amber is the status palette's waiting hue, darkened until the
+ * white word on it clears 4.5:1, and the dashed border says the level is not in
+ * force yet: the runs that no longer fit it are still being stopped.
+ */
+.machine-level-button.pending {
+  color: #ffffff;
+  background: #8f5f13;
+  border-color: #8f5f13;
+  border-style: dashed;
+  cursor: default;
+}
+
+/* The wait, said in one line under the slider. The amber is the same waiting
+   hue, deepened for the light theme so small text on the pale page clears 4.5:1,
+   and lifted for the dark one, where the deepened value would sink into the
+   background. */
+.machine-pending {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: #8f5f13;
+  overflow-wrap: anywhere;
+}
+
+[data-theme="dark"] .machine-pending {
+  color: #e3ac4a;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] .machine-pending {
+    color: #e3ac4a;
+  }
+}
+
+.machine-users {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.machine-user[data-link-state="reachable"] {
+  color: var(--text);
+}
+
+.machine-user[data-link-state="unreachable"] {
+  color: var(--danger);
+}
+
+.machine-error,
+.machine-block {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.machine-error {
+  color: var(--danger);
+}
+
+/* A stopped machine is red like the job banner: it is the one line here that
+   says something is wrong and will stay wrong until the operator acts. */
+.machine-block {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
+  color: var(--danger);
+}
+
+.machine-note {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The setup card: three steps in the chat area while the daemon has no model.
+ * It sits above the (empty) transcript and takes the room it needs.
+ */
+.setup-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-4);
+  padding: var(--space-4);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-y: auto;
+}
+
+.setup-card.hidden {
+  display: none;
+}
+
+.setup-title,
+.setup-step h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.setup-step h3 {
+  font-size: 0.92rem;
+}
+
+.setup-step {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-self: stretch;
+}
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.setup-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: 0.82rem;
+}
+
+.setup-worker summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.setup-command code {
+  overflow-wrap: anywhere;
+}

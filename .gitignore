@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+src/web/dist/
+test/tmp/
+state
+!src/ui/state/
+tmp

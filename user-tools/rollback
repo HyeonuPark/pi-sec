@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Move the execution (snapshot) tree to an earlier commit and cold-restart from it.
+#
+# The snapshot worktree sits on its own branch, so a rollback is a branch move:
+# `reset --hard <target>` inside the execution tree. The next update fast-forwards
+# back to the workspace's HEAD, and refuses if the two have diverged — which is
+# the behaviour you want here: a rollback should never be undone by accident.
+#
+# Storage is not touched. If a migration made storage unreadable by the older
+# binary, restore your own copy of it as well.
+#
+# Without a systemd unit there is nothing to stop, so the script asks whether a
+# daemon of this home runs and refuses before it resets anything: the tree it
+# would reset is the tree that daemon loads its modules from.
+#
+# Run as the pi-sec user. Never calls sudo.
+set -euo pipefail
+
+HOME_DIR="${PI_SEC_HOME:-$HOME/.pi/sec}"
+SNAPSHOT="$HOME_DIR/snapshot"
+TARGET="${1:-}"
+
+if [ ! -e "$SNAPSHOT/.git" ]; then
+  echo "error: no execution tree at $SNAPSHOT" >&2
+  exit 1
+fi
+
+echo "pi-sec rollback"
+echo "  current: $(git -C "$SNAPSHOT" log --oneline -1)"
+
+if [ -z "$TARGET" ]; then
+  echo "recent commits:"
+  git -C "$SNAPSHOT" log --oneline -15 | sed 's/^/    /'
+  echo "usage: $0 <commit-or-tag>" >&2
+  exit 2
+fi
+
+if [ -n "$(git -C "$SNAPSHOT" status --porcelain)" ]; then
+  echo "error: $SNAPSHOT has uncommitted changes; refusing to discard them" >&2
+  exit 1
+fi
+
+RESOLVED="$(git -C "$SNAPSHOT" rev-parse --verify "$TARGET^{commit}")" || {
+  echo "error: $TARGET is not a commit in this repository" >&2
+  exit 1
+}
+
+service_unit() {
+  # Asked first, and without a probe: under the runner there is no unit to find.
+  if [ "${PI_SEC_RUNNER:-}" = "1" ]; then echo "runner"
+  elif systemctl --user is-enabled pi-sec >/dev/null 2>&1; then echo "user"
+  elif command -v systemctl >/dev/null 2>&1 && systemctl is-enabled pi-sec >/dev/null 2>&1; then echo "system"
+  else echo "none"; fi
+}
+
+svc_stop() {
+  case "$(service_unit)" in
+    runner) echo "  the daemon stopped for this rollback: it ran under user-tools/run" ;;
+    user) systemctl --user stop pi-sec ;;
+    system) sudo systemctl stop pi-sec ;;
+    none) echo "  no systemd unit found; stop your supervised 'pi-sec start' process now" ;;
+  esac
+}
+
+svc_start() {
+  case "$(service_unit)" in
+    runner) echo "  the runner starts the daemon again when this script exits" ;;
+    user) systemctl --user start pi-sec ;;
+    system) sudo systemctl start pi-sec ;;
+    none) echo "  no systemd unit found; start your supervised 'pi-sec start' process" ;;
+  esac
+}
+
+# Is a daemon of this home running? `pi-sec status` decides it from the pid file
+# and the life of that pid. Without a build in the execution tree no daemon can
+# run from it, so a missing pid file or a dead pid means one is not running.
+daemon_running() {
+  if [ -f "$SNAPSHOT/dist/cli.js" ]; then
+    PI_SEC_HOME="$HOME_DIR" node "$SNAPSHOT/dist/cli.js" status >/dev/null 2>&1
+    return $?
+  fi
+  local pid
+  pid="$(cat "$HOME_DIR/run/pi-sec.pid" 2>/dev/null || true)"
+  case "$pid" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  kill -0 "$pid" 2>/dev/null
+}
+
+echo "  rolling back to $(git -C "$SNAPSHOT" log --oneline -1 "$RESOLVED")"
+
+# Before the first change: with no unit to stop, the tree a running daemon loads
+# from would be reset and rebuilt under it.
+case "$(service_unit)" in
+  runner | none)
+    if daemon_running; then
+      echo "error: a pi-sec daemon is running for $HOME_DIR" >&2
+      if [ "$(service_unit)" = "runner" ]; then
+        echo "  it runs under user-tools/run: use the restart button in the web UI instead" >&2
+      else
+        echo "  stop it first, then run this script again" >&2
+      fi
+      echo "  nothing was changed" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+svc_stop
+git -C "$SNAPSHOT" reset --hard "$RESOLVED"
+
+if [ ! -d "$SNAPSHOT/node_modules" ]; then
+  echo "  installing dependencies"
+  (cd "$SNAPSHOT" && npm ci)
+fi
+echo "  building"
+(cd "$SNAPSHOT" && npm run build)
+svc_start
+
+echo "done: now at $(git -C "$SNAPSHOT" rev-parse --short HEAD)"

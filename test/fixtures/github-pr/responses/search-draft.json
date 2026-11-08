@@ -1,0 +1,24 @@
+{
+  "json": {
+    "data": {
+      "search": {
+        "nodes": [
+          {
+            "number": 21,
+            "title": "Own work, draft",
+            "url": "https://github.example.com/acme/widgets/pull/21",
+            "isDraft": true,
+            "state": "OPEN",
+            "updatedAt": "2026-10-30T02:00:00Z",
+            "author": { "login": "example-user" },
+            "headRefName": "feature/draft",
+            "baseRefName": "main",
+            "reviewDecision": null,
+            "labels": { "nodes": [] },
+            "commits": { "nodes": [] }
+          }
+        ]
+      }
+    }
+  }
+}

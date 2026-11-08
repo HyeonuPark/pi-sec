@@ -1,0 +1,14 @@
+#!/bin/sh
+# pi-sec install hook. Refuse a commit message that carries a value of this
+# install: a registered secret, the home path, the host name, or a word of the
+# word list. It runs scripts/scan-tree.mjs of the work tree on a copy of the
+# message.
+words="${PI_SEC_HOME:-$HOME/.pi/sec}/scan-words.txt"
+[ -r "$words" ] || { echo "commit-msg: cannot read the word list $words" >&2; exit 1; }
+[ -r "$1" ] || { echo "commit-msg: cannot read the message file $1" >&2; exit 1; }
+top=$(git rev-parse --show-toplevel) || exit 1
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+mkdir "$tmp/msg" && cp "$1" "$tmp/msg/COMMIT_EDITMSG" || exit 1
+env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR \
+  node "$top/scripts/scan-tree.mjs" --root "$tmp/msg" --words "$words"

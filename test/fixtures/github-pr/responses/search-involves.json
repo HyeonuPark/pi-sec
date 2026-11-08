@@ -1,0 +1,38 @@
+{
+  "json": {
+    "data": {
+      "search": {
+        "nodes": [
+          {
+            "number": 30,
+            "title": "Related through a comment",
+            "url": "https://github.example.com/acme/widgets/pull/30",
+            "isDraft": false,
+            "state": "OPEN",
+            "updatedAt": "2026-10-27T05:00:00Z",
+            "author": { "login": "example-third" },
+            "headRefName": "chore/docs",
+            "baseRefName": "main",
+            "reviewDecision": null,
+            "labels": { "nodes": [] },
+            "commits": { "nodes": [{ "commit": { "statusCheckRollup": { "state": "FAILURE" } } }] }
+          },
+          {
+            "number": 31,
+            "title": "Closed already",
+            "url": "https://github.example.com/acme/widgets/pull/31",
+            "isDraft": false,
+            "state": "CLOSED",
+            "updatedAt": "2026-10-26T05:00:00Z",
+            "author": { "login": "example-third" },
+            "headRefName": "chore/closed",
+            "baseRefName": "main",
+            "reviewDecision": null,
+            "labels": { "nodes": [] },
+            "commits": { "nodes": [] }
+          }
+        ]
+      }
+    }
+  }
+}

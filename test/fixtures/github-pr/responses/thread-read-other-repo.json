@@ -1,0 +1,16 @@
+{
+  "json": {
+    "data": {
+      "node": {
+        "isResolved": false,
+        "viewerCanResolve": true,
+        "pullRequest": {
+          "number": 10,
+          "repository": {
+            "nameWithOwner": "other/gadgets"
+          }
+        }
+      }
+    }
+  }
+}

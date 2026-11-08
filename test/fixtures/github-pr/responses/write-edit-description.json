@@ -1,0 +1,12 @@
+{
+  "json": {
+    "data": {
+      "updatePullRequest": {
+        "pullRequest": {
+          "id": "PR_node_10",
+          "body": "Adds a small cache, now with notes."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- The external mount prefix, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-base" content="" />
+    <!-- The harness time zone, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-timezone" content="" />
+    <title>Model speed · pi-sec</title>
+    <link rel="stylesheet" href="{{base}}/theme.css" />
+    <link rel="stylesheet" href="{{base}}/styles.css" />
+    <link rel="stylesheet" href="{{base}}/usage-stats.css" />
+  </head>
+  <body class="usage-stats-page">
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">π</span>
+          <span class="brand-name">model speed</span>
+        </div>
+      </div>
+      <div class="header-status">
+        <a class="pill pill-muted" id="usage-link" href="{{base}}/usage">← usage</a>
+        <a class="pill pill-muted" id="chat-link" href="{{base}}/basic-chat">chat</a>
+        <button id="theme-toggle" class="button" type="button">◐ auto</button>
+      </div>
+    </header>
+
+    <main class="stats-scroll">
+      <section id="stats-root" class="stats-root"></section>
+    </main>
+
+    <div id="stats-toast" class="toast hidden" role="alert" aria-live="assertive"></div>
+
+    <script src="{{base}}/base.js"></script>
+    <script type="module" src="{{base}}/ui-usage-stats.js"></script>
+  </body>
+</html>

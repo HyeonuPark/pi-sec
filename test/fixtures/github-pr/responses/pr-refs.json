@@ -1,0 +1,16 @@
+{
+  "json": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "id": "PR_node_10",
+          "number": 10,
+          "title": "Add widget cache",
+          "baseRefName": "main",
+          "headRefName": "feature/widget-cache",
+          "headRefOid": "1111111111111111111111111111111111111111"
+        }
+      }
+    }
+  }
+}

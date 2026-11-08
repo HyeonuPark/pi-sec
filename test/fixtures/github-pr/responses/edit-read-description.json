@@ -1,0 +1,14 @@
+{
+  "json": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "id": "PR_node_10",
+          "body": "Adds a small cache.\r\n\r\nThanks.",
+          "viewerCanUpdate": true,
+          "viewerDidAuthor": true
+        }
+      }
+    }
+  }
+}

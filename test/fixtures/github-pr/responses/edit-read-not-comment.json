@@ -1,0 +1,9 @@
+{
+  "json": {
+    "data": {
+      "node": {
+        "__typename": "PullRequestReview"
+      }
+    }
+  }
+}

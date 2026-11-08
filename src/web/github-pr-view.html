@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light" />
+    <!-- The external mount prefix, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-base" content="" />
+    <!-- The harness time zone, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-timezone" content="" />
+    <title>Pull requests · pi-sec</title>
+    <!-- Two stylesheets, and no more: the dashboard's own theme, and the code-block
+         palette the build copies from the highlight.js package. pi-sec's own
+         theme.css and styles.css are not loaded, because this theme is GitHub's
+         light one and stays that way. The assets sit beside the shell in dist/web,
+         the way usage.css and ui-usage.js do, so a page served under a mount prefix
+         asks for them under the same prefix. -->
+    <link rel="stylesheet" href="{{base}}/github-pr.css" />
+    <link rel="stylesheet" href="{{base}}/ui-highlight-github.css" />
+  </head>
+  <body>
+    <!-- The bar and the failure strip, drawn by the page's script. The pull
+         request itself is drawn into `#view`: the page takes each of these three
+         elements over in place, so their ids and classes are the ones
+         github-pr.css styles. -->
+    <header id="topbar" class="topbar"></header>
+    <div id="error-banner" class="error-banner hidden" role="alert"></div>
+    <main id="view"></main>
+
+    <!-- The facts every dashboard page needs before its first request: who gh is
+         logged in as, which repositories the operator configured, and whether the
+         write routes answer. The server replaces this marker with
+         `<script type="application/json" id="github-pr-meta">…</script>`, escaping
+         `<` so that no value can close the element early. It is data and never
+         runs, so the page's `script-src 'self'` policy has nothing to refuse. -->
+    <!--github-pr-meta-->
+
+    <!-- base.js first: it carries the one rule that builds every URL on this page,
+         and the page module reads it before its first request. -->
+    <script src="{{base}}/base.js"></script>
+    <!-- The page itself. The pull request and the repository it belongs to come
+         from this page's own address, not from a block. -->
+    <script type="module" src="{{base}}/ui-github-pr-view.js"></script>
+  </body>
+</html>

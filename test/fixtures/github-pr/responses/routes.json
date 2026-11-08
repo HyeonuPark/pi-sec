@@ -1,0 +1,44 @@
+{
+  "routes": [
+    { "contains": ["addPullRequestReviewThreadReply"], "file": "write-reply.json" },
+    { "contains": ["addComment(input:"], "file": "write-comment.json" },
+    { "contains": ["addReaction(input:"], "file": "write-reaction.json" },
+    { "contains": ["removeReaction(input:"], "file": "write-reaction.json" },
+    { "contains": ["node(id: $threadId)", "threadId=PRRT_other_pr"], "file": "thread-read-other-pr.json" },
+    { "contains": ["node(id: $threadId)", "threadId=PRRT_other_repo"], "file": "thread-read-other-repo.json" },
+    { "contains": ["node(id: $threadId)", "threadId=PRRT_cannot"], "file": "thread-read-cannot.json" },
+    { "contains": ["node(id: $threadId)", "threadId=PRRT_done"], "file": "thread-read-resolved.json" },
+    { "contains": ["node(id: $threadId)", "threadId=PRRT_nothread"], "file": "thread-read-not-thread.json" },
+    { "contains": ["node(id: $threadId)"], "file": "thread-read.json" },
+    { "contains": ["resolveReviewThread(input:"], "file": "write-resolve.json" },
+    { "contains": ["/pulls/", "/reviews", "POST"], "file": "write-review.json" },
+    { "contains": ["EditDescriptionRead"], "file": "edit-read-description.json" },
+    { "contains": ["EditCommentRead", "commentId=IC_other_author"], "file": "edit-read-other-author.json" },
+    { "contains": ["EditCommentRead", "commentId=IC_other_pr"], "file": "edit-read-other-pr.json" },
+    { "contains": ["EditCommentRead", "commentId=IC_other_repo"], "file": "edit-read-other-repo.json" },
+    { "contains": ["EditCommentRead", "commentId=PRR_1"], "file": "edit-read-not-comment.json" },
+    { "contains": ["EditCommentRead", "commentId=PRRC_mine"], "file": "edit-read-review-comment.json" },
+    { "contains": ["EditCommentRead"], "file": "edit-read-issue-comment.json" },
+    { "contains": ["updatePullRequest("], "file": "write-edit-description.json" },
+    { "contains": ["updateIssueComment("], "file": "write-edit-issue-comment.json" },
+    { "contains": ["updatePullRequestReviewComment("], "file": "write-edit-review-comment.json" },
+
+    { "contains": ["is:pr is:open mentions:"], "file": "search-mentions.json" },
+    { "contains": ["is:pr is:open review-requested:"], "file": "search-need-review.json" },
+    { "contains": ["is:pr is:open author:example-user draft:false"], "file": "search-opened.json" },
+    { "contains": ["is:pr is:open author:example-user draft:true"], "file": "search-draft.json" },
+    { "contains": ["is:pr is:open involves:"], "file": "search-involves.json" },
+    { "contains": ["is:pr is:open reviewed-by:"], "file": "search-reviewed.json" },
+
+    { "contains": ["id number title baseRefName headRefName headRefOid"], "file": "pr-refs.json" },
+    { "contains": ["statusCheckRollup"], "file": "pr-detail.json" },
+    { "contains": ["pullRequest(number:"], "file": "mentions-detail.json" },
+
+    { "contains": ["api repos/upstream/widgets"], "file": "repo-info-root.json" },
+    { "contains": ["api repos/acme/widgets"], "file": "repo-info.json" },
+    { "contains": ["api repos/"], "file": "repo-info.json" },
+
+    { "contains": ["viewer { login }"], "file": "viewer.json" }
+  ],
+  "default": "empty.json"
+}

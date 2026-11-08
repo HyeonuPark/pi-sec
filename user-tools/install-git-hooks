@@ -1,0 +1,117 @@
+#!/bin/sh
+# Install the pi-sec commit hooks into a repository.
+#
+# usage: user-tools/install-git-hooks [--update] [repository]
+#
+# The repository is the one that holds this script, unless one is named. The
+# script puts `pre-commit`, `commit-msg` and `pre-push` from user-tools/git-hooks
+# into the hooks folder that git names for that repository, mode 755. The three
+# hooks run the tree scan with the word list `scan-words.txt` in the pi-sec home.
+#
+# A hook file that already holds other text is never replaced: the script prints
+# which file it found and exits 1 without changing any hook. A file with the
+# same text is left as it is, so a second run changes nothing. No other hook
+# file is read or written.
+#
+# With `--update`, a hook file whose second line starts with
+# `# pi-sec install hook.` is replaced by the shipped file. Any other existing
+# file is still refused, and then no hook is changed.
+#
+# When the word list is missing, the script creates it with a comment header
+# only and mode 600, so the hooks refuse nothing until words are added. When the
+# identity list `commit-identities.txt` is missing, the script creates it with a
+# comment header and the line `pi-sec <pi-sec@localhost>`, mode 600. An existing
+# file is left as it is.
+set -eu
+
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
+src="$script_dir/git-hooks"
+update=0
+if [ "${1:-}" = "--update" ]; then
+  update=1
+  shift
+fi
+repo=${1:-$script_dir}
+home_dir="${PI_SEC_HOME:-$HOME/.pi/sec}"
+words="$home_dir/scan-words.txt"
+identities="$home_dir/commit-identities.txt"
+
+# Whether an installed hook is an older pi-sec hook, by its second line.
+is_pi_sec_hook() {
+  case "$(sed -n 2p "$1")" in
+    "# pi-sec install hook."*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+hooks_dir=$(git -C "$repo" rev-parse --path-format=absolute --git-path hooks 2>/dev/null) ||
+  hooks_dir=$(git -C "$repo" rev-parse --git-path hooks) || {
+    echo "install-git-hooks: $repo is not a git repository" >&2
+    exit 1
+  }
+case "$hooks_dir" in
+  /*) ;;
+  *) hooks_dir="$repo/$hooks_dir" ;;
+esac
+
+# Check every hook first, so a refusal changes nothing.
+for name in pre-commit commit-msg pre-push; do
+  [ -f "$src/$name" ] || { echo "install-git-hooks: missing $src/$name" >&2; exit 1; }
+  target="$hooks_dir/$name"
+  if [ -e "$target" ] && ! cmp -s "$src/$name" "$target" && ! { [ "$update" = 1 ] && is_pi_sec_hook "$target"; }; then
+    echo "install-git-hooks: $target already exists with other text; not replacing it" >&2
+    echo "install-git-hooks: no hook was changed. Merge the two by hand if you want both." >&2
+    exit 1
+  fi
+done
+
+mkdir -p "$hooks_dir"
+for name in pre-commit commit-msg pre-push; do
+  target="$hooks_dir/$name"
+  if [ -e "$target" ] && cmp -s "$src/$name" "$target"; then
+    chmod 755 "$target"
+    echo "install-git-hooks: $target is already installed"
+  elif [ -e "$target" ]; then
+    cp "$src/$name" "$target"
+    chmod 755 "$target"
+    echo "install-git-hooks: updated $target"
+  else
+    cp "$src/$name" "$target"
+    chmod 755 "$target"
+    echo "install-git-hooks: installed $target"
+  fi
+done
+
+if [ -e "$words" ]; then
+  echo "install-git-hooks: word list $words exists; leaving it as it is"
+else
+  mkdir -p "$home_dir"
+  (
+    umask 077
+    cat >"$words" <<'LIST'
+# Words of this install that no commit may carry, one per line.
+# A line that starts with # is a comment. Matching ignores case and needs no
+# letter directly before or after the word.
+# Keep this file outside the repository.
+LIST
+  )
+  chmod 600 "$words"
+  echo "install-git-hooks: created the word list $words"
+fi
+
+if [ -e "$identities" ]; then
+  echo "install-git-hooks: identity list $identities exists; leaving it as it is"
+else
+  mkdir -p "$home_dir"
+  (
+    umask 077
+    cat >"$identities" <<'LIST'
+# Identities that a commit of this install may carry, one per line, as
+# Name <email>. Matching is exact. A line that starts with # is a comment.
+# Keep this file outside the repository.
+pi-sec <pi-sec@localhost>
+LIST
+  )
+  chmod 600 "$identities"
+  echo "install-git-hooks: created the identity list $identities"
+fi

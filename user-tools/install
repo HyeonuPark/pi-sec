@@ -1,0 +1,666 @@
+#!/usr/bin/env bash
+# Install pi-sec for one unprivileged account.
+#
+# Run this as the account that will run pi-sec. It never calls sudo and never
+# changes anything outside the account's own home, so the privileged steps are
+# printed for the operator to run somewhere else.
+#
+# What it builds, in this order:
+#
+#   1. checks      not root; node 22.19 or newer, npm, git and flock are present
+#   2. home        ~/.pi/sec and its subdirectories, mode 700
+#   3. workspace   ~/.pi/sec/workspace, a clone of the repository this script
+#                  runs from; the modification tree, never executed. Its commit
+#                  hooks are installed here (user-tools/install-git-hooks)
+#   4. snapshot    ~/.pi/sec/snapshot, a worktree of the workspace repository on
+#                  branch `snapshot`; the execution tree, built here
+#   5. config      ~/.pi/sec/config.json from the built CLI's default
+#   6. provider    a models.json endpoint file or a provider extension, copied
+#                  into the home; the web UI signs the provider in later
+#   7. model       the first vmodels, through `models` and `setup-model`
+#   8. run mode    a systemd user unit, or the way to run the tree by hand
+#
+# After step 8 it downloads the headless Chromium browser as this account (leave
+# that out with --skip-browser) and prints the optional system packages that
+# are missing, with the one root command that installs them. Those packages
+# never stop the install. `--check-deps` runs only the checks.
+#
+# Running it again is safe: an existing tree, config, models.json, extension
+# copy or unit file is left as it is, and the steps whose result is already
+# there are skipped.
+#
+# Two ways in. With a terminal on stdin and an option missing, it asks. Without
+# a terminal, or with --yes, it never waits: it uses the option, or the default.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+TEMPLATE="$SCRIPT_DIR/pi-sec.service"
+OPTIONAL_DEPS="$SCRIPT_DIR/optional-deps.mjs"
+ALL_ARGS=("$@")
+
+OPT_PROVIDER=""
+OPT_MODELS_JSON=""
+OPT_MODELS_JSON_SET=0
+OPT_EXTENSION=""
+OPT_MODEL=""
+OPT_THINKING=""
+OPT_WORKER_PROVIDER=""
+OPT_WORKER_MODEL=""
+OPT_RUN=""
+SKIP_MODEL=0
+SKIP_BROWSER=0
+CHECK_DEPS=0
+ASSUME_YES=0
+NO_START=0
+
+say() { printf '  %s\n' "$*"; }
+step() { printf '\n%s\n' "$*"; }
+die() {
+  printf 'install: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+usage: user-tools/install [options]
+
+Pre-checks and the code trees need no option.
+
+  --provider <id>         the provider of the first vmodels (step 7)
+  --models-json [file]    copy a models.json endpoint file into the home;
+                          without a file, print where the docs show an example
+  --extension <dir>       copy a provider extension into the home
+  --model <id>            the model for root, orchestrator and worker
+  --thinking <level>      thinking level for those vmodels
+  --worker-provider <id>  a different provider for the worker vmodel
+  --worker-model <id>     a different model for the worker vmodel
+  --skip-model            do not write the first vmodels
+  --run systemd|manual    how the daemon runs; the default is systemd when the
+                          account has a user manager, manual otherwise
+  --skip-browser          do not download the headless Chromium browser
+  --check-deps            only check the system packages and print what to
+                          install; creates and changes nothing, and takes no
+                          other option
+  --no-start              write the unit file, but do not register or start it
+  --yes                   never ask; take the options and the defaults as given.
+                          With --run systemd this registers and starts the unit,
+                          so add --no-start to stop after writing the file
+
+An option takes its value as a separate word: --provider anthropic.
+EOF
+}
+
+need_value() {
+  [ "$#" -ge 2 ] || die "$1 needs a value (see --help)"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --provider)
+      need_value "$@"
+      OPT_PROVIDER="$2"
+      shift 2
+      ;;
+    --models-json)
+      OPT_MODELS_JSON_SET=1
+      # The value is optional: without it the step prints where an example is.
+      if [ "$#" -ge 2 ] && [ "${2#--}" = "$2" ]; then
+        OPT_MODELS_JSON="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    --extension)
+      need_value "$@"
+      OPT_EXTENSION="$2"
+      shift 2
+      ;;
+    --model)
+      need_value "$@"
+      OPT_MODEL="$2"
+      shift 2
+      ;;
+    --thinking)
+      need_value "$@"
+      OPT_THINKING="$2"
+      shift 2
+      ;;
+    --worker-provider)
+      need_value "$@"
+      OPT_WORKER_PROVIDER="$2"
+      shift 2
+      ;;
+    --worker-model)
+      need_value "$@"
+      OPT_WORKER_MODEL="$2"
+      shift 2
+      ;;
+    --run)
+      need_value "$@"
+      case "$2" in
+        systemd|manual) OPT_RUN="$2" ;;
+        *) die 'unknown --run value "'"$2"'"; use systemd or manual' ;;
+      esac
+      shift 2
+      ;;
+    --skip-model) SKIP_MODEL=1; shift ;;
+    --skip-browser) SKIP_BROWSER=1; shift ;;
+    --check-deps) CHECK_DEPS=1; shift ;;
+    --no-start) NO_START=1; shift ;;
+    --yes|-y) ASSUME_YES=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument: $1" ;;
+  esac
+done
+
+if [ "$CHECK_DEPS" = 1 ] && [ "${#ALL_ARGS[@]}" -ne 1 ]; then
+  die "--check-deps runs the checks only and takes no other option"
+fi
+
+if [ "$OPT_MODELS_JSON_SET" = 1 ] && [ -n "$OPT_EXTENSION" ]; then
+  die "--models-json and --extension are two ways to the same step; choose one"
+fi
+
+# Every path below hangs off the account's home, so a run with no HOME has
+# nowhere to install. This is checked here rather than at the top, so --help
+# answers from any shell.
+if [ -z "${HOME:-}" ]; then
+  printf 'install: HOME is not set; run this as the account that runs pi-sec\n' >&2
+  exit 1
+fi
+HOME_DIR="${PI_SEC_HOME:-$HOME/.pi/sec}"
+WORKSPACE="$HOME_DIR/workspace"
+SNAPSHOT="$HOME_DIR/snapshot"
+CLI="$SNAPSHOT/dist/cli.js"
+CONFIG="$HOME_DIR/config.json"
+MODELS_FILE="$HOME_DIR/models.json"
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+UNIT_PATH="$UNIT_DIR/pi-sec.service"
+
+# The CLI reads its home from this variable, so every command below acts on the
+# home this script installs, and not on whatever the caller had.
+export PI_SEC_HOME="$HOME_DIR"
+
+# A terminal on stdin is the permission to ask. Anything else, and --yes, means
+# the run must finish without input: a script that waits forever looks the same
+# as one that is broken.
+INTERACTIVE=0
+if [ "$ASSUME_YES" = 0 ] && [ -t 0 ]; then
+  INTERACTIVE=1
+fi
+
+# The answer goes to stdout so `$(ask ...)` can read it; the prompt goes to
+# stderr, where the operator can see it without it being captured.
+ask() {
+  local prompt="$1" default="${2:-}" answer=""
+  if [ -n "$default" ]; then
+    printf '%s [%s]: ' "$prompt" "$default" >&2
+  else
+    printf '%s: ' "$prompt" >&2
+  fi
+  if ! IFS= read -r answer; then
+    die "no answer on stdin; run again with options (see --help)"
+  fi
+  if [ -z "$answer" ]; then answer="$default"; fi
+  printf '%s' "$answer"
+}
+
+ask_yes_no() {
+  local prompt="$1" default="$2" answer=""
+  printf '%s [%s]: ' "$prompt" "$default" >&2
+  if ! IFS= read -r answer; then
+    die "no answer on stdin; run again with options (see --help)"
+  fi
+  case "${answer:-$default}" in
+    y|Y|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Whether this account has a user manager to put the unit in. This only asks the
+# manager to print its environment, which changes nothing.
+user_systemd_available() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl --user show-environment >/dev/null 2>&1
+}
+
+# Reads one value out of the installed config without printing the rest of it.
+config_value() {
+  node -e '
+const fs = require("node:fs");
+try {
+  const config = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const value = process.argv[2].split(".").reduce((node, key) => (node ?? {})[key], config);
+  if (value !== undefined && value !== null) process.stdout.write(String(value));
+} catch {
+  /* an unreadable config is reported by the step that wrote it */
+}' "$CONFIG" "$1"
+}
+
+printf 'pi-sec install\n'
+say "control structure: $HOME_DIR"
+
+# --- 1. pre-checks -----------------------------------------------------------
+if [ "$CHECK_DEPS" = 1 ]; then step "pre-checks"; else step "[1/8] pre-checks"; fi
+if [ "$(id -u)" = "0" ]; then
+  die "do not install as root: run this as the account that runs pi-sec"
+fi
+
+# Debian and Ubuntu get an apt-get command to run as root. The script never runs
+# it: it has no root.
+debian_family=0
+if [ -r /etc/os-release ]; then
+  case " $(. /etc/os-release >/dev/null 2>&1; printf '%s %s' "${ID:-}" "${ID_LIKE:-}") " in
+    *" debian "*|*" ubuntu "*) debian_family=1 ;;
+  esac
+fi
+
+missing=()
+if command -v node >/dev/null 2>&1; then
+  node_version=$(node -e 'process.stdout.write(process.versions.node)')
+  node_major=${node_version%%.*}
+  node_rest=${node_version#*.}
+  node_minor=${node_rest%%.*}
+  if [ "$node_major" -lt 22 ] || { [ "$node_major" -eq 22 ] && [ "$node_minor" -lt 19 ]; }; then
+    missing+=("node 22.19 or newer (found $node_version): install it from nodejs.org or with a version manager such as fnm or nvm")
+  fi
+else
+  missing+=("node 22.19 or newer: install it from nodejs.org or with a version manager such as fnm or nvm")
+fi
+command -v npm >/dev/null 2>&1 || missing+=("npm: comes with Node.js; install Node.js 22.19 or newer from nodejs.org or with a version manager such as fnm or nvm")
+if ! command -v git >/dev/null 2>&1; then
+  if [ "$debian_family" = 1 ]; then
+    missing+=("git: run as root: apt-get install -y git")
+  else
+    missing+=("git: install the git package of this distribution, as root")
+  fi
+fi
+if ! command -v flock >/dev/null 2>&1; then
+  if [ "$debian_family" = 1 ]; then
+    missing+=("flock: run as root: apt-get install -y util-linux")
+  else
+    missing+=("flock: install the util-linux package of this distribution, as root")
+  fi
+fi
+if [ "${#missing[@]}" -gt 0 ]; then
+  printf 'install: required tools are missing or too old:\n' >&2
+  for entry in "${missing[@]}"; do printf '  - %s\n' "$entry" >&2; done
+  exit 1
+fi
+say "node, npm, git and flock are present"
+
+if [ "$CHECK_DEPS" = 1 ]; then
+  # The workspace when it already has Playwright, the tree this script runs from
+  # otherwise. Nothing is created, and the browser is never downloaded here.
+  deps_tree=$(dirname "$SCRIPT_DIR")
+  if [ -d "$WORKSPACE/node_modules/playwright-core" ]; then deps_tree="$WORKSPACE"; fi
+  node "$OPTIONAL_DEPS" --tree "$deps_tree" || true
+  exit 0
+fi
+
+# --- 2. control structure ----------------------------------------------------
+step "[2/8] control structure"
+umask 077
+mkdir -p "$HOME_DIR"/{state,memory,prompts,extensions,secrets,logs,run,cache}
+chmod 700 "$HOME_DIR" "$HOME_DIR"/{state,memory,prompts,extensions,secrets,logs,run,cache}
+say "$HOME_DIR is mode 700"
+
+# --- 3. modification tree ----------------------------------------------------
+step "[3/8] modification tree"
+if ! source_top=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null); then
+  die "$SCRIPT_DIR is not in a git repository; clone the repository to $WORKSPACE and run $WORKSPACE/user-tools/install"
+fi
+
+workspace_top=""
+if [ -d "$WORKSPACE" ]; then
+  workspace_top=$(git -C "$WORKSPACE" rev-parse --show-toplevel 2>/dev/null || true)
+fi
+
+if [ -n "$workspace_top" ]; then
+  say "$WORKSPACE already holds a repository; leaving it as it is"
+  if [ "$workspace_top" != "$source_top" ]; then
+    say "note: this script runs from $source_top, and the workspace keeps its own history"
+  fi
+elif [ "$source_top" = "$WORKSPACE" ]; then
+  say "this script runs from $WORKSPACE"
+else
+  say "cloning $source_top to $WORKSPACE"
+  if ! git clone --quiet "$source_top" "$WORKSPACE"; then
+    die "could not clone $source_top to $WORKSPACE; move what is there away and run again"
+  fi
+  # The clone's origin becomes the source repository's origin, so an update in
+  # the new home pulls from where this code really came from. A source with no
+  # origin (a local clone) points at its own path instead.
+  origin_url=$(git -C "$source_top" remote get-url origin 2>/dev/null || true)
+  if [ -z "$origin_url" ]; then origin_url="$source_top"; fi
+  git -C "$WORKSPACE" remote set-url origin "$origin_url"
+  say "origin: $origin_url"
+fi
+
+# The commit hooks of the workspace repository. The installer never replaces a
+# hook file that holds other text, so a refusal prints its note and the install
+# goes on.
+if [ -x "$WORKSPACE/user-tools/install-git-hooks" ]; then
+  if ! "$WORKSPACE/user-tools/install-git-hooks" "$WORKSPACE"; then
+    say "note: the commit hooks were not installed; read the lines above, and run"
+    say "  $WORKSPACE/user-tools/install-git-hooks"
+    say "again when the cause is fixed"
+  fi
+fi
+
+# --- 4. execution tree -------------------------------------------------------
+step "[4/8] execution tree"
+if [ -e "$SNAPSHOT/.git" ]; then
+  say "$SNAPSHOT already holds a worktree; leaving it as it is"
+elif [ -d "$SNAPSHOT" ] && [ -n "$(ls -A "$SNAPSHOT" 2>/dev/null)" ]; then
+  die "$SNAPSHOT exists and is not a worktree; move it away and run again"
+else
+  # `main` is the branch an update fast-forwards `snapshot` from. A clone that
+  # checked out another branch keeps `main` only as a remote-tracking ref.
+  base=""
+  for candidate in refs/heads/main refs/remotes/origin/main; do
+    if git -C "$WORKSPACE" rev-parse --verify --quiet "$candidate" >/dev/null; then
+      base="$candidate"
+      break
+    fi
+  done
+  if [ -z "$base" ]; then
+    base=$(git -C "$WORKSPACE" symbolic-ref --quiet --short HEAD || true)
+    if [ -z "$base" ]; then
+      die "$WORKSPACE has no main branch and no checked-out branch to start from"
+    fi
+    say "warning: no main branch; starting the execution tree from $base"
+  fi
+  mkdir -p "$(dirname "$SNAPSHOT")"
+  if git -C "$WORKSPACE" rev-parse --verify --quiet refs/heads/snapshot >/dev/null; then
+    say "adding $SNAPSHOT as a worktree on the existing branch snapshot"
+    git -C "$WORKSPACE" worktree add --quiet "$SNAPSHOT" snapshot
+  else
+    say "adding $SNAPSHOT as a worktree on a new branch snapshot from $base"
+    git -C "$WORKSPACE" worktree add --quiet -b snapshot "$SNAPSHOT" "$base"
+  fi
+fi
+
+# The restart gate runs typecheck and tests in the modification tree, so it needs
+# its dependencies as well as the execution tree does.
+if [ -d "$WORKSPACE/node_modules" ]; then
+  say "modification tree dependencies are already installed"
+else
+  say "installing modification tree dependencies"
+  (cd "$WORKSPACE" && npm ci)
+fi
+
+if [ -d "$SNAPSHOT/node_modules" ]; then
+  say "execution tree dependencies are already installed"
+else
+  say "installing execution tree dependencies"
+  (cd "$SNAPSHOT" && npm ci)
+fi
+
+if [ -f "$CLI" ]; then
+  say "the execution tree is already built"
+else
+  say "building the execution tree"
+  (cd "$SNAPSHOT" && npm run build)
+fi
+
+# --- 5. configuration --------------------------------------------------------
+step "[5/8] configuration"
+if [ -f "$CONFIG" ]; then
+  say "config.json exists; leaving it as it is"
+else
+  # The default comes from the CLI, so the tree has to be built first. A torn
+  # file would make every later run fail, so it is written aside and renamed.
+  config_tmp="$CONFIG.tmp.$$"
+  if ! node "$CLI" config --default >"$config_tmp"; then
+    rm -f "$config_tmp"
+    die "could not write the default config.json from $CLI"
+  fi
+  chmod 600 "$config_tmp"
+  mv "$config_tmp" "$CONFIG"
+  say "wrote the default config.json"
+fi
+
+# --- 6. model provider -------------------------------------------------------
+step "[6/8] model provider"
+provider_route=""
+if [ "$OPT_MODELS_JSON_SET" = 1 ]; then
+  provider_route=models-json
+elif [ -n "$OPT_EXTENSION" ]; then
+  provider_route=extension
+elif [ "$INTERACTIVE" = 1 ]; then
+  printf '  1) add a compatible endpoint with a models.json file\n' >&2
+  printf '  2) copy a provider extension\n' >&2
+  printf '  3) skip this step for now\n' >&2
+  choice=$(ask "model provider [3]")
+  case "$choice" in
+    1) provider_route=models-json ;;
+    2) provider_route=extension ;;
+    *) provider_route=skip ;;
+  esac
+fi
+
+case "$provider_route" in
+  models-json)
+    if [ -f "$MODELS_FILE" ]; then
+      say "$MODELS_FILE exists; leaving it as it is"
+    elif [ -n "$OPT_MODELS_JSON" ]; then
+      [ -f "$OPT_MODELS_JSON" ] || die "no file at $OPT_MODELS_JSON"
+      cp "$OPT_MODELS_JSON" "$MODELS_FILE"
+      chmod 600 "$MODELS_FILE"
+      say "copied $OPT_MODELS_JSON to $MODELS_FILE"
+    else
+      # Nothing is guessed: the endpoint file is JSON with the provider, its
+      # address and its models, and an example is simpler to copy than to type.
+      say "no models.json file was given; write $MODELS_FILE yourself"
+      say "the example is in docs/install.md, in the workspace tree"
+    fi
+    ;;
+  extension)
+    if [ -z "$OPT_EXTENSION" ]; then
+      [ "$INTERACTIVE" = 1 ] || die "--extension needs the directory of the provider extension"
+      OPT_EXTENSION=$(ask "extension directory")
+      [ -n "$OPT_EXTENSION" ] || die "no extension directory"
+    fi
+    [ -d "$OPT_EXTENSION" ] || die "no directory at $OPT_EXTENSION"
+    extension_name=$(basename "$OPT_EXTENSION")
+    extension_target="$HOME_DIR/extensions/$extension_name"
+    if [ -e "$extension_target" ]; then
+      say "$extension_target exists; leaving it as it is"
+    else
+      cp -a "$OPT_EXTENSION" "$extension_target"
+      chmod -R go-rwx "$extension_target"
+      say "copied $OPT_EXTENSION to $extension_target"
+    fi
+    ;;
+  *)
+    say "not connecting a model provider in this step"
+    ;;
+esac
+
+# The credential is not written here. The daemon owns the login, and the web UI
+# is where it is entered, so the install needs no terminal for it.
+say "the daemon does not sign a provider in"
+say "after the daemon starts, open the web UI and sign in from \"Model login\" in the \"More actions\" menu"
+
+# --- 7. first model ----------------------------------------------------------
+step "[7/8] first model"
+vmodel_now=$(config_value agent.vmodel)
+if [ "$SKIP_MODEL" = 1 ]; then
+  say "not writing the first vmodels (--skip-model)"
+elif [ -n "$vmodel_now" ]; then
+  say "agent.vmodel is already $vmodel_now; leaving the vmodels as they are"
+else
+  say "models the catalog offers:"
+  node "$CLI" models || true
+
+  if [ -z "$OPT_MODEL" ] && [ "$INTERACTIVE" = 1 ]; then
+    OPT_PROVIDER=$(ask "provider" "$OPT_PROVIDER")
+    OPT_MODEL=$(ask "model id")
+  fi
+
+  if [ -z "$OPT_MODEL" ] || [ -z "$OPT_PROVIDER" ]; then
+    say "the first vmodels are not written, so the daemon starts in setup mode:"
+    say "the web page then asks for a model, and its model form writes the same vmodels"
+    say "or write them yourself when you have chosen a model:"
+    say "  node $CLI setup-model --provider <id> --model <id>"
+    say "(the list above shows the provider and model ids to use)"
+  else
+    setup_args=(setup-model --provider "$OPT_PROVIDER" --model "$OPT_MODEL")
+    if [ -n "$OPT_THINKING" ]; then setup_args+=(--thinking "$OPT_THINKING"); fi
+    if [ -n "$OPT_WORKER_PROVIDER" ]; then setup_args+=(--worker-provider "$OPT_WORKER_PROVIDER"); fi
+    if [ -n "$OPT_WORKER_MODEL" ]; then setup_args+=(--worker-model "$OPT_WORKER_MODEL"); fi
+    node "$CLI" "${setup_args[@]}"
+    say "wrote vmodels root, orchestrator and worker"
+  fi
+fi
+
+# --- 8. run mode -------------------------------------------------------------
+step "[8/8] run mode"
+if [ -z "$OPT_RUN" ]; then
+  if user_systemd_available; then RUN_DEFAULT=systemd; else RUN_DEFAULT=manual; fi
+  if [ "$INTERACTIVE" = 1 ]; then
+    OPT_RUN=$(ask "run mode: systemd or manual" "$RUN_DEFAULT")
+    case "$OPT_RUN" in
+      systemd|manual) ;;
+      *) die 'unknown run mode "'"$OPT_RUN"'"; use systemd or manual' ;;
+    esac
+  else
+    OPT_RUN="$RUN_DEFAULT"
+    say "no --run given; using $OPT_RUN"
+  fi
+fi
+
+NODE_BIN=""
+unit_path_value=""
+render_unit() {
+  # node, not `sed` and not `${text//@HOME@/$HOME}`: both read a `&` or a `\` in
+  # the replacement as something to expand, and an account's home is allowed to
+  # contain either. split/join is literal.
+  node -e '
+const fs = require("node:fs");
+const [template, home, homeDir, nodeBin, pathValue] = process.argv.slice(1);
+const values = [["@HOME@", home], ["@PI_SEC_HOME@", homeDir], ["@NODE@", nodeBin], ["@PATH@", pathValue]];
+let text = fs.readFileSync(template, "utf8");
+for (const [token, value] of values) text = text.split(token).join(value);
+process.stdout.write(text);
+' "$TEMPLATE" "$HOME" "$HOME_DIR" "$NODE_BIN" "$unit_path_value"
+}
+
+if [ "$OPT_RUN" = systemd ]; then
+  [ -f "$TEMPLATE" ] || die "no unit template at $TEMPLATE"
+  if [ -e "$UNIT_PATH" ]; then
+    say "$UNIT_PATH already exists; not overwriting it"
+    say "move it away and run this script again to write a new one"
+    exit 1
+  fi
+  NODE_BIN=$(command -v node)
+  case "$NODE_BIN" in
+    /*) ;;
+    *) NODE_BIN="$PWD/$NODE_BIN" ;;
+  esac
+  unit_path_value="$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin"
+  # systemd splits these lines on whitespace and has no escape for it in
+  # Environment= and ReadWritePaths=, so a home with a space would produce a
+  # unit that starts with the wrong values. Say that here, not at the first
+  # failed start.
+  case "$HOME$HOME_DIR$NODE_BIN" in
+    *[[:space:]]*)
+      die "the home or the node path contains a space, and a systemd unit cannot carry one; use --run manual instead"
+      ;;
+  esac
+  mkdir -p "$UNIT_DIR"
+  (umask 077 && render_unit >"$UNIT_PATH")
+  say "wrote $UNIT_PATH"
+  if grep -q '@[A-Z_]*@' "$UNIT_PATH"; then
+    rm -f "$UNIT_PATH"
+    die "the unit template kept a placeholder; nothing was installed"
+  fi
+
+  start_unit=0
+  if [ "$NO_START" = 1 ]; then
+    say "not registering or starting the unit (--no-start)"
+  elif [ "$INTERACTIVE" = 1 ]; then
+    if ask_yes_no "register and start the unit now?" "y"; then start_unit=1; fi
+  elif [ "$ASSUME_YES" = 1 ]; then
+    start_unit=1
+  else
+    say "not registering or starting the unit without --yes"
+  fi
+
+  if [ "$start_unit" = 1 ]; then
+    systemctl --user daemon-reload
+    systemctl --user enable --now pi-sec
+    say "the unit is registered and started"
+  else
+    say "register and start it with:"
+    say "  systemctl --user daemon-reload"
+    say "  systemctl --user enable --now pi-sec"
+  fi
+  say "to keep it running after you log out (needs privileges only if refused):"
+  say "  loginctl enable-linger $(whoami)"
+else
+  say "start the daemon in a terminal that stays open: tmux, screen, or a similar one"
+  if [ "$HOME_DIR" = "$HOME/.pi/sec" ]; then
+    say "  \"$SNAPSHOT/user-tools/run\""
+  else
+    say "  PI_SEC_HOME=\"$HOME_DIR\" \"$SNAPSHOT/user-tools/run\""
+  fi
+  say "the runner starts the daemon again when the web UI asks for a restart"
+fi
+
+# --- browser download and optional packages -----------------------------------
+# After step 8, so the questions of the earlier steps do not wait for a large
+# download. The helper reports the browser as it is after the download.
+browser_note=none
+if [ "$SKIP_BROWSER" = 1 ]; then
+  browser_note=skipped
+elif [ -f "$WORKSPACE/node_modules/playwright/cli.js" ]; then
+  browser_state=$(node "$OPTIONAL_DEPS" --tree "$WORKSPACE" --probe-browser 2>/dev/null || true)
+  if [ "$browser_state" = missing ]; then
+    step "browser download"
+    say "downloading the headless Chromium browser as this account; add --skip-browser to leave it out"
+    browser_note=attempted
+    # Playwright's own CLI file, not npx: npx may fetch a package from the npm
+    # registry. stderr joins stdout so Playwright's progress and errors show.
+    (cd "$WORKSPACE" && node "$WORKSPACE/node_modules/playwright/cli.js" install --only-shell chromium 2>&1) || true
+  fi
+fi
+deps_args=(--tree "$WORKSPACE" --browser-note "$browser_note")
+if [ "$OPT_RUN" = systemd ]; then deps_args+=(--daemon-path "$unit_path_value"); fi
+node "$OPTIONAL_DEPS" "${deps_args[@]}" || true
+
+# --- notice ------------------------------------------------------------------
+bind=$(config_value server.bind)
+port=$(config_value server.port)
+[ -n "$bind" ] || bind="127.0.0.1"
+[ -n "$port" ] || port="8787"
+
+# The web UI authenticates nobody itself, so the address it listens on is the
+# whole access control it has. Say which of the two safe arrangements is in
+# force, and say it about the address this home really uses.
+case "$bind" in
+  127.0.0.1|localhost|::1)
+    reach="The config binds to $bind, so only this machine reaches it. If another
+machine must, put an authenticating proxy in front of the port."
+    ;;
+  *)
+    reach="The config binds to $bind, so other machines reach it. Put an
+authenticating proxy in front of the port, or set server.bind to 127.0.0.1."
+    ;;
+esac
+
+cat <<EOF
+
+pi-sec install is complete.
+
+  web UI:  http://$bind:$port/
+  home:    $HOME_DIR
+
+The install signs no model provider in: after the daemon starts, open the web
+UI and sign in from "Model login" in the "More actions" menu. With no model
+chosen, the daemon runs in setup mode and the chat page shows how to choose one.
+
+The web UI has no login of its own. $reach
+EOF

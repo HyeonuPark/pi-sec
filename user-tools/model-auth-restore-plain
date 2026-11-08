@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Run this only while the pi-sec daemon is stopped. It rewrites ~/.pi/sec/auth.json.
+#
+# Rebuild auth.json with the credential values inline, read from the secret
+# store files that auth.json names (`{ "file": "model-auth.<provider>.<field>" }`).
+# This undoes the move of model credentials to the secret store, for a rollback
+# to code that only reads inline values.
+#
+# - It first copies the current auth.json to auth.json.bak-<YYYYMMDD-HHMMSS>-before-restore (0600).
+# - It writes the new auth.json through a temporary file and a rename, mode 0600.
+# - When that write succeeds, it deletes the copy and prints that it did. When the
+#   write fails, it keeps the copy and prints where the copy is, so that the file can
+#   be put back by hand.
+# - It leaves the secret files in place.
+# - It never prints a value: only provider ids, field names, file names and byte counts.
+#
+# Environment: PI_SEC_HOME (default ~/.pi/sec), PI_SEC_SECRETS_DIR (default
+# $PI_SEC_HOME/secrets; set it if config.json moves secrets.dir).
+#
+# Run as the pi-sec user. Never calls sudo.
+set -euo pipefail
+
+HOME_DIR="${PI_SEC_HOME:-$HOME/.pi/sec}"
+AUTH="$HOME_DIR/auth.json"
+SECRETS_DIR="${PI_SEC_SECRETS_DIR:-$HOME_DIR/secrets}"
+PID_FILE="$HOME_DIR/run/pi-sec.pid"
+
+echo "pi-sec model-auth restore: rebuild $AUTH with inline values from $SECRETS_DIR"
+
+if [ ! -f "$AUTH" ]; then
+  echo "error: no $AUTH" >&2
+  exit 1
+fi
+
+if [ -f "$PID_FILE" ]; then
+  PID="$(tr -dc '0-9' < "$PID_FILE" || true)"
+  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+    echo "error: the pi-sec daemon is running (pid $PID). Stop it first, then run this again." >&2
+    exit 1
+  fi
+fi
+
+echo "This rewrites $AUTH. Run it only while the pi-sec daemon is stopped."
+printf 'Type "restore" to continue: '
+read -r ANSWER || ANSWER=""
+if [ "$ANSWER" != "restore" ]; then
+  echo "aborted; nothing changed"
+  exit 1
+fi
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP="$AUTH.bak-$STAMP-before-restore"
+if [ -e "$BACKUP" ]; then
+  echo "error: $BACKUP already exists; wait a second and run again" >&2
+  exit 1
+fi
+( umask 077 && cp -p "$AUTH" "$BACKUP" )
+chmod 600 "$BACKUP"
+echo "backup: $BACKUP"
+
+AUTH="$AUTH" SECRETS_DIR="$SECRETS_DIR" node --input-type=module - <<'NODE'
+import { closeSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+
+const auth = process.env.AUTH;
+const secretsDir = process.env.SECRETS_DIR;
+const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+let data;
+try {
+  data = JSON.parse(readFileSync(auth, "utf8").replace(/^\uFEFF/, ""));
+} catch {
+  // The parser's message quotes the text; do not print it.
+  console.error("error: auth.json is not valid JSON; nothing changed");
+  process.exit(1);
+}
+
+const restored = [];
+for (const [provider, credential] of Object.entries(data)) {
+  if (typeof credential !== "object" || credential === null || Array.isArray(credential)) continue;
+  for (const [field, value] of Object.entries(credential)) {
+    const isReference =
+      typeof value === "object" && value !== null && !Array.isArray(value) &&
+      Object.keys(value).length === 1 && typeof value.file === "string";
+    if (!isReference) continue;
+    if (!NAME.test(value.file) || value.file === "env" || value.file.endsWith(".")) {
+      console.error(`error: ${provider}.${field} names an invalid file name; nothing changed`);
+      process.exit(1);
+    }
+    let text;
+    try {
+      text = readFileSync(join(secretsDir, value.file), "utf8");
+    } catch (error) {
+      console.error(`error: cannot read ${value.file} for ${provider}.${field} (${error.code ?? "error"}); nothing changed`);
+      process.exit(1);
+    }
+    const inline = text.replace(/\r?\n$/, "");
+    credential[field] = inline;
+    restored.push(`${provider}.${field} <- ${value.file} (${Buffer.byteLength(inline, "utf8")} bytes)`);
+  }
+}
+
+if (restored.length === 0) {
+  console.log("auth.json names no secret files; nothing changed");
+  process.exit(0);
+}
+
+const temp = join(dirname(auth), `.${basename(auth)}.restore-${process.pid}`);
+const fd = openSync(temp, "wx", 0o600);
+try {
+  writeSync(fd, JSON.stringify(data, null, 2));
+  fsyncSync(fd);
+} finally {
+  closeSync(fd);
+}
+renameSync(temp, auth);
+for (const line of restored) console.log(`restored ${line}`);
+console.log(`wrote ${auth} (0600). The secret files stay in place.`);
+NODE
+
+# The copy was only for undoing the write above, which succeeded: do not leave it
+# behind. A failed write exits before this line, and keeps the copy.
+rm -f "$BACKUP"
+echo "deleted backup: $BACKUP"

@@ -1,0 +1,92 @@
+#!/bin/bash
+# pi-sec install hook. Refuse a push that would send a commit which carries a
+# value of this install: a registered secret, the home path, the host name, a
+# word of the word list, an install value, or a shape. It also refuses a commit
+# whose author or committer is not in commit-identities.txt of the pi-sec home.
+# For each ref that the push updates, it takes the
+# commits that the remote does not hold yet. It scans every file that each of
+# those commits adds or changes, and each commit message, with
+# scripts/scan-tree.mjs of the work tree. A commit that adds a value and a later
+# commit of the same push that removes it is still refused. A push that deletes
+# a ref has no commit to scan. When the remote has no such ref, the commits that
+# no remote-tracking ref of that remote holds are scanned.
+# The hook prints the place and the kind of each finding, never the value and
+# never the line.
+home_dir="${PI_SEC_HOME:-$HOME/.pi/sec}"
+words="$home_dir/scan-words.txt"
+identities="$home_dir/commit-identities.txt"
+[ -r "$words" ] || { echo "pre-push: cannot read the word list $words" >&2; exit 1; }
+[ -r "$identities" ] || { echo "pre-push: cannot read the identity list $identities" >&2; exit 1; }
+check="$(git rev-parse --show-toplevel)/scripts/check-identity.mjs"
+[ -f "$check" ] || { echo "pre-push: the work tree holds no scripts/check-identity.mjs" >&2; exit 1; }
+top=$(git rev-parse --show-toplevel) || exit 1
+scan="$top/scripts/scan-tree.mjs"
+[ -f "$scan" ] || { echo "pre-push: the work tree holds no scripts/scan-tree.mjs" >&2; exit 1; }
+remote=$1
+zero=0000000000000000000000000000000000000000
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+
+# Keep the place and the kind of a finding. Drop the matched word and the line.
+filter() {
+  awk -v pre="$1" '/^    /{next} /^[^ ].*:[0-9]+: /{
+    split($0,a,": "); loc=a[1]; kind=$2;
+    if (kind=="word") print pre loc ": word";
+    else print pre loc ": " kind " " $3; next }
+    /^scan: /{ if ($0 !~ / 0 findings$/) print pre $0 }'
+}
+
+failed=0
+seen=" "
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  exclude=(--remotes="$remote")
+  if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    exclude+=("$remote_sha")
+  fi
+  commits=$(git rev-list --reverse "$local_sha" --not "${exclude[@]}") || { echo "pre-push: cannot list the commits of $local_ref" >&2; exit 1; }
+  for c in $commits; do
+    case "$seen" in *" $c "*) continue ;; esac
+    seen="$seen$c "
+    s=${c:0:7}
+    d="$tmp/tree/$s"; mkdir -p "$d" "$tmp/msg"
+    git log -1 --format=%B "$c" > "$tmp/msg/$s.txt" || exit 1
+    for role in author committer; do
+      if [ "$role" = author ]; then fmt='%an <%ae>'; else fmt='%cn <%ce>'; fi
+      ident=$(git log -1 --format="$fmt" "$c") || exit 1
+      if ! node "$check" --identities "$identities" "$ident" 2>/dev/null; then
+        failed=1
+        echo "pre-push: $s: $role is not in $identities"
+      fi
+    done
+    n=0
+    while IFS= read -r -d '' p; do
+      mkdir -p "$d/$(dirname "$p")"
+      git show "$c:$p" > "$d/$p" 2>/dev/null && n=$((n+1))
+    done < <(git diff-tree --root --no-commit-id -r -z --name-only --diff-filter=AMRCT -m "$c")
+    if [ "$n" -gt 0 ]; then
+      out=$(cd "$tmp" && node "$scan" --root "$d" --words "$words" 2>&1; echo "exit=$?")
+      code=${out##*exit=}
+      if [ "$code" != 0 ]; then
+        failed=1
+        printf '%s\n' "$out" | filter "$s " 
+        [ "$code" = 1 ] || echo "$s: the scan failed with exit $code"
+      fi
+    fi
+  done
+done
+if [ -d "$tmp/msg" ]; then
+  out=$(cd "$tmp" && node "$scan" --root "$tmp/msg" --words "$words" 2>&1; echo "exit=$?")
+  code=${out##*exit=}
+  if [ "$code" != 0 ]; then
+    failed=1
+    printf '%s\n' "$out" | filter "msg "
+    [ "$code" = 1 ] || echo "msg: the scan failed with exit $code"
+  fi
+fi
+if [ "$failed" != 0 ]; then
+  echo "pre-push: the push is refused; the commits above carry a value of this install" >&2
+  exit 1
+fi
+exit 0

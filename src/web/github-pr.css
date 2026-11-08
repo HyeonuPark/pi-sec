@@ -1,0 +1,560 @@
+/* Pull request dashboard — GitHub (Primer) flavored theme.
+
+   This is the stylesheet of the three dashboard pages (`/github/pr/`, one pull
+   request, one diff). It is the only stylesheet they load beside
+   `ui-highlight-github.css`, which the build copies from the highlight.js package
+   for code blocks. They do not load `theme.css` or `styles.css`: this theme is
+   the GitHub light one, with no dark palette, and it must not pick up pi-sec's
+   own tokens.
+
+   Two rules of the theme are that colour, type and spacing are the ones GitHub
+   uses, and that a label's colour is set from the script rather than from a
+   `style` attribute in the markup: the pages are served under
+   `style-src 'self'`, so an attribute would be refused and a Preact style object
+   is what draws it. */
+:root {
+  --fg: #1f2328;
+  --fg-muted: #59636e;
+  --bg: #ffffff;
+  --bg-subtle: #f6f8fa;
+  --border: #d1d9e0;
+  --accent: #0969da;
+  --success: #1a7f37;
+  --danger: #cf222e;
+  --attention: #9a6700;
+  --add-bg: #dafbe1;
+  --add-num-bg: #aceebb;
+  --del-bg: #ffdbd9;
+  --del-num-bg: #ffcecb;
+  --hunk-bg: #ddf4ff;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--bg);
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.hidden { display: none !important; }
+
+/* ---- top bar ---- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #f6f8fa;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.brand { font-weight: 600; font-size: 16px; color: var(--fg); }
+.brand:hover { text-decoration: none; color: var(--accent); }
+.repo-slug { color: var(--fg-muted); font-family: var(--mono); font-size: 12px; }
+.spacer { flex: 1; }
+.loading { color: var(--fg-muted); font-size: 12px; }
+
+.btn {
+  font: inherit;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f6f8fa;
+  color: var(--fg);
+  cursor: pointer;
+}
+.btn:hover { background: #eef1f4; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn-primary { background: #1f883d; border-color: #1f883d; color: #fff; }
+.btn-primary:hover { background: #1a7f37; }
+#sidebar-toggle { display: none; }
+
+.error-banner {
+  margin: 12px 16px;
+  padding: 10px 14px;
+  border: 1px solid #ff818266;
+  background: var(--del-bg);
+  color: var(--danger);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+main { padding: 16px; }
+.empty { color: var(--fg-muted); padding: 16px; }
+
+/* ---- PR list ---- */
+.pr-list { max-width: 1012px; margin: 0 auto; }
+.section { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 20px; overflow: hidden; }
+.section-header {
+  padding: 10px 16px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-count {
+  background: #818b981f;
+  border-radius: 2em;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.section-empty { padding: 12px 16px; color: var(--fg-muted); font-style: italic; }
+.pr-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  color: inherit;
+}
+.pr-row:last-child { border-bottom: none; }
+.pr-row:hover { background: var(--bg-subtle); text-decoration: none; }
+.pr-row .pr-icon { margin-top: 1px; }
+.pr-main { flex: 1; min-width: 0; }
+.pr-title { font-weight: 600; color: var(--fg); }
+.pr-row:hover .pr-title { color: var(--accent); }
+.pr-sub { color: var(--fg-muted); font-size: 12px; margin-top: 3px; }
+.pr-ci { font-size: 14px; width: 20px; text-align: center; margin-top: 1px; }
+
+.label-chip {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 2em;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  border: 1px solid transparent;
+  margin: 0 2px 2px 0;
+  vertical-align: middle;
+}
+
+.state-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 2em;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+}
+.state-open { background: #1a7f37; }
+.state-draft { background: #59636e; }
+.state-merged { background: #8250df; }
+.state-closed { background: #cf222e; }
+
+.ci-ok { color: var(--success); }
+.ci-fail { color: var(--danger); }
+.ci-pending { color: var(--attention); }
+
+/* ---- PR dashboard ---- */
+.dash { display: flex; gap: 24px; max-width: 1280px; margin: 0 auto; align-items: flex-start; }
+.dash-main { flex: 1; min-width: 0; }
+.dash-side {
+  width: 296px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 60px;
+}
+.dash-title { font-size: 22px; font-weight: 400; margin: 0 0 4px; }
+.dash-title .pr-number { color: var(--fg-muted); font-weight: 300; }
+.dash-meta-line { color: var(--fg-muted); margin-bottom: 16px; }
+
+.comment-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+.comment-header {
+  padding: 8px 16px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.comment-header .author { font-weight: 600; color: var(--fg); }
+.comment-body { padding: 12px 16px; overflow-wrap: break-word; }
+.comment-body pre, .thread-comment pre {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-left: 3px solid #afb8c1;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 0;
+}
+/* soft-wrap long code lines instead of scrolling horizontally.
+ * .thread-comment pre covers review-thread comments, whose md() output has no .comment-body wrapper */
+.comment-body pre, .thread-comment pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* copy button at the top-right corner of each markdown code block; equal top/bottom padding reserved so it never covers code */
+pre.has-copy { position: relative; padding-top: 34px; padding-bottom: 34px; }
+.code-copy { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; cursor: pointer; font-size: 13px; line-height: 1; opacity: 0.6; user-select: none; }
+.code-copy:hover, .code-copy:focus-visible { opacity: 1; background: var(--bg); border-color: var(--border); }
+.code-copy.copied { opacity: 1; background: var(--add-bg); border-color: var(--success); }
+/* full-width red/green for ```diff blocks, same tints as the diff views */
+.comment-body pre .hljs-deletion { display: inline-block; width: 100%; background: var(--del-bg); color: #82071e; }
+.comment-body pre .hljs-addition { display: inline-block; width: 100%; background: var(--add-bg); color: #116329; }
+.comment-body input[type="checkbox"] { margin: 0 4px 0 0; vertical-align: -2px; accent-color: var(--accent); }
+.comment-body table { display: block; max-width: 100%; overflow-x: auto; }
+.comment-body th { background: var(--bg-subtle); }
+.comment-body code { font-family: var(--mono); font-size: 85%; background: #818b981f; padding: 1px 4px; border-radius: 4px; }
+.comment-body pre code { background: none; padding: 0; }
+.comment-body .mention { font-weight: 600; color: var(--accent); }
+.comment-body h1, .comment-body h2, .comment-body h3,
+.comment-body h4, .comment-body h5, .comment-body h6 { margin: 14px 0 6px; line-height: 1.3; }
+.comment-body h1 { font-size: 18px; } .comment-body h2 { font-size: 16px; }
+.comment-body h3 { font-size: 14px; } .comment-body h4, .comment-body h5, .comment-body h6 { font-size: 13px; }
+.comment-body p { margin: 6px 0; }
+.comment-body p:first-child { margin-top: 0; }
+.comment-body p:last-child { margin-bottom: 0; }
+.comment-body ul, .comment-body ol { margin: 6px 0; padding-left: 24px; }
+.comment-body li { margin: 2px 0; }
+.comment-body li:has(> input[type="checkbox"]) { list-style: none; margin-left: -16px; }
+.comment-body hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.comment-body details { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+.comment-body summary { cursor: pointer; font-weight: 600; }
+.comment-body blockquote { margin: 4px 0; padding: 0 12px; color: var(--fg-muted); border-left: 3px solid var(--border); }
+.comment-body table { border-collapse: collapse; margin: 6px 0; }
+.comment-body td, .comment-body th { border: 1px solid var(--border); padding: 4px 10px; }
+.comment-body img { max-width: 100%; }
+.comment-body kbd { font-family: var(--mono); font-size: 85%; background: var(--bg-subtle); border: 1px solid var(--border); border-bottom-width: 3px; border-radius: 4px; padding: 1px 5px; }
+.review-state { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 2em; }
+.review-APPROVED { color: var(--success); background: var(--add-bg); }
+.review-CHANGES_REQUESTED { color: var(--danger); background: var(--del-bg); }
+.review-COMMENTED, .review-DISMISSED, .review-PENDING { color: var(--fg-muted); background: #818b981f; }
+
+.thread-card { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 16px; }
+.thread-card.thread-target { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.thread-path {
+  padding: 8px 12px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.thread-flags { margin-left: auto; display: flex; gap: 6px; }
+.flag { font-size: 11px; padding: 1px 8px; border-radius: 2em; border: 1px solid var(--border); color: var(--fg-muted); }
+.flag-resolved { color: var(--success); border-color: var(--success); }
+.flag-outdated { color: var(--attention); border-color: var(--attention); }
+.thread-file-note { padding: 8px 12px; color: var(--fg-muted); font-size: 12px; border-bottom: 1px solid var(--border); }
+.thread-comments { padding: 8px 12px; }
+.thread-comment { padding: 8px 4px; border-bottom: 1px solid #d1d9e066; }
+.thread-comment:last-child { border-bottom: none; }
+.thread-comment .meta { font-size: 12px; color: var(--fg-muted); margin-bottom: 4px; }
+.thread-comment .meta .author { font-weight: 600; color: var(--fg); }
+.thread-toggle { cursor: pointer; padding: 8px 12px; color: var(--fg-muted); font-size: 12px; background: none; border: none; width: 100%; text-align: left; font-family: inherit; }
+.thread-toggle:hover { color: var(--accent); }
+
+.reaction-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.comment-card > .reaction-bar { margin: 0; padding: 0 16px 12px; }
+.reaction-pill, .reaction-add { font: inherit; font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--border); border-radius: 2em; background: var(--bg); cursor: pointer; }
+.reaction-pill:hover, .reaction-add:hover { background: var(--bg-subtle); }
+.reaction-pill.mine { border-color: var(--accent); background: var(--hunk-bg); }
+.reaction-add { color: var(--fg-muted); }
+.reaction-picker { display: inline-flex; gap: 2px; }
+.reaction-choice { background: none; border: none; cursor: pointer; font-size: 16px; padding: 2px 4px; border-radius: 6px; }
+.reaction-choice:hover { background: var(--bg-subtle); }
+.reaction-choice.mine { background: var(--hunk-bg); }
+
+.reply-box { padding: 8px 12px; border-top: 1px solid var(--border); background: var(--bg-subtle); border-radius: 0 0 6px 6px; }
+.reply-box textarea {
+  width: 100%;
+  min-height: 60px;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+  background: var(--bg);
+}
+.reply-box textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.reply-actions { margin-top: 6px; text-align: right; }
+.edit-btn { margin-left: auto; padding: 0 8px; font-size: 12px; }
+.thread-comment .meta .edit-btn { margin-left: 8px; }
+.edit-box { padding: 8px 12px; background: var(--bg-subtle); }
+.edit-box textarea {
+  width: 100%;
+  min-height: 140px;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.edit-box textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.edit-actions { margin-top: 6px; text-align: right; }
+.edit-actions .btn + .btn { margin-left: 6px; }
+.resolve-row { padding: 8px 12px; border-top: 1px solid var(--border); text-align: right; }
+
+/* mini diff hunk inside a thread */
+.hunk-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; line-height: 20px; }
+.hunk-table td { padding: 0 8px; white-space: pre-wrap; word-break: break-all; }
+.hunk-table .num { width: 1%; min-width: 36px; text-align: right; color: var(--fg-muted); user-select: none; }
+.hunk-table tr.l-add td { background: var(--add-bg); }
+.hunk-table tr.l-del td { background: var(--del-bg); }
+.hunk-table tr.l-hunk td { background: var(--hunk-bg); color: var(--fg-muted); }
+.hunk-table .sign { width: 1%; min-width: 20px; text-align: center; user-select: none; color: var(--fg-muted); }
+.hunk-wrap { max-height: 300px; overflow: auto; border-bottom: 1px solid var(--border); }
+
+/* sidebar */
+.side-box { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 16px; }
+.side-section { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.side-section:last-child { border-bottom: none; }
+.side-section h4 { margin: 0 0 8px; font-size: 12px; color: var(--fg-muted); font-weight: 600; text-transform: uppercase; }
+.side-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 13px; }
+.side-row .k { color: var(--fg-muted); }
+.diff-stat-add { color: var(--success); font-weight: 600; }
+.diff-stat-del { color: var(--danger); font-weight: 600; }
+.check-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.check-row .check-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-fold { background: none; border: none; padding: 0; font: inherit; color: inherit; text-transform: inherit; cursor: pointer; }
+.side-fold:hover { color: var(--accent); }
+.side-fold-body.hidden { display: none; }
+.side-list { max-height: 320px; overflow-y: auto; }
+.commit-row { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; padding: 4px 0; font-size: 13px; color: inherit; }
+.commit-row:hover { background: var(--bg-subtle); text-decoration: none; }
+.commit-oid { font-family: var(--mono, monospace); color: var(--fg-muted); }
+.commit-headline { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-meta { grid-column: 2; font-size: 12px; color: var(--fg-muted); }
+.commit-more { flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.diff-link-btn { display: block; text-align: center; padding: 6px; border: 1px solid var(--border); border-radius: 6px; font-weight: 600; }
+.diff-link-btn:hover { background: var(--bg-subtle); text-decoration: none; }
+
+/* ---- diff view ---- */
+.diff-layout {
+  display: flex;
+  gap: 0;
+  height: calc(100vh - 53px);
+  margin: -16px;
+}
+.diff-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  overflow: auto;              /* scrolls on its own, both axes */
+  padding: 12px 8px;
+  background: var(--bg-subtle);
+}
+.diff-sidebar .tree { min-width: max-content; }
+.tree-dir { font-weight: 600; color: var(--fg-muted); padding: 2px 4px; cursor: pointer; white-space: nowrap; user-select: none; }
+.tree-dir:hover { color: var(--fg); }
+.tree-file { display: flex; gap: 6px; align-items: center; padding: 2px 4px; border-radius: 6px; white-space: nowrap; cursor: pointer; font-family: var(--mono); font-size: 12px; }
+.tree-file:hover { background: #818b981f; }
+.tree-file.active { background: var(--hunk-bg); font-weight: 600; }
+.tree-file.active::before { content: ""; position: absolute; left: 0; width: 3px; height: 18px; background: var(--accent); border-radius: 2px; }
+.tree-file { position: relative; }
+.tree-file .fstat { font-size: 11px; font-weight: 700; width: 12px; text-align: center; }
+.tree-file .tree-stats { font-size: 11px; white-space: nowrap; }
+/* The file's own name in a tree row. The row is a flex box with a gap, and the
+   name is the part that may be long: it keeps its natural width, so the
+   sidebar's `min-width: max-content` scrolls a deep tree sideways rather than
+   squeezing the name into an ellipsis. */
+.tree-file .tree-name { flex: 0 0 auto; white-space: nowrap; }
+.fstat-A { color: var(--success); }
+.fstat-D { color: var(--danger); }
+.fstat-M { color: var(--attention); }
+.fstat-R { color: var(--accent); }
+.tree-children { margin-left: 14px; }
+
+.diff-content { flex: 1; overflow: auto; padding: 16px; }
+.diff-head { margin: 0 0 16px; font-size: 18px; font-weight: 600; }
+.diff-head .muted { color: var(--fg-muted); font-weight: 400; font-size: 13px; font-family: var(--mono); }
+
+.file-diff { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 16px; overflow: hidden; }
+.file-header {
+  position: sticky;
+  top: -17px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.file-header .stats { margin-left: auto; white-space: nowrap; }
+
+.file-collapse { background: none; border: none; cursor: pointer; font: inherit; font-size: 12px; color: var(--fg-muted); padding: 0 2px; user-select: none; }
+.file-collapse:hover { color: var(--accent); }
+.file-diff.collapsed > :not(.file-header) { display: none; }
+
+.split-grid { display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px minmax(0, 1fr); font-family: var(--mono); font-size: 12px; line-height: 20px; }
+.split-grid .pane, .split-grid .line { display: contents; }
+.split-grid .num, .split-grid .code-left, .split-grid .code-right, .split-grid .wide-row { grid-row: var(--row); }
+.split-grid .pane-left .num { grid-column: 1; }
+.split-grid .code-left { grid-column: 2; border-right: 1px solid var(--border); }
+.split-grid .pane-right .num { grid-column: 3; }
+.split-grid .code-right { grid-column: 4; }
+.split-grid .wide-row { grid-column: 1 / -1; }
+.split-grid .num, .split-grid .code-left, .split-grid .code-right { padding: 0 8px; white-space: pre-wrap; word-break: break-all; min-width: 0; }
+.split-grid .num {
+  text-align: right;
+  color: var(--fg-muted);
+  user-select: none;
+  background: var(--bg-subtle);
+  border-right: 1px solid #d1d9e066;
+}
+.split-grid .num[data-n] { cursor: pointer; }
+.split-grid .num[data-n]:hover { color: var(--accent); font-weight: 600; }
+.split-grid .num.sel { background: #0969da; color: #fff; }
+.split-grid .num .line-bubble { display: inline-block; padding: 0 4px; margin: 0 -4px; border-radius: 2em; cursor: pointer; }
+.split-grid .num .line-bubble.live { background: var(--accent); color: #fff; }
+.split-grid .num .line-bubble.resolved { background: var(--fg-muted); color: #fff; }
+/* One highlighted line of code: the span the highlighter's markup is written
+   into, inside a `.code-left` or `.code-right` cell.
+   It stays an inline box on purpose. The darker stretch that marks what changed
+   inside the line is wrapped as a range over this element's own text nodes, and a
+   block box here would take the wrapping of the line away from the cell. The two
+   wrap rules repeat what the code cell already sets, so the span wraps a long
+   line the same way whether or not a rule above it still does. The padding, the
+   font and the line height stay the cell's. */
+.split-grid .code-html { display: inline; white-space: pre-wrap; word-break: break-all; }
+.split-grid .cell-add { background: var(--add-bg); }
+.split-grid .num-add { background: var(--add-num-bg); color: #1f2328; }
+.split-grid .cell-del { background: var(--del-bg); }
+.split-grid .num-del { background: var(--del-num-bg); color: #1f2328; }
+.split-grid .cell-empty { background: #f0f2f5; }
+/* The number of a line that exists on one side of the change only: the cell is
+   there, the digits are not. It keeps the gutter's grey, `var(--bg-subtle)`, which
+   is the colour every `.split-grid .num` already has, so an added or removed block
+   keeps one unbroken gutter beside its two code cells (the empty one is
+   `.cell-empty`). The rule names the class rather than leaving it to inherit, so
+   the empty cell can be changed here without touching the numbers of real lines. */
+.split-grid .num.num-empty { background: var(--bg-subtle); }
+.split-grid .seg-del { background: #ff818266; border-radius: 2px; }
+.split-grid .seg-add { background: #abf2bc; border-radius: 2px; }
+.split-grid .expand-row {
+  background: var(--hunk-bg);
+  color: var(--accent);
+  text-align: center;
+  padding: 2px;
+  font-size: 12px;
+  user-select: none;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.expand-row .exp { cursor: pointer; padding: 0 14px; }
+.expand-row .exp:hover { text-decoration: underline; font-weight: 600; }
+
+/* drag-to-review comment form */
+.review-form { padding: 10px 12px; background: var(--bg-subtle); border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.review-form-title { font-size: 12px; color: var(--fg-muted); margin-bottom: 6px; }
+.review-form textarea {
+  width: 100%; min-height: 70px; font: inherit; font-size: 13px; padding: 8px;
+  border: 1px solid var(--border); border-radius: 6px; resize: vertical; background: var(--bg);
+}
+.review-form textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.review-form .reply-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+.review-form-ok { color: var(--success); font-weight: 600; }
+
+/* pending review comments + finish-review panel */
+.pending-comment {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 12px; background: #fff8c5; border-top: 1px solid #d4a72c66;
+  border-bottom: 1px solid #d4a72c66;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px;
+}
+.pending-badge {
+  font-size: 11px; font-weight: 600; color: #7d4e00;
+  border: 1px solid #d4a72c; border-radius: 2em; padding: 0 8px; flex-shrink: 0;
+}
+.pending-loc { color: var(--fg-muted); font-size: 12px; flex-shrink: 0; }
+.pending-body { flex: 1; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pending-remove { font-size: 12px; padding: 1px 8px; flex-shrink: 0; }
+
+/* stale row: an outdated thread's review-time hunk, placed as a full-width grid row */
+.split-grid .stale-row { background: var(--bg-subtle); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; }
+.stale-head { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px; flex-wrap: wrap; }
+.stale-loc { color: var(--fg-muted); font-size: 12px; }
+.stale-toggle { cursor: pointer; background: none; border: none; padding: 0; font: inherit; font-size: 12px; color: var(--fg-muted); }
+.stale-toggle:hover { color: var(--accent); }
+.stale-link { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.stale-row .hunk-wrap { border-top: 1px solid var(--border); border-bottom: none; }
+.stale-row.resolved .flag-outdated { color: var(--fg-muted); border-color: var(--border); }
+
+/* fixed overlay: never participates in the diff pane's layout */
+.review-bar { position: fixed; top: 61px; right: 28px; z-index: 15; }
+.review-bar-btn.has-pending { background: #1f883d; border-color: #1f883d; color: #fff; font-weight: 600; }
+.review-panel {
+  position: absolute; right: 0; top: 36px; width: 340px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 8px 24px #8c959f33; padding: 12px; z-index: 30;
+}
+.review-panel-title { font-weight: 600; margin-bottom: 2px; }
+.review-panel-count { color: var(--fg-muted); font-size: 12px; margin-bottom: 8px; }
+.review-panel textarea {
+  width: 100%; min-height: 70px; font: inherit; font-size: 13px; padding: 8px;
+  border: 1px solid var(--border); border-radius: 6px; resize: vertical; margin-bottom: 8px;
+}
+.review-panel textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.review-event { display: block; padding: 2px 0; font-size: 13px; cursor: pointer; }
+.review-event input { accent-color: var(--accent); margin-right: 6px; }
+.review-panel .reply-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+
+/* diff sidebar nav */
+.side-nav { display: flex; gap: 6px; margin-bottom: 10px; position: sticky; left: 0; }
+.side-nav-btn { flex: 1; text-align: center; font-size: 12px; font-weight: 600; }
+.side-nav-btn:hover { text-decoration: none; }
+.binary-note { padding: 16px; color: var(--fg-muted); font-style: italic; }
+
+/* The three sizes a disk-limit refusal measured, under the sentence that says no
+   diff was fetched. `.empty` already greys the box and pads it; this line is the
+   one row of facts, in the type the diff header uses for its two commits
+   (`.diff-head .muted`): mono, 12px, muted. The margin is what keeps it off the
+   sentence above and the advice below. */
+.disk-limit-sizes { margin: 8px 0; font-family: var(--mono); font-size: 12px; color: var(--fg-muted); }
+
+/* ---- mobile ---- */
+@media (max-width: 768px) {
+  /* keep the topbar exactly one line so the drawer's top: 53px stays correct */
+  .topbar { gap: 8px; }
+  .brand { white-space: nowrap; }
+  .repo-slug { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar .btn { flex-shrink: 0; white-space: nowrap; }
+
+  body:has(.dash-side, .diff-sidebar) #sidebar-toggle { display: inline-block; }
+  .dash-side, .diff-sidebar { display: none; }
+  body.sidebar-open .dash-side,
+  body.sidebar-open .diff-sidebar {
+    display: block;
+    position: fixed;
+    top: 53px;
+    right: 0;
+    bottom: 0;
+    width: min(320px, 85vw);
+    overflow: auto;
+    padding: 12px;
+    background: var(--bg-subtle);
+    border-left: 1px solid var(--border);
+    border-right: none;
+    box-shadow: -4px 0 12px #8c959f33;
+    z-index: 25;
+  }
+}
+/* ---- end mobile ---- */
+
+.commit-head .commit-body { margin: 8px 0 0; padding: 8px 12px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; font-weight: 400; white-space: pre-wrap; overflow-wrap: anywhere; }
+.commit-head .commit-author { margin-top: 2px; }

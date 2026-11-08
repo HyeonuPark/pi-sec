@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Export one commit of a repository as a new repository with a single commit.
+#
+# usage: user-tools/export-public --ref <ref> --out <new directory>
+#          --identity '<Name> <email>' --message <text>
+#          [--bundle <file>] [--date YYYY-MM-DD] [--repository <path>]
+#
+# The repository is the one that holds this script, unless one is named. Either way the top of that repository is used. The
+# script makes `<out>` with `git init -b main`, installs the hooks of the ref
+# into it, writes the files of the ref with `git archive`, and commits them as
+# `--identity` (author and committer) on `--date` at 00:00:00 +0000, so the
+# commit shows no time of day. The date is the current UTC date by default.
+#
+# After the commit it checks, apart from the hooks: one commit with no parent on
+# the one branch `main` and no tag; the tree id equals the tree id of the ref;
+# author, committer and both dates are as asked; the identity is listed in
+# `commit-identities.txt` of the pi-sec home; and the scan of the exported tree
+# and of the commit message reports 0 findings, with the word list and the
+# machine values of this install on.
+#
+# With `--bundle <file>` it also writes a bundle of `main`, verifies it, and
+# clones it to a temporary directory whose one commit must have the same tree id.
+#
+# On a failure it prints `export-public: refused: <reason>`, keeps `<out>` for
+# inspection, and exits 1. It never adds a remote and never pushes.
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
+USAGE="usage: $0 --ref <ref> --out <new directory> --identity '<Name> <email>' --message <text> [--bundle <file>] [--date YYYY-MM-DD] [--repository <path>]"
+ref="" out="" identity="" message="" bundle="" date="" repo=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --ref|--out|--identity|--message|--bundle|--date|--repository)
+      [ "$#" -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
+      case "$1" in
+        --ref) ref=$2 ;; --out) out=$2 ;; --identity) identity=$2 ;; --message) message=$2 ;;
+        --bundle) bundle=$2 ;; --date) date=$2 ;; --repository) repo=$2 ;;
+      esac
+      shift 2 ;;
+    *) echo "$USAGE" >&2; exit 2 ;;
+  esac
+done
+[ -n "$ref" ] && [ -n "$out" ] && [ -n "$identity" ] && [ -n "$message" ] || { echo "$USAGE" >&2; exit 2; }
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+refuse() {
+  echo "export-public: refused: $1" >&2
+  exit 1
+}
+
+# Use the top of the repository: a subdirectory would hide `user-tools` from git archive.
+[ -n "$repo" ] || repo=$script_dir
+repo=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) || refuse "not inside a git repository: $repo"
+
+case "$identity" in
+  *" <"*">") ;;
+  *) refuse "the identity must be 'Name <email>'" ;;
+esac
+name=${identity%% <*}
+email=${identity#*<}
+email=${email%>}
+if [ -z "$date" ]; then date=$(TZ=UTC date +%Y-%m-%d); fi
+case "$date" in
+  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+  *) refuse "the date must be YYYY-MM-DD" ;;
+esac
+commit_date="${date}T00:00:00+0000"
+
+home_dir="${PI_SEC_HOME:-$HOME/.pi/sec}"
+words="$home_dir/scan-words.txt"
+identities="$home_dir/commit-identities.txt"
+
+commit=$(git -C "$repo" rev-parse --verify --quiet "$ref^{commit}") || refuse "cannot resolve $ref in $repo"
+tree=$(git -C "$repo" rev-parse "$commit^{tree}")
+[ ! -e "$out" ] || refuse "$out exists"
+if [ -n "$bundle" ] && [ -e "$bundle" ]; then refuse "$bundle exists"; fi
+[ -r "$words" ] || refuse "cannot read the word list $words"
+[ -r "$identities" ] || refuse "cannot read the identity list $identities"
+
+mkdir -p "$(dirname "$out")"
+git init --quiet -b main "$out"
+out=$(cd "$out" && pwd -P)
+
+# Install the hooks of the ref, so the commit below and a later push from `out`
+# run the same checks.
+mkdir "$tmp/ref"
+git -C "$repo" archive "$commit" user-tools | tar -x -C "$tmp/ref"
+"$tmp/ref/user-tools/install-git-hooks" "$out" >/dev/null || refuse "cannot install the hooks of $ref"
+
+git -C "$repo" archive "$commit" | tar -x -C "$out"
+git -C "$out" add -A
+if ! output=$(TZ=UTC GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_AUTHOR_DATE="$commit_date" \
+    GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" GIT_COMMITTER_DATE="$commit_date" \
+    git -C "$out" commit --quiet -m "$message" 2>&1); then
+  # Print the place and the kind of each finding, never the value or the line.
+  printf '%s\n' "$output" | awk '/^[^ ].*:[0-9]+: /{ split($0,a,": "); if ($2=="word") print a[1] ": word"; else print a[1] ": " $2 " " $3; next } /^[a-z-]+: /{ print }' >&2
+  refuse "the commit was refused by a hook"
+fi
+
+# Checks that do not rely on the hooks.
+[ "$(git -C "$out" rev-list --count --all)" = 1 ] || refuse "the repository does not hold exactly one commit"
+[ -z "$(git -C "$out" rev-list --max-parents=0 --all | sed -n 2p)" ] || refuse "more than one root commit"
+[ "$(git -C "$out" rev-list --parents -n 1 HEAD | wc -w)" = 1 ] || refuse "the commit has a parent"
+[ "$(git -C "$out" for-each-ref --format='%(refname)')" = "refs/heads/main" ] || refuse "the repository holds a ref other than main"
+[ -z "$(git -C "$out" tag)" ] || refuse "the repository holds a tag"
+[ "$(git -C "$out" rev-parse 'HEAD^{tree}')" = "$tree" ] || refuse "the tree id differs from the tree id of $ref"
+[ "$(git -C "$out" log -1 --format='%an <%ae>')" = "$identity" ] || refuse "the author differs from the identity"
+[ "$(git -C "$out" log -1 --format='%cn <%ce>')" = "$identity" ] || refuse "the committer differs from the identity"
+[ "$(git -C "$out" log -1 --format='%ad|%cd' --date=raw)" = "$(date -u -d "$commit_date" +%s) +0000|$(date -u -d "$commit_date" +%s) +0000" ] || refuse "a date differs from the asked date or does not end in +0000"
+node "$out/scripts/check-identity.mjs" --identities "$identities" "$identity" 2>/dev/null || refuse "the identity is not in $identities"
+scan_out=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE node "$out/scripts/scan-tree.mjs" --root "$out" --words "$words" 2>&1) ||
+  { printf '%s\n' "$scan_out" | grep -E '^[^ ].*:[0-9]+: ' | awk '{print $1, $2, $3}' >&2 || true; refuse "the scan of the exported tree found a value"; }
+mkdir "$tmp/msg"
+git -C "$out" log -1 --format=%B > "$tmp/msg/message.txt"
+node "$out/scripts/scan-tree.mjs" --root "$tmp/msg" --words "$words" >/dev/null 2>&1 || refuse "the scan of the commit message found a value"
+
+if [ -n "$bundle" ]; then
+  git -C "$out" bundle create "$bundle" HEAD main >/dev/null 2>&1 || refuse "cannot create the bundle"
+  git -C "$out" bundle verify "$bundle" >/dev/null 2>&1 || refuse "the bundle does not verify"
+  git clone --quiet "$bundle" "$tmp/clone" >/dev/null 2>&1 || refuse "cannot clone the bundle"
+  [ "$(git -C "$tmp/clone" rev-list --count --all)" = 1 ] || refuse "the clone of the bundle does not hold one commit"
+  [ "$(git -C "$tmp/clone" rev-parse refs/heads/main^{tree})" = "$tree" ] || refuse "the clone of the bundle has another tree id"
+fi
+
+echo "export-public: commit $(git -C "$out" rev-parse HEAD)"
+echo "export-public: tree $tree"
+echo "export-public: files $(git -C "$out" ls-files | wc -l | tr -d ' ')"
+[ -z "$bundle" ] || echo "export-public: bundle $bundle"

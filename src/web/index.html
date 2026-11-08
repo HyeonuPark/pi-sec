@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- The external mount prefix, stamped by the server (see src/server/proxy.ts). -->
+    <meta name="pi-sec-base" content="" />
+    <!-- The harness time zone, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-timezone" content="" />
+    <!-- The personality's name, stamped by the server when it serves this page.
+         It is what the root conversation is called; an empty one leaves the
+         page with its own name (see the chat page). -->
+    <meta name="pi-sec-name" content="" />
+    <title>pi-sec</title>
+    <link rel="stylesheet" href="{{base}}/theme.css" />
+    <link rel="stylesheet" href="{{base}}/styles.css" />
+  </head>
+  <body data-sidebar="open" data-report="closed" data-snippet="closed" data-login="closed">
+    <header class="app-header">
+      <div class="header-left">
+        <!-- The chat this page shows, in the place the app's name used to be: a
+             reader needs to know which conversation is on screen, and that used
+             to be the one thing the top bar never said. The root conversation
+             shows the personality's name, or "pi-sec" when the personality has
+             none; a focused chat shows its title, with a mark in front of it.
+             Pressing the title asks for a new one, which a focused chat takes
+             until it is archived. -->
+        <div class="brand">
+          <!-- The mark every companion page carries beside its own name, so the
+               pages read as one app. It is not a press. -->
+          <span class="brand-mark" aria-hidden="true">π</span>
+          <span id="chat-mark" class="chat-mark hidden">Focused chat</span>
+          <button id="chat-title" class="chat-title" type="button" title="pi-sec" disabled>pi-sec</button>
+        </div>
+      </div>
+      <div class="header-status">
+        <span id="connection" class="pill pill-offline" role="status">offline</span>
+        <!-- The activity ring: it turns while the agent is working. Blue while the
+             model is being waited on or is answering, green while a tool runs.
+             Hidden when nothing is running, so it costs no room at rest. Marked
+             aria-hidden because it only repeats what the transcript shows. -->
+        <span id="activity" class="spinner hidden" aria-hidden="true"></span>
+        <span id="model" class="pill pill-muted">—</span>
+        <button id="restart-banner" class="banner hidden" type="button"></button>
+        <!-- The config on disk failed to load; the daemon is still on the last
+             one that worked. Filled in from /api/admin/status. -->
+        <button id="config-banner" class="banner banner-error hidden" type="button"></button>
+        <!-- This page did not carry a mount stamp, so its URL has to be skipped to
+             be read. Shown instead of building wrong URLs quietly. -->
+        <button id="mount-banner" class="banner banner-error hidden" type="button"></button>
+        <!-- The root model's provider has no credential. Read from
+             /api/admin/model-login/providers on load: the two chat GET routes
+             answer 503 on a daemon whose root preparation failed, and a fresh
+             install is exactly that daemon. Pressing the line opens the login
+             panel. -->
+        <button id="credential-banner" class="banner hidden" type="button"></button>
+        <!-- A provider refused model requests for usage, so the conversations
+             that ran on it are held. Filled in from /api/admin/status and re-read
+             on `usage_hold_changed`; pressing it opens the usage page. -->
+        <button id="usage-banner" class="banner banner-error hidden" type="button"></button>
+      </div>
+      <!-- The work panel is the bar's right-hand column on a wide screen and a
+           drawer over the transcript on a narrow one, so its press sits at that
+           same edge: last in the bar, after the status. -->
+      <button
+        id="sidebar-toggle"
+        class="icon-button"
+        type="button"
+        aria-label="Toggle the work panel"
+        aria-expanded="true"
+        aria-controls="sidebar"
+      >
+        ☰
+      </button>
+    </header>
+
+    <div id="sidebar-scrim" class="scrim"></div>
+
+    <main class="app-main">
+      <!-- The report panel. It covers the left of the transcript instead of taking
+           a column of its own, so opening it never reflows the conversation. It
+           is filled in from /api/reports when an inbox item links to one. -->
+      <aside id="report-pane" class="report-pane" aria-label="Report">
+        <div class="report-pane-head">
+          <div class="report-pane-titles">
+            <h2 id="report-pane-title" class="report-pane-title">Report</h2>
+            <div id="report-pane-meta" class="report-pane-meta"></div>
+          </div>
+          <div class="report-pane-actions">
+            <a id="report-pane-page" class="button" href="{{base}}/report" target="_blank" rel="noopener noreferrer">Open page</a>
+            <button id="report-pane-close" class="button" type="button" aria-label="Close the report panel">✕</button>
+          </div>
+        </div>
+        <div id="report-pane-body" class="report-pane-body report-body"></div>
+        <!-- The same feedback control the report viewer carries, filled in by
+             the chat page when the panel opens. It is empty here on purpose: the
+             form is built by the component the two surfaces share, so there is
+             one place where a press means something. -->
+        <div id="report-pane-feedback" class="report-pane-feedback"></div>
+      </aside>
+
+      <!-- The snippet panel. It shares the report panel's slot, so only one of
+           the two is ever open. In the ordinary mode the body becomes a
+           text/plain attachment: the agent reads it only if it looks, so the
+           operator can keep a long note out of the context. With the secret
+           switch on, the same form writes a file under the secrets directory
+           instead, and the body never becomes a message. -->
+      <aside id="snippet-pane" class="snippet-pane" aria-label="Text snippet">
+        <div class="snippet-pane-head">
+          <h2 class="snippet-pane-title">Text snippet</h2>
+          <button id="snippet-pane-close" class="button" type="button" aria-label="Close the snippet panel">✕</button>
+        </div>
+        <label class="snippet-field">
+          <span class="snippet-label">Name</span>
+          <input id="snippet-name" class="snippet-input" type="text" placeholder="snippet" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="snippet-switch">
+          <input id="snippet-secret" type="checkbox" />
+          <span>Store as a secret</span>
+        </label>
+        <p id="snippet-hint" class="snippet-hint">The body goes with your next message as a text file.</p>
+        <label class="snippet-field snippet-field-body">
+          <span class="snippet-label">Body</span>
+          <textarea id="snippet-body" class="snippet-body" rows="8" spellcheck="false"></textarea>
+        </label>
+        <div class="snippet-actions">
+          <button id="snippet-submit" class="button button-primary" type="button">Attach</button>
+        </div>
+        <p id="snippet-error" class="snippet-error" role="status"></p>
+      </aside>
+
+      <!-- The model login panel. It shares the snippet and report panel's slot.
+           The daemon holds one login at a time: the form starts it, the area
+           below it shows what the provider asks, and nothing typed here is kept
+           anywhere but in the field. -->
+      <aside id="login-pane" class="login-pane" aria-label="Model login">
+        <div class="login-pane-head">
+          <h2 class="login-pane-title">Model login</h2>
+          <button id="login-pane-close" class="button" type="button" aria-label="Close the login panel">✕</button>
+        </div>
+        <p id="login-intro" class="login-hint">Choose a provider and how to sign in.</p>
+        <label class="login-field">
+          <span class="login-label">Provider</span>
+          <select id="login-provider" class="login-select"></select>
+        </label>
+        <label class="login-field">
+          <span class="login-label">Login type</span>
+          <select id="login-type" class="login-select"></select>
+        </label>
+        <p id="login-provider-note" class="login-hint"></p>
+        <div class="login-actions">
+          <button id="login-start" class="button button-primary" type="button">Start login</button>
+          <button id="login-cancel" class="button button-danger hidden" type="button">Cancel</button>
+        </div>
+        <div id="login-events" class="login-events"></div>
+        <div id="login-prompt" class="login-prompt"></div>
+        <p id="login-status" class="login-status" role="status"></p>
+        <p id="login-error" class="login-error" role="status"></p>
+      </aside>
+
+      <section class="transcript-pane">
+        <section id="setup-card" class="setup-card hidden" aria-label="Model setup"></section>
+        <div id="transcript" class="transcript" aria-live="polite" aria-label="Conversation transcript"></div>
+        <div id="compaction-status" class="compaction hidden" role="status">compressing context…</div>
+      </section>
+
+      <aside id="sidebar" class="sidebar" aria-label="Work">
+        <!-- The panels sit in the order the operator reads them: what waits on
+             an answer first, then the inbox, then the job tree. The Notes panel
+             keeps its place right after the inbox; it is hidden until the daemon
+             has something to say. -->
+        <section class="panel">
+          <h2>Awaiting you</h2>
+          <div id="queries" class="queries"></div>
+        </section>
+        <!-- The inbox, the job tree and the machines fold from their headings:
+             the name and a caret are one button, and the stylesheet hides what
+             the panel holds while `body[data-folded]` names it. The heading
+             stays on screen, with the unread count, so a folded panel still says
+             whether anything waits. `hide all` goes while folded: it hides a list
+             the operator cannot see. -->
+        <section class="panel" data-panel="inbox">
+          <h2>
+            <button type="button" id="inbox-fold" class="panel-fold" aria-expanded="true" aria-controls="inbox"><span class="panel-fold-label">Inbox</span><span class="panel-fold-caret" aria-hidden="true"><svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M2.5 4.5 6 8.5l3.5-4z" fill="currentColor" /></svg></span></button>
+            <span id="inbox-count" class="badge">0</span><button type="button" id="inbox-hide-all" class="panel-action" title="Hide every inbox item">hide all</button>
+          </h2>
+          <div id="inbox" class="inbox"></div>
+        </section>
+        <section class="panel hidden" id="notes-panel">
+          <h2>Notes</h2>
+          <!-- The daemon's recent diagnostics: a failed config reload, a review
+               that could not be delivered, a mount conflict. Before this they
+               were recorded and never shown. -->
+          <div id="notes" class="notes"></div>
+        </section>
+        <!-- Folded, the job tree leaves its heading and the count of jobs with an
+             agent on them: the work below the fold is the one thing a reader
+             cannot see for themselves. -->
+        <section class="panel" data-panel="jobs">
+          <h2>
+            <button type="button" id="jobs-fold" class="panel-fold" aria-expanded="true" aria-controls="jobs"><span class="panel-fold-label">Jobs</span><span class="panel-fold-caret" aria-hidden="true"><svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M2.5 4.5 6 8.5l3.5-4z" fill="currentColor" /></svg></span></button>
+            <span id="jobs-working" class="badge hidden"></span>
+          </h2>
+          <div id="jobs" class="jobs"></div>
+        </section>
+        <!-- The remote machines this install may reach over ssh. Hidden until
+             the config registers one: an empty panel would promise a machine
+             that is not there. The component draws the whole section so it can
+             hide it. -->
+        <section class="panel hidden" id="machines-panel">
+          <h2>Machines</h2>
+          <div id="machines" class="machines"></div>
+        </section>
+        <div class="sidebar-footer">
+          <!-- How full the root conversation's context is, against the point where
+               compaction fires. Filled in from GET /basic-chat/context: the exact
+               numbers are one hover away, the bar above the composer shows the
+               same ratio. Shown here rather than only there because it is read at
+               rest, not only while typing. -->
+          <div class="sidebar-row">
+            <span class="sidebar-label">Context</span>
+            <span id="context-usage" class="sidebar-value">—</span>
+          </div>
+          <div class="sidebar-row">
+            <span class="sidebar-label">Appearance</span>
+            <button id="theme-toggle" class="button" type="button">◐ auto</button>
+          </div>
+          <!-- The pages that sit beside the chat page. One dropdown rather than
+               one row each, because the footer is read at rest and the links are
+               not what the operator came for; the menu opens upward, since the
+               footer is at the bottom of the panel. The chat page fills it, so a
+               page is one line in the list it reads. -->
+          <div class="sidebar-row">
+            <span class="sidebar-label">Pages</span>
+            <div class="sidebar-more">
+              <button
+                id="pages-toggle"
+                class="button"
+                type="button"
+                aria-expanded="false"
+                aria-controls="pages-menu"
+                aria-haspopup="menu"
+              >
+                ↗ Open
+              </button>
+              <div id="pages-menu" class="sidebar-menu" role="menu" aria-label="Pages"></div>
+            </div>
+          </div>
+          <div class="ui-slot" data-ui-slot="sidebar.bottom"></div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- How much of the usable context is in use, as one thin line the width of
+         the composer. It sits here because that is where the operator already
+         looks, and it is empty until an answer has been measured. -->
+    <div
+      id="context-bar"
+      class="context-bar"
+      role="progressbar"
+      aria-label="Context used"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      aria-valuenow="0"
+    >
+      <div id="context-fill" class="context-fill"></div>
+    </div>
+
+    <form id="composer" class="composer">
+      <!-- What the next message carries, one chip per picked file: its name, its
+           size, and either progress or the reason it failed with a retry. It is
+           the first child of the form and takes a row of its own, so a chip is
+           read as part of the draft and the field below keeps its place. Hidden
+           and empty at rest, so it costs no room until a file is picked. -->
+      <div id="attachment-tray" class="attachment-tray hidden" aria-label="Attachments for the next message"></div>
+      <!-- The browser's own picker, which is what the operator asked for: three
+           buttons, three file inputs. `multiple` on the image and file ones so
+           one press can take a handful; the camera takes one photo. The inputs
+           are hidden and opened by the buttons beside them. The fourth button
+           opens a panel instead, because a snippet is typed. These sit beside
+           the field and not in `.composer-actions`, so the three actions that
+           row carries (Stop, the dropdown, Send) keep their order. -->
+      <div class="composer-tools">
+        <!-- Drawn, not typed: a glyph in this row depends on a font the machine
+             may not have, and the inbox marks are drawn the same way. -->
+        <button id="attach-image" type="button" class="button composer-tool" aria-label="Attach an image" title="Attach an image">
+          <svg class="composer-tool-mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <rect x="2" y="3.5" width="12" height="9" rx="1.5" />
+            <circle cx="5.8" cy="6.8" r="0.9" />
+            <path d="M2.6 12 6.2 8.6l2.6 2.4 1.9-1.8 2.7 2.6" />
+          </svg>
+        </button>
+        <!-- The camera: `capture` makes a phone open the camera itself, and
+             `image/*` alone keeps video and sound recording out of the
+             picker. One photo, so no `multiple`. -->
+        <button id="attach-camera" type="button" class="button composer-tool" aria-label="Take a photo" title="Take a photo">
+          <svg class="composer-tool-mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <rect x="1.8" y="4.8" width="12.4" height="8.2" rx="1.5" />
+            <path d="M5.6 4.8 6.5 3h3l.9 1.8" />
+            <circle cx="8" cy="8.9" r="2.4" />
+          </svg>
+        </button>
+        <button id="attach-file" type="button" class="button composer-tool" aria-label="Attach a file" title="Attach a file">
+          <svg class="composer-tool-mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M14.29 7.37l-6.13 6.13a4 4 0 0 1-5.66-5.66l6.13-6.13a2.67 2.67 0 0 1 3.77 3.77l-6.13 6.13a1.33 1.33 0 0 1-1.89-1.89l5.66-5.65" />
+          </svg>
+        </button>
+        <!-- The fourth button opens a panel, not a picker: a snippet is typed,
+             not picked, so there is no hidden input to go with it. -->
+        <button id="attach-snippet" type="button" class="button composer-tool" aria-label="Attach a text snippet" title="Attach a text snippet">
+          <svg class="composer-tool-mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M3 2.5h6.5L13 6v7.5H3z" />
+            <path d="M9.5 2.5V6H13" />
+            <path d="M5.5 8.5h5M5.5 11h3.5" />
+          </svg>
+        </button>
+        <input id="pick-image" type="file" accept="image/*" multiple hidden />
+        <input id="pick-camera" type="file" accept="image/*" capture="environment" hidden />
+        <input id="pick-file" type="file" multiple hidden />
+      </div>
+      <textarea id="message" rows="1" placeholder="Message pi-sec… (Enter to send, Shift+Enter for newline)" aria-label="Message"></textarea>
+      <!-- Three actions at every width: Stop, the dropdown, Send. The dropdown
+           holds what used to crowd the row (New session, Compact, and the
+           server restart). -->
+      <div class="composer-actions">
+        <button id="abort" type="button" class="button button-danger" disabled>Stop</button>
+        <div class="composer-more">
+          <button
+            id="more-actions"
+            class="button"
+            type="button"
+            aria-expanded="false"
+            aria-controls="composer-menu"
+            aria-haspopup="menu"
+            aria-label="More actions"
+          >
+            ⋯
+          </button>
+          <div id="composer-menu" class="composer-menu" role="menu" aria-label="More actions">
+            <button id="reset" type="button" class="button" role="menuitem">New session</button>
+            <button id="compact" type="button" class="button" role="menuitem">Compact</button>
+            <button id="model-login" type="button" class="button" role="menuitem">Model login</button>
+            <button id="restart-ui" type="button" class="button" role="menuitem">Restart UI</button>
+            <button id="restart" type="button" class="button" role="menuitem">Restart server</button>
+            <button id="restart-reinstall" type="button" class="button" role="menuitem">Force reinstall and restart</button>
+          </div>
+        </div>
+        <button id="send" type="submit" class="button button-primary">Send</button>
+      </div>
+    </form>
+
+    <!-- Shown in the composer's place when this chat cannot be written to: an
+         archived chat keeps its transcript and loses the composer, and a chat
+         that does not exist has neither. It follows the form rather than sitting
+         between the context bar and it, because the bar's place is directly
+         above the composer; with the form hidden, this takes the same slot.
+         Filled in by the chat page. -->
+    <div id="chat-notice" class="chat-notice hidden" role="status"></div>
+
+    <script src="{{base}}/base.js"></script>
+    <script src="{{base}}/ui-cards.js"></script>
+    <!-- The page itself: one module, which the build writes beside the shell and
+         which imports the code the pages share as a relative chunk, so the same
+         files load under a mount prefix as at the root. -->
+    <script type="module" src="{{base}}/ui-chat.js"></script>
+    <!-- The pages the enabled extensions serve, as the sidebar's Pages menu names
+         them: the server plants a JSON data block here and the menu draws one link
+         per entry after its own three. It sits at the end of the body, after the
+         page's own module, and a page with no block draws the three links it
+         always had. -->
+    <!--pages-links-->
+    <div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
+  </body>
+</html>

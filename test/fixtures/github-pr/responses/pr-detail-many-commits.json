@@ -1,0 +1,216 @@
+{
+  "json": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "id": "PR_node_10",
+          "number": 10,
+          "title": "Add widget cache",
+          "body": "Adds a small cache.\n\n- [x] tests\n- [ ] docs\n\nThanks @example-other.",
+          "url": "https://github.example.com/acme/widgets/pull/10",
+          "state": "OPEN",
+          "isDraft": false,
+          "createdAt": "2026-10-27T09:00:00Z",
+          "author": {
+            "login": "example-other"
+          },
+          "additions": 120,
+          "deletions": 8,
+          "changedFiles": 4,
+          "baseRefName": "main",
+          "headRefName": "feature/widget-cache",
+          "headRefOid": "1111111111111111111111111111111111111111",
+          "labels": {
+            "nodes": [
+              {
+                "name": "cache",
+                "color": "0e8a16"
+              },
+              {
+                "name": "reviewed",
+                "color": "1d76db"
+              }
+            ]
+          },
+          "reactionGroups": [
+            {
+              "content": "THUMBS_UP",
+              "viewerHasReacted": true,
+              "reactors": {
+                "totalCount": 2
+              }
+            },
+            {
+              "content": "HEART",
+              "viewerHasReacted": false,
+              "reactors": {
+                "totalCount": 0
+              }
+            },
+            {
+              "content": "ROCKET",
+              "viewerHasReacted": false,
+              "reactors": {
+                "totalCount": 1
+              }
+            }
+          ],
+          "comments": {
+            "nodes": [
+              {
+                "id": "IC_1",
+                "author": {
+                  "login": "example-other"
+                },
+                "body": "First look, @example-user.",
+                "createdAt": "2026-10-27T10:00:00Z",
+                "url": "https://github.example.com/acme/widgets/pull/10#issuecomment-1",
+                "reactionGroups": [
+                  {
+                    "content": "THUMBS_UP",
+                    "viewerHasReacted": false,
+                    "reactors": {
+                      "totalCount": 1
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "id": "PRR_1",
+                "author": {
+                  "login": "example-user"
+                },
+                "body": "Looks fine.",
+                "state": "COMMENTED",
+                "createdAt": "2026-10-27T11:00:00Z",
+                "url": "https://github.example.com/acme/widgets/pull/10#pullrequestreview-1",
+                "reactionGroups": []
+              }
+            ]
+          },
+          "reviewThreads": {
+            "nodes": [
+              {
+                "id": "PRRT_1",
+                "isResolved": false,
+                "viewerCanResolve": true,
+                "isOutdated": false,
+                "path": "src/cache.ts",
+                "line": 42,
+                "startLine": 40,
+                "originalLine": 41,
+                "originalStartLine": 39,
+                "diffSide": "RIGHT",
+                "comments": {
+                  "nodes": [
+                    {
+                      "id": "PRRC_1",
+                      "author": {
+                        "login": "example-other"
+                      },
+                      "body": "Why 42?",
+                      "createdAt": "2026-10-27T12:00:00Z",
+                      "url": "https://github.example.com/acme/widgets/pull/10#discussion_r1",
+                      "diffHunk": "@@ -39,7 +39,9 @@ export function read(key: string) {",
+                      "path": "src/cache.ts",
+                      "reactionGroups": []
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "PRRT_2",
+                "isResolved": true,
+                "isOutdated": true,
+                "path": "src/index.ts",
+                "line": null,
+                "startLine": null,
+                "originalLine": 7,
+                "originalStartLine": 7,
+                "diffSide": "LEFT",
+                "comments": {
+                  "nodes": []
+                }
+              }
+            ]
+          },
+          "commitList": {
+            "totalCount": 130,
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "2222222222222222222222222222222222222222",
+                  "abbreviatedOid": "2222222",
+                  "messageHeadline": "Add the cache",
+                  "committedDate": "2026-10-27T09:10:00Z",
+                  "authoredDate": "2026-10-27T09:00:00Z",
+                  "url": "https://github.example.com/acme/widgets/commit/2222222222222222222222222222222222222222",
+                  "author": {
+                    "name": "Other Person",
+                    "user": {
+                      "login": "example-other"
+                    }
+                  }
+                }
+              },
+              {
+                "commit": {
+                  "oid": "3333333333333333333333333333333333333333",
+                  "abbreviatedOid": "3333333",
+                  "messageHeadline": "Fix a typo",
+                  "committedDate": "2026-10-27T09:20:00Z",
+                  "authoredDate": "2026-10-27T09:20:00Z",
+                  "url": "https://github.example.com/acme/widgets/commit/3333333333333333333333333333333333333333",
+                  "author": {
+                    "name": "No Account",
+                    "user": null
+                  }
+                }
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "1111111111111111111111111111111111111111",
+                  "statusCheckRollup": {
+                    "state": "FAILURE",
+                    "contexts": {
+                      "nodes": [
+                        {
+                          "__typename": "CheckRun",
+                          "name": "unit",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://ci.example.com/1"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "lint",
+                          "status": "IN_PROGRESS",
+                          "conclusion": null,
+                          "detailsUrl": "https://ci.example.com/2"
+                        },
+                        {
+                          "__typename": "StatusContext",
+                          "context": "coverage",
+                          "state": "FAILURE",
+                          "targetUrl": "https://ci.example.com/3"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

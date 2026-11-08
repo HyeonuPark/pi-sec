@@ -1,0 +1,15 @@
+# Exceptions for the tree scan in `scripts/scan-tree.mjs`.
+#
+# The scan looks for known values and never for shapes, so an entry here hides
+# one known value in one place: a word from the word list, a machine value, or a
+# registered secret value that is legitimate in that place and nowhere else.
+#
+# Every entry must cover a false match in the file it names. An entry never
+# covers a real leak. The file may hold no entry at all, and then the scan
+# applies no exception of the repository's own.
+#
+# Format: <path or path glob> TAB <JavaScript regex>
+#   The first field is a path relative to the scanned root. `*` matches any run
+#   of characters except `/`, and `**` matches any run of characters.
+#   A finding is skipped when its path matches the first field and its line
+#   matches the second. Keep both fields narrow: one file, one line shape.

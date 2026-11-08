@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- The external mount prefix, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-base" content="" />
+    <!-- The harness time zone, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-timezone" content="" />
+    <title>Reports · pi-sec</title>
+    <link rel="stylesheet" href="{{base}}/report/assets/theme.css" />
+    <link rel="stylesheet" href="{{base}}/report/assets/styles.css" />
+  </head>
+  <body class="report-page" data-sidebar="closed">
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">π</span>
+          <span class="brand-name">reports</span>
+        </div>
+      </div>
+      <div class="header-status">
+        <!-- Shown on the list only: it reads the list again in place, so a
+             report that was just finished elsewhere appears without a reload. -->
+        <button id="reload-list" class="button hidden" type="button">↻ reload</button>
+        <!-- Shown only while one report is open: from the list there is nowhere
+             back to go. -->
+        <a class="pill pill-muted hidden" id="list-link" href="{{base}}/report">▤ all reports</a>
+        <a class="pill pill-muted" id="chat-link" href="{{base}}/basic-chat">← chat</a>
+        <button id="theme-toggle" class="button" type="button">◐ auto</button>
+      </div>
+    </header>
+
+    <!-- The shell is a fixed height (body.report-page), and this is the row
+         that scrolls. The header and the bar keep their place while the report
+         body moves under them. -->
+    <div class="report-scroll">
+      <main id="view" class="report-view" aria-live="polite"></main>
+    </div>
+
+    <!-- The feedback bar is the shell's last row, so it is always on screen
+         wherever in the report the reader has scrolled to. The field and the
+         two-state button are built by the shared component, so the viewer and
+         the chat's report panel cannot drift apart; that panel keeps its own
+         floating bar. It is shown by the viewer and hidden on the list. -->
+    <div id="note-bar" class="note-bar hidden"></div>
+
+    <div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
+
+    <script src="{{base}}/report/assets/base.js"></script>
+    <!-- The page itself: one module, which the build writes into this directory
+         and which imports the code the pages share as a relative chunk, so it
+         loads under `/report/assets/` the same way it does at the root. -->
+    <script type="module" src="{{base}}/report/assets/ui-report.js"></script>
+  </body>
+</html>

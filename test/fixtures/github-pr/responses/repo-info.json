@@ -1,0 +1,37 @@
+{
+  "json": {
+    "id": 31415926,
+    "node_id": "R_kgDOExampleFork",
+    "name": "widgets",
+    "full_name": "acme/widgets",
+    "private": false,
+    "owner": { "login": "acme", "id": 4711, "type": "Organization", "site_admin": false },
+    "html_url": "https://github.com/acme/widgets",
+    "description": "Widgets for the example product",
+    "fork": true,
+    "size": 82729,
+    "default_branch": "main",
+    "parent": {
+      "id": 27182818,
+      "node_id": "R_kgDOExampleRoot",
+      "name": "widgets",
+      "full_name": "upstream/widgets",
+      "private": false,
+      "owner": { "login": "upstream", "id": 4712, "type": "Organization", "site_admin": false },
+      "fork": false,
+      "size": 90000,
+      "default_branch": "main"
+    },
+    "source": {
+      "id": 27182818,
+      "node_id": "R_kgDOExampleRoot",
+      "name": "widgets",
+      "full_name": "upstream/widgets",
+      "private": false,
+      "owner": { "login": "upstream", "id": 4712, "type": "Organization", "site_admin": false },
+      "fork": false,
+      "size": 90000,
+      "default_branch": "main"
+    }
+  }
+}

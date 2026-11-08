@@ -1,0 +1,38 @@
+{
+  "json": {
+    "data": {
+      "search": {
+        "nodes": [
+          {
+            "number": 10,
+            "title": "Add widget cache",
+            "url": "https://github.example.com/acme/widgets/pull/10",
+            "isDraft": false,
+            "state": "OPEN",
+            "updatedAt": "2026-10-29T09:12:00Z",
+            "author": { "login": "example-other" },
+            "headRefName": "feature/widget-cache",
+            "baseRefName": "main",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "labels": { "nodes": [{ "name": "cache", "color": "0e8a16" }] },
+            "commits": { "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }] }
+          },
+          {
+            "number": 12,
+            "title": "Old mention, answered",
+            "url": "https://github.example.com/acme/widgets/pull/12",
+            "isDraft": false,
+            "state": "OPEN",
+            "updatedAt": "2026-10-28T08:00:00Z",
+            "author": { "login": "example-other" },
+            "headRefName": "fix/typo",
+            "baseRefName": "main",
+            "reviewDecision": null,
+            "labels": { "nodes": [] },
+            "commits": { "nodes": [{ "commit": { "statusCheckRollup": null } }] }
+          }
+        ]
+      }
+    }
+  }
+}

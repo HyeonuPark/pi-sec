@@ -1,0 +1,12 @@
+{
+  "json": {
+    "data": {
+      "updateIssueComment": {
+        "issueComment": {
+          "id": "IC_mine",
+          "body": "My first note, edited."
+        }
+      }
+    }
+  }
+}

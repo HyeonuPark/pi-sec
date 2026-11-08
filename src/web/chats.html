@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- The external mount prefix, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-base" content="" />
+    <!-- The harness time zone, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-timezone" content="" />
+    <title>Chats · pi-sec</title>
+    <!-- The assets are the report page's, because that route serves this whole
+         directory: a second copy of the stylesheet would be a second palette to
+         keep in step. -->
+    <link rel="stylesheet" href="{{base}}/report/assets/theme.css" />
+    <link rel="stylesheet" href="{{base}}/report/assets/styles.css" />
+  </head>
+  <body class="report-page chats-page" data-sidebar="closed">
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">π</span>
+          <span class="brand-name">chats</span>
+        </div>
+      </div>
+      <div class="header-status">
+        <!-- The root conversation is not a focused chat, so it does not appear in
+             either list below. The link is the way back to it. -->
+        <a class="pill pill-muted" id="chat-link" href="{{base}}/basic-chat">← root chat</a>
+        <button id="theme-toggle" class="button" type="button">◐ auto</button>
+      </div>
+    </header>
+
+    <!-- The shell is a fixed height (body.report-page), and this is the row that
+         scrolls, the way the report list does it. -->
+    <div class="report-scroll">
+      <main id="view" class="report-view" aria-live="polite"></main>
+    </div>
+
+    <div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
+
+    <!-- base.js first: it carries the one rule that builds every URL on the page,
+         and the page module below reads it before its first request. -->
+    <script src="{{base}}/report/assets/base.js"></script>
+    <!-- The page itself: one module, which the build writes into this directory
+         and which imports the code the pages share as a relative chunk, so it
+         loads under `/report/assets/` the same way it does at the root. -->
+    <script type="module" src="{{base}}/report/assets/ui-chats.js"></script>
+  </body>
+</html>

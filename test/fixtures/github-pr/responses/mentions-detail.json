@@ -1,0 +1,42 @@
+{
+  "json": {
+    "data": {
+      "repository": {
+        "p0": {
+          "number": 10,
+          "comments": {
+            "nodes": [
+              { "author": { "login": "example-other" }, "body": "Can you look, @example-user?", "createdAt": "2026-10-29T09:10:00Z" }
+            ]
+          },
+          "reviews": { "nodes": [] },
+          "reviewThreads": {
+            "nodes": [
+              {
+                "comments": {
+                  "nodes": [
+                    { "author": { "login": "example-other" }, "body": "What about this line?", "createdAt": "2026-10-29T09:11:00Z" },
+                    { "author": { "login": "example-user" }, "body": "Fixed in the next push.", "createdAt": "2026-10-29T09:20:00Z" },
+                    { "author": { "login": "example-other" }, "body": "Then why is @example-user mentioned here again?", "createdAt": "2026-10-29T09:30:00Z" }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "p1": {
+          "number": 12,
+          "comments": {
+            "nodes": [
+              { "author": { "login": "example-other" }, "body": "Ping @example-user please", "createdAt": "2026-10-28T07:00:00Z" },
+              { "author": { "login": "example-user" }, "body": "Done.", "createdAt": "2026-10-28T07:30:00Z" },
+              { "author": { "login": "example-other" }, "body": "Thanks.", "createdAt": "2026-10-28T07:40:00Z" }
+            ]
+          },
+          "reviews": { "nodes": [] },
+          "reviewThreads": { "nodes": [] }
+        }
+      }
+    }
+  }
+}

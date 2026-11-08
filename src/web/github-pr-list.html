@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light" />
+    <!-- The external mount prefix, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-base" content="" />
+    <!-- The harness time zone, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-timezone" content="" />
+    <title>Pull requests · pi-sec</title>
+    <!-- One stylesheet, and no more. This theme is GitHub's light one, so pi-sec's
+         own theme.css and styles.css are not loaded; and this page draws no code,
+         so the code-block palette that the pull request and diff pages load beside
+         this file is not loaded here either. The assets sit beside the shell in
+         dist/web, the way usage.css and ui-usage.js do, so a page served under a
+         mount prefix asks for them under the same prefix. -->
+    <link rel="stylesheet" href="{{base}}/github-pr.css" />
+  </head>
+  <body>
+    <!-- The bar, the failure strip and the list: the page holds the shape, and the
+         script (ui-github-pr-list.js) draws the values into these three elements. -->
+    <header id="topbar" class="topbar"></header>
+    <div id="error-banner" class="error-banner hidden" role="alert"></div>
+    <main id="view"></main>
+
+    <!-- The facts every dashboard page needs before its first request: who gh is
+         logged in as, which repositories the operator configured, and whether the
+         write routes answer. The server replaces this marker with
+         `<script type="application/json" id="github-pr-meta">…</script>`, escaping
+         `<` so that no value can close the element early. It is data and never
+         runs, so the page's `script-src 'self'` policy has nothing to refuse. -->
+    <!--github-pr-meta-->
+    <!-- The list the server already held, replaced by the server with
+         `<script type="application/json" id="github-pr-list-first">…</script>`, or
+         with `null` when it held none. This block is what makes the rows draw with
+         the page instead of one request later. No other page carries it. -->
+    <!--github-pr-list-first-->
+
+    <!-- base.js first: it carries the one rule that builds every URL on this page,
+         and the page module reads it before its first request. -->
+    <script src="{{base}}/base.js"></script>
+    <!-- The page itself: one module, which the build writes beside the shell and
+         which imports the shared code as a relative chunk, so the same files load
+         under a mount prefix as at the root. -->
+    <script type="module" src="{{base}}/ui-github-pr-list.js"></script>
+  </body>
+</html>

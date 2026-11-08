@@ -1,0 +1,101 @@
+:root {
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --motion: 200ms ease;
+  --accent: #4f7cff;
+  --accent-soft: rgba(79, 124, 255, 0.12);
+  --danger: #d64545;
+
+  /* The two states of the feedback bar's one button: green approves, orange
+     sends what is in the field. The hues are the status palette's own (its
+     green, and its amber deepened so a white label keeps the contrast the
+     accent button already has). The button's text and aria-label carry the
+     meaning; the colour only reinforces it. */
+  --approve: #2f9e6b;
+  --approve-strong: #247a53;
+  --feedback: #b3781a;
+  --feedback-strong: #8f5f13;
+
+  --bg: #f7f8fb;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #eef0f6;
+  --text: #1c2130;
+  --text-muted: #5b647a;
+  --border: #dde1ec;
+  --status-planned: #7a7f91;
+  --status-active: #2f9e6b;
+  --status-waiting: #c98a1b;
+  --status-paused: #8a6ad6;
+  --status-done: #4f7cff;
+  --status-failed: #d64545;
+  --status-cancelled: #6b7280;
+  /* The working chip's fill is the status colour mixed toward this: black in a
+     light theme so a light label clears 4.5:1, white in a dark one. */
+  --chip-fill-partner: #000;
+
+  /* The top bar while a focused chat is open. A focused chat is a sub-session of
+     the root, and the bar says which one is on screen before the title is read.
+     The fill is the accent's pale wash, so the bar still belongs to the page. */
+  --chat-header-bg: #e9edff;
+  --chat-header-border: #c3cdf7;
+  --chat-header-text: #2f3f7a;
+}
+
+[data-theme="dark"] {
+  --bg: #10131c;
+  --bg-elevated: #171b27;
+  --bg-sunken: #0c0f17;
+  --text: #e7eaf3;
+  --text-muted: #9aa3ba;
+  --border: #262c3d;
+  --accent-soft: rgba(79, 124, 255, 0.18);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --chip-fill-partner: #fff;
+  --chat-header-bg: #1b2136;
+  --chat-header-border: #33406b;
+  --chat-header-text: #b9c6f5;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] {
+    --bg: #10131c;
+    --bg-elevated: #171b27;
+    --bg-sunken: #0c0f17;
+    --text: #e7eaf3;
+    --text-muted: #9aa3ba;
+    --border: #262c3d;
+    --accent-soft: rgba(79, 124, 255, 0.18);
+    --chip-fill-partner: #fff;
+    --chat-header-bg: #1b2136;
+    --chat-header-border: #33406b;
+    --chat-header-text: #b9c6f5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+  /*
+   * The activity ring cannot turn here. It becomes a whole ring instead, so it
+   * still reads as a state marker rather than as a spinner that stopped.
+   */
+  .spinner {
+    border-color: var(--accent) !important;
+  }
+  .spinner[data-stage="tool"] {
+    border-color: var(--status-active) !important;
+  }
+}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- The external mount prefix, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-base" content="" />
+    <!-- The harness time zone, stamped by the server (see src/server/static.ts). -->
+    <meta name="pi-sec-timezone" content="" />
+    <title>Usage · pi-sec</title>
+    <link rel="stylesheet" href="{{base}}/theme.css" />
+    <link rel="stylesheet" href="{{base}}/styles.css" />
+    <link rel="stylesheet" href="{{base}}/usage.css" />
+  </head>
+  <body class="usage-page">
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">π</span>
+          <span class="brand-name">usage</span>
+        </div>
+      </div>
+      <div class="header-status">
+        <!-- The cards are read once at load; this reads them again in place, so a
+             provider logged in from another tab appears without a reload. -->
+        <button id="reload-usage" class="button" type="button">↻ reload</button>
+        <a class="pill pill-muted" id="stats-link" href="{{base}}/usage/stats">speed stats</a>
+        <a class="pill pill-muted" id="chat-link" href="{{base}}/basic-chat">← chat</a>
+        <button id="theme-toggle" class="button" type="button">◐ auto</button>
+      </div>
+    </header>
+
+    <main class="usage-scroll">
+      <p id="usage-status" class="usage-status">Reading usage…</p>
+      <!-- One card per provider that has auth, drawn by the page from the usage
+           answer the server writes after this line, and from GET /api/usage only
+           for a provider value that answer does not hold yet. -->
+      <section id="usage-cards" class="usage-cards" aria-live="polite"></section><!--usage-first-->
+
+      <!-- The slot an extension puts its own usage card in. The server fills it,
+           the way the chat page fills `sidebar.bottom`. This page opens no event
+           stream, so a card here hears no `ui_event`. -->
+      <section class="usage-slot" aria-label="Usage cards from extensions">
+        <div class="ui-slot" data-ui-slot="usage.cards"></div>
+      </section>
+    </main>
+
+    <div id="usage-toast" class="toast hidden" role="alert" aria-live="assertive"></div>
+
+    <script src="{{base}}/base.js"></script>
+    <script src="{{base}}/ui-cards.js"></script>
+    <!-- The page itself: one module, which the build writes beside the shell and
+         which imports the code the pages share as a relative chunk, so the same
+         files load under a mount prefix as at the root. -->
+    <script type="module" src="{{base}}/ui-usage.js"></script>
+  </body>
+</html>
