@@ -372,7 +372,7 @@ beforeAll(async () => {
     webDir: builtWebDir(),
     adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
   };
-  started = await startServer(deps, { webDir: builtWebDir(), ui: { renderTimeoutMs: 2000 } });
+  started = await startServer(deps, { webDir: builtWebDir(), ui: { renderTimeoutMs: 2000 }, usage: { models: () => runtime.models as never, fetch: fakeFetch } });
   origin = started.origin;
 
   try {
