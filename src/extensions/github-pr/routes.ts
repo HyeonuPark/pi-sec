@@ -19,6 +19,7 @@ import {
 import { fetchPrList, type PrListPayload } from "./list.ts";
 import { createPrListCache, type ListCacheTimers, type PrListCache } from "./list-cache.ts";
 import { configuredRepository, createSettingsReader, DISK_LIMIT_DEFAULT_MEGABYTES, splitRepository, type GithubPrSettings } from "./settings.ts";
+import { createReviewDraftStore, DraftInputError, listKey, readOp } from "./review-drafts.ts";
 import { createRepoStore, DiskLimitError } from "./store.ts";
 import {
   commentOnPullRequest,
@@ -122,6 +123,11 @@ export interface GithubPrRouteOptions {
   readonly remoteUrl?: (slug: string) => string;
   /** The clock, for the store's 24-hour reconcile interval. Default `Date.now`. */
   readonly now?: () => number;
+  /**
+   * The directory the review drafts live in, one file per pull request. Default
+   * `<pi-sec home>/state/github-pr/review-drafts`. A test passes its own.
+   */
+  readonly draftsDir?: string;
   /** The poll's timer functions. Default `setTimeout`/`clearTimeout`. */
   readonly timers?: ListCacheTimers;
   /**
@@ -147,6 +153,7 @@ function optionsOf(value: unknown): GithubPrRouteOptions {
   if (typeof raw["ghPath"] === "string") out["ghPath"] = raw["ghPath"];
   if (typeof raw["ghEnv"] === "object" && raw["ghEnv"] !== null) out["ghEnv"] = raw["ghEnv"];
   if (typeof raw["repoRoot"] === "string") out["repoRoot"] = raw["repoRoot"];
+  if (typeof raw["draftsDir"] === "string") out["draftsDir"] = raw["draftsDir"];
   if (typeof raw["remoteUrl"] === "function") out["remoteUrl"] = raw["remoteUrl"];
   if (typeof raw["now"] === "function") out["now"] = raw["now"];
   if (typeof raw["timers"] === "object" && raw["timers"] !== null) out["timers"] = raw["timers"];
@@ -271,6 +278,12 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
     read: (owner, name) => fetchRepositoryInfo(reader, owner, name),
   });
 
+  const drafts = createReviewDraftStore({
+    dir: options.draftsDir ?? join(deps.runtime.paths.stateDir, "github-pr", "review-drafts"),
+    ...(options.now === undefined ? {} : { now: options.now }),
+    logger,
+  });
+
   const channel = deps.sse.channel(EVENTS_CHANNEL);
 
   /**
@@ -320,9 +333,32 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
     const active = currentSettings();
     if (active === undefined) throw new GhError("the githubPr settings are missing from the config");
     await reconcileQuietly(active.repos);
-    return await fetchPrList(reader, active.repos);
+    const payload = await fetchPrList(reader, active.repos);
+    // The read succeeded, so the list is whole: the deletion rule of the review
+    // drafts may run. A failed read threw above and deletes nothing.
+    await sweepDrafts(payload, active.repos);
+    return payload;
   };
 
+  /** Whether the list this process holds shows one pull request. */
+  const onList = (repo: string, number: number): boolean => {
+    const key = listKey(repo, number);
+    return (cache.current()?.sections ?? []).some((section) =>
+      section.prs.some((pr) => listKey(pr.repo, pr.number) === key),
+    );
+  };
+
+  async function sweepDrafts(payload: PrListPayload, repos: readonly string[]): Promise<void> {
+    const listed = new Set<string>();
+    for (const section of payload.sections) for (const pr of section.prs) listed.add(listKey(pr.repo, pr.number));
+    try {
+      await drafts.sweep({ listed, repos });
+    } catch (error) {
+      logger.warn("github-pr draft sweep failed", { error });
+    }
+  }
+
+  // `cache` is used by `onList` above only when a request runs, after this line.
   const cache: PrListCache = createPrListCache({
     fetch: fetchList,
     // Read at every cycle, so a reload of the interval changes the pace.
@@ -545,6 +581,43 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
     }
   });
 
+  /* --------------------------------------------------------- review drafts */
+
+  /**
+   * Run one draft route. The write switch does not guard these routes: they do
+   * not reach GitHub. A body that is not JSON is `415` on the POST, as on the
+   * write routes, and a repository that is not configured is `404`.
+   */
+  const draftRoute = async (route: RouteContext, post: boolean, work: (target: PrTarget) => Promise<object>): Promise<void> => {
+    if (post && !isJsonRequest(route)) {
+      refuse(route.res, 415, "send this request with Content-Type: application/json");
+      return;
+    }
+    const target = targetOf(route);
+    if (target === undefined) return;
+    try {
+      json(route.res, 200, await work(target));
+    } catch (error) {
+      if (error instanceof DraftInputError) {
+        refuse(route.res, 400, error.message);
+        return;
+      }
+      logger.warn("github-pr draft failed", { requestId: route.requestId, error });
+      refuse(route.res, 500, messageOf(error));
+    }
+  };
+
+  router.get("/api/github/pr/:owner/:repo/:number/draft", async (route) => {
+    await draftRoute(route, false, (target) => drafts.get(target));
+  });
+
+  router.post("/api/github/pr/:owner/:repo/:number/draft", async (route) => {
+    await draftRoute(route, true, async (target) => {
+      const change = readOp(route.body, new Date((options.now ?? Date.now)()).toISOString());
+      return await drafts.apply(target, change, onList(target.repo, target.number));
+    });
+  });
+
   /* ---------------------------------------------------------------- write */
 
   /**
@@ -694,7 +767,17 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
         }
         return { body: text, path, side, line, startLine };
       });
+      const draftIds = body["draftCommentIds"];
+      if (draftIds !== undefined && (!Array.isArray(draftIds) || draftIds.some((id) => typeof id !== "string"))) {
+        throw new WriteInputError("draftCommentIds must be a list of strings");
+      }
       await submitReview(writeContext(target), event as ReviewEvent, summary, comments);
+      // GitHub accepted the review. A failure above leaves the draft as it was.
+      try {
+        if (draftIds !== undefined) await drafts.removeSubmitted(target, draftIds as string[]);
+      } catch (error) {
+        logger.warn("github-pr draft cleanup after submit failed", { requestId: route.requestId, error });
+      }
     });
   });
 

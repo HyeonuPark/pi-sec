@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -611,6 +611,182 @@ describe("github-pr routes", () => {
     expect(answer.status).toBe(502);
     expect(String(((await answer.json()) as { error: string }).error)).toContain("boom from gh");
     expect(await auditRows(booted!.harness, "github_pr_write")).toEqual([]);
+  }, 40_000);
+
+  /* ---------------------------------------------------------- review drafts */
+
+  const DRAFT_COMMENT = {
+    id: "c-000001",
+    path: "src/a.ts",
+    side: "RIGHT",
+    line: 10,
+    startLine: null,
+    body: "please rename",
+    headSha: "1".repeat(40),
+    anchor: { first: "const a = 1;", last: "const a = 1;" },
+  };
+
+  async function postJson(origin: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+    const answer = await fetch(`${origin}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: answer.status, json: (await answer.json()) as Record<string, unknown> };
+  }
+
+  /** A draft file as the store writes it, for a case that seeds one by hand. */
+  function seededDraft(number: number, listed: boolean): string {
+    return JSON.stringify({
+      version: 1,
+      repo: "acme/widgets",
+      number,
+      listed,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      summary: "",
+      event: "COMMENT",
+      comments: [{ ...DRAFT_COMMENT, createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+  }
+
+  it("answers the draft routes with the switch off, sends nothing to GitHub, and refuses what it must", async () => {
+    const gh = await fakeGhFixture({ allowWrites: true });
+    const draftsDir = join(await mkdtemp(join(tmpdir(), "drafts-routes-")), "drafts");
+    const { origin } = await boot({ githubPr: { writes: false, repos: ["acme/widgets"] }, gh, routeOptions: { draftsDir } });
+    expect((await get(origin, "/api/github/pr/list")).status).toBe(200);
+    const before = (await calls(gh)).length;
+    const base = "/api/github/pr/acme/widgets/10/draft";
+
+    const empty = await get(origin, base);
+    expect(empty.status).toBe(200);
+    expect(empty.json).toMatchObject({ comments: [], summary: "", event: "COMMENT", number: 10 });
+
+    const added = await postJson(origin, base, { op: "add", comment: DRAFT_COMMENT });
+    expect(added.status).toBe(200);
+    expect((added.json["comments"] as unknown[]).length).toBe(1);
+    const same = await postJson(origin, base, { op: "add", comment: DRAFT_COMMENT });
+    expect((same.json["comments"] as unknown[]).length).toBe(1);
+    const set = await postJson(origin, base, { op: "set", summary: "overall", event: "REQUEST_CHANGES" });
+    expect(set.json).toMatchObject({ summary: "overall", event: "REQUEST_CHANGES" });
+    expect((await get(origin, base)).json).toMatchObject({ summary: "overall", comments: [{ id: "c-000001" }] });
+    expect((await readdir(draftsDir)).sort()).toEqual(["acme+widgets+10.json"]);
+
+    const removed = await postJson(origin, base, { op: "remove", id: "c-000001" });
+    expect(removed.json["comments"]).toEqual([]);
+    expect((await postJson(origin, base, { op: "discard" })).status).toBe(200);
+    expect(await readdir(draftsDir)).toEqual([]);
+
+    const notJson = await fetch(`${origin}${base}`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" });
+    expect(notJson.status).toBe(415);
+    expect((await postJson(origin, base, { op: "bogus" })).status).toBe(400);
+    expect((await get(origin, "/api/github/pr/acme/other/10/draft")).status).toBe(404);
+    expect((await get(origin, "/api/github/pr/acme/widgets/x/draft")).status).toBe(404);
+    expect((await postJson(origin, "/api/github/pr/acme/other/10/draft", { op: "discard" })).status).toBe(404);
+
+    // The routes never reached `gh`.
+    expect((await calls(gh)).length).toBe(before);
+  }, 40_000);
+
+  it("removes the submitted comments after GitHub accepts a review and leaves the draft when it does not", async () => {
+    const gh = await fakeGhFixture({ allowWrites: true });
+    const draftsDir = join(await mkdtemp(join(tmpdir(), "drafts-routes-")), "drafts");
+    const { origin } = await boot({ githubPr: { writes: true, repos: ["acme/widgets"] }, gh, routeOptions: { draftsDir } });
+    expect((await get(origin, "/api/github/pr/list")).status).toBe(200);
+    const base = "/api/github/pr/acme/widgets/10";
+    await postJson(origin, `${base}/draft`, { op: "add", comment: DRAFT_COMMENT });
+    await postJson(origin, `${base}/draft`, { op: "add", comment: { ...DRAFT_COMMENT, id: "c-000002", line: 20 } });
+    await postJson(origin, `${base}/draft`, { op: "set", summary: "overall" });
+    const file = join(draftsDir, "acme+widgets+10.json");
+    const before = await readFile(file, "utf8");
+
+    // The switch refuses (403): a draft is not touched. Flip the switch off by a bad body first.
+    const bad = await postJson(origin, `${base}/review`, { event: "COMMENT", body: "x", comments: [], draftCommentIds: "no" });
+    expect(bad.status).toBe(400);
+    expect(await readFile(file, "utf8")).toBe(before);
+
+    const accepted = await postJson(origin, `${base}/review`, {
+      event: "COMMENT",
+      body: "overall",
+      comments: [{ body: "please rename", path: "src/a.ts", side: "RIGHT", line: 10, startLine: null }],
+      draftCommentIds: ["c-000001"],
+    });
+    expect(accepted.status).toBe(200);
+    const draft = (await get(origin, `${base}/draft`)).json as { comments: { id: string }[]; summary: string };
+    expect(draft.comments.map((c) => c.id)).toEqual(["c-000002"]);
+    expect(draft.summary).toBe("");
+  }, 40_000);
+
+  it("leaves the draft as it was when gh fails the review or the switch is off", async () => {
+    const responses = await mkdtemp(join(tmpdir(), "fake-gh-responses-"));
+    await cp(SHARED_RESPONSES, responses, { recursive: true });
+    await writeFile(join(responses, "write-review.json"), JSON.stringify({ stderr: "boom from gh", exit: 1 }));
+    const gh = await fakeGhFixture({ responsesDir: responses, allowWrites: true });
+    const draftsDir = join(await mkdtemp(join(tmpdir(), "drafts-routes-")), "drafts");
+    const { origin } = await boot({ githubPr: { writes: true, repos: ["acme/widgets"] }, gh, routeOptions: { draftsDir } });
+    const base = "/api/github/pr/acme/widgets/10";
+    await postJson(origin, `${base}/draft`, { op: "add", comment: DRAFT_COMMENT });
+    const file = join(draftsDir, "acme+widgets+10.json");
+    const before = await readFile(file, "utf8");
+    const failed = await postJson(origin, `${base}/review`, {
+      event: "COMMENT",
+      body: "",
+      comments: [{ body: "please rename", path: "src/a.ts", side: "RIGHT", line: 10, startLine: null }],
+      draftCommentIds: ["c-000001"],
+    });
+    expect(failed.status).toBe(502);
+    expect(await readFile(file, "utf8")).toBe(before);
+
+    // With the switch off the review is refused with 403 and the file stays too.
+    const off = await boot({ githubPr: { writes: false, repos: ["acme/widgets"] }, gh, routeOptions: { draftsDir } });
+    const refused = await postJson(off.origin, `${base}/review`, { event: "COMMENT", body: "", comments: [], draftCommentIds: ["c-000001"] });
+    expect(refused.status).toBe(403);
+    // The poll of the second server may mark the draft as listed, so compare the review itself.
+    expect(JSON.parse(await readFile(file, "utf8")).comments).toEqual(JSON.parse(before).comments);
+  }, 40_000);
+
+  it("deletes the draft of a listed pull request that a successful read no longer lists", async () => {
+    const responses = await mkdtemp(join(tmpdir(), "fake-gh-responses-"));
+    await cp(SHARED_RESPONSES, responses, { recursive: true });
+    const gh = await fakeGhFixture({ responsesDir: responses });
+    const draftsDir = join(await mkdtemp(join(tmpdir(), "drafts-routes-")), "drafts");
+    await mkdir(draftsDir, { recursive: true });
+    // Seeded as if an earlier daemon had saved it: 12345 was listed, and the
+    // list this daemon reads never shows it, which is the daemon-was-down case.
+    await writeFile(join(draftsDir, "acme+widgets+12345.json"), seededDraft(12345, true));
+    const { origin } = await boot({ githubPr: { writes: false, repos: ["acme/widgets"] }, gh, routeOptions: { draftsDir } });
+    const cold = await get(origin, "/api/github/pr/list");
+    expect(cold.status).toBe(200);
+    expect(await readdir(draftsDir)).toEqual([]);
+
+    const listed = (cold.json as { sections: { prs: { number: number }[] }[] }).sections.flatMap((s) => s.prs.map((p) => p.number));
+    expect(listed.length).toBeGreaterThan(0);
+    const number = listed[0] ?? 0;
+    const draftPath = `/api/github/pr/acme/widgets/${number}/draft`;
+    const file = join(draftsDir, `acme+widgets+${number}.json`);
+    await postJson(origin, draftPath, { op: "add", comment: DRAFT_COMMENT });
+    expect(JSON.parse(await readFile(file, "utf8"))).toMatchObject({ listed: true });
+
+    // A refresh whose list still has it keeps it.
+    expect((await get(origin, "/api/github/pr/list?refresh=1")).status).toBe(200);
+    expect(await readdir(draftsDir)).toEqual([`acme+widgets+${number}.json`]);
+
+    // A failed refresh deletes nothing.
+    const saved = await mkdtemp(join(tmpdir(), "fake-gh-saved-"));
+    await cp(responses, saved, { recursive: true });
+    await writeFile(join(responses, "routes.json"), JSON.stringify({ routes: [], default: "not-authenticated.json" }));
+    await writeFile(join(responses, "not-authenticated.json"), JSON.stringify({ stderr: "gh auth login", exit: 1 }));
+    expect((await get(origin, "/api/github/pr/list?refresh=1")).status).toBe(502);
+    expect(await readdir(draftsDir)).toEqual([`acme+widgets+${number}.json`]);
+
+    // A successful refresh whose list is empty deletes it.
+    await cp(saved, responses, { recursive: true });
+    const empty = JSON.stringify({ json: { data: { search: { nodes: [] } } } });
+    for (const name of ["search-mentions", "search-need-review", "search-opened", "search-draft", "search-involves", "search-reviewed"]) {
+      await writeFile(join(responses, `${name}.json`), empty);
+    }
+    expect((await get(origin, "/api/github/pr/list?refresh=1")).status).toBe(200);
+    expect(await readdir(draftsDir)).toEqual([]);
   }, 40_000);
 
   /* ---------------------------------------------------------------- cache */

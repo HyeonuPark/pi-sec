@@ -56,6 +56,7 @@ export function createGithubPrExtension(_context: ExtensionContext): Extension<T
  * | `ghPath` | `string` | `gh` on `PATH` |
  * | `ghEnv` | `Record<string, string>` | the process environment |
  * | `repoRoot` | `string` | `<pi-sec home>/gh-repo` |
+ * | `draftsDir` | `string` | `<pi-sec home>/state/github-pr/review-drafts` |
  * | `remoteUrl` | `(slug: string) => string` | `https://github.com/<slug>.git` |
  * | `now` | `() => number` | `Date.now` |
  * | `timers` | `{ set, clear }` | `setTimeout`/`clearTimeout` |
