@@ -1326,6 +1326,41 @@ and only the copy that outlives the tab is missing. The comments a reader collec
 on a diff's lines and has not submitted are kept the same way, under the pull
 request they belong to. The diff of one commit is kept under its own key.
 
+**The unsubmitted review is saved on the server.** The comments a reader collects
+with Add to review, the overall comment and the verdict are kept, as one file for
+each pull request, under `state/github-pr/review-drafts/` (see
+[http-api.md](./http-api.md#github-pr-draft)), so they come back after the tab is
+closed and on another browser. The tab's own copy is still drawn first, and the
+server's draft then replaces it. Each change is one small request (add, remove, set,
+discard), sent one at a time in order. The overall comment is sent one second after
+the last key press, when its field loses focus and when the page closes, and the
+verdict is sent at once. When a request fails, the comment stays on the page and in
+the tab, the review panel says `Not saved to server` with a Retry button, and the
+next change, the Retry press or the next page load sends what waited. A review that
+the page submits removes its comments from the draft. Discard all deletes the draft.
+The server also deletes a draft when its pull request leaves the dashboard list, and
+after 30 days when the list never showed that pull request. Another open tab sees
+the change at its next change or load, not at once.
+
+**A comment keeps the text of its line.** Each comment saves the head commit of the
+diff it was written on and the text of its first and last line. When the diff has
+another head, a comment whose saved text differs from the text now at that line
+number is marked `Line changed since it was written`, shows the saved text, and sits
+at the top of its file. A comment on a file that is no longer in the diff is listed
+in the review panel under `Comments on files not in this diff`, with a Remove
+button. The panel shows how many comments point at changed lines above Submit, and
+Submit sends them as they are.
+
+**The review panel links to each comment.** Between the count and the overall
+comment the panel lists one button for each comment, in the order of the diff. Its
+text is the path, the side and lines, and the first 60 characters of the body. A
+press unfolds the file when it is folded, opens the whole folded stretch that holds
+the line (no other stretch, and none for a marked comment), scrolls the comment row
+to the middle of the view, moves the focus to the row and highlights it for about 1.5
+seconds. Under `prefers-reduced-motion` the row keeps a static outline until the next
+press. A press on a comment that is already drawn writes no state and draws no
+component. On a screen 768 pixels wide or narrower the panel closes after a press.
+
 **The sidebar folds, and lists the commits.** The heading of the CI status
 section and the heading of the Commits section are buttons: a press hides or shows
 the rows under them. The CI mark stays in its heading while the rows are hidden.

@@ -1758,6 +1758,8 @@ path below answers `404`.
 | `GET` | `/api/github/pr/<owner>/<repo>/<number>/commits/<sha>` | The diff of one commit of a pull request. |
 | `POST` | `/api/github/pr/<owner>/<repo>/<number>/reply` | A thread reply, or a comment on the whole pull request. |
 | `POST` | `/api/github/pr/<owner>/<repo>/<number>/reaction` | Add or remove one reaction. |
+| `GET` | `/api/github/pr/<owner>/<repo>/<number>/draft` | The saved, unsubmitted review of one pull request. |
+| `POST` | `/api/github/pr/<owner>/<repo>/<number>/draft` | One change of that saved review. |
 | `POST` | `/api/github/pr/<owner>/<repo>/<number>/review` | Submit a review. |
 | `POST` | `/api/github/pr/<owner>/<repo>/<number>/resolve` | Resolve one review thread. |
 | `POST` | `/api/github/pr/<owner>/<repo>/<number>/edit` | Replace the description, or one of the account's own comments. |
@@ -1913,7 +1915,8 @@ request. With the switch off, every one of them answers `403` and starts no
 // POST /api/github/pr/<owner>/<repo>/<number>/review
 { "event": "COMMENT" | "APPROVE" | "REQUEST_CHANGES",
   "body": "",
-  "comments": [{ "body": "typo", "path": "src/a.ts", "side": "RIGHT", "line": 12, "startLine": null }] }
+  "comments": [{ "body": "typo", "path": "src/a.ts", "side": "RIGHT", "line": 12, "startLine": null }],
+  "draftCommentIds": ["..."] }   // optional: the ids of the saved draft comments this review sends
 { "ok": true }
 
 // POST /api/github/pr/<owner>/<repo>/<number>/resolve
@@ -1951,9 +1954,67 @@ least one comment or a summary body. Each write that reaches GitHub leaves one
 row in the audit log with the repository, the number and the kind, and never the
 comment's text (see [security.md](./security.md#github-pr-writes)).
 
+`draftCommentIds` is read after GitHub accepted the review. The server then
+removes those comments and the summary from the saved draft of that pull request
+(§10.7) and deletes the draft file when nothing is left. A comment with another id
+stays, because another tab can add one while this tab submits. A review that GitHub
+refuses, or that the switch refuses, leaves the draft as it was. A value that is not
+a list of strings is `400`.
+
 `POST` takes the `Host` and `Origin` checks of §3.1 like every other write route.
 A request with no `Origin` header passes that check, which is how a command line
 program on the same host reaches these routes.
+
+### 10.7 The saved review: `/draft` <a id="github-pr-draft"></a>
+
+The diff page keeps the review that a reader has collected and not submitted on
+the server, one file per pull request, so the reader finds it again after the tab
+closed and on another browser. The two draft routes never reach GitHub, so
+`githubPr.writes` does not gate them: with the switch off the page draws no review
+control and makes no new draft, and a draft that exists stays until the switch is on
+again or the deletion rule below removes it.
+
+```jsonc
+// GET /api/github/pr/<owner>/<repo>/<number>/draft
+{ "version": 1, "repo": "acme/widgets", "number": 12, "listed": false,
+  "createdAt": "...", "updatedAt": "...",
+  "summary": "", "event": "COMMENT",
+  "comments": [{ "id": "...", "path": "src/a.ts", "side": "RIGHT", "line": 12, "startLine": null,
+                 "body": "typo", "headSha": "<head of the diff when it was written>",
+                 "anchor": { "first": "<text of the first line>", "last": "<text of the last line>" },
+                 "createdAt": "..." }] }
+
+// POST /api/github/pr/<owner>/<repo>/<number>/draft   (answers the whole draft after the change)
+{ "op": "add", "comment": { "id": "...", "path": "...", "side": "RIGHT", "line": 12, "startLine": null, "body": "...", "headSha": "...", "anchor": null } }
+{ "op": "remove", "id": "..." }
+{ "op": "set", "summary": "...", "event": "APPROVE" }   // summary, event, or both
+{ "op": "discard" }
+```
+
+A pull request with no saved review answers an empty draft: no comments, an empty
+`summary` and `event` `COMMENT`. An `add` with an id that exists and a `remove` with
+an id that does not exist change nothing, so a retry is safe. A draft with no comment
+and an empty `summary` has no file, so a verdict alone is not kept. The refusals are
+`415` for a body that is not JSON, `404` for a repository outside the configuration
+or a number that is not a number, and `400` for an unknown `op`, a field of the wrong
+type, more than 500 comments, or a comment body or summary of more than 65536
+characters. Changes to one pull request run one at a time in the order they arrive.
+Changes to two pull requests do not wait for each other.
+
+The server deletes a draft file after each successful read of the dashboard list (the
+poll and `GET /api/github/pr/list?refresh=1`; a failed read deletes nothing):
+
+- when its repository is no longer in `githubPr.repos`,
+- when the pull request was on the list at an earlier read (`listed` is true) and the
+  list no longer shows it,
+- when it was never on the list and no change touched it for 30 days.
+
+A pull request that the list shows gets `listed: true` and keeps its `updatedAt`.
+A file that does not parse is renamed to `<name>.unreadable` and deleted after 30
+days. Each deletion writes one log line with the repository, the number, the reason
+and the comment count, and never the text. Because `listed` is stored in the file, a
+pull request that left the list while the daemon was down is found by the first
+successful read after the start.
 
 ---
 

@@ -68,6 +68,9 @@ Path resolution:
 ├── gh-repo/                    # github-pr's bare repositories (0700): one per fork network
 │   └── <owner>/                #   of the configured repositories; safe to delete, they are
 │       └── <repo>.git/         #   fetched again when a diff is next viewed
+├── state/github-pr/review-drafts/  # github-pr's saved, unsubmitted reviews (0700): one file per pull
+│                               #   request, named `<owner>+<repo>+<number>.json` in lower case
+│                               #   (0600); a dot-named temporary file is a write in progress
 ├── cache/
     └── <timestamp>/
 ```
