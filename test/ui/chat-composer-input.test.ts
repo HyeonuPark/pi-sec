@@ -134,10 +134,19 @@ describe("the field that grows", () => {
   it("grows with its text, up to 12rem, and scrolls past that", async () => {
     const ui = await page();
     const field = ui.document.getElementById("message") as HTMLTextAreaElement;
-    const height = { value: 48 };
+    const height = { value: 40 };
     Object.defineProperty(field, "scrollHeight", { configurable: true, get: () => height.value });
+    // jsdom lays nothing out, so the one-row height the stylesheet gives is stubbed.
+    Object.defineProperty(field, "clientHeight", { configurable: true, get: () => 40 });
 
+    // One line fits the stylesheet's row, so the field keeps that height and no
+    // inline height is written: a typed line is as tall as the empty field.
     ui.type("one line");
+    await ui.settle();
+    expect(field.style.height).toBe("");
+
+    height.value = 48;
+    ui.type("one line\nand another");
     await ui.settle();
     expect(field.style.height).toBe("48px");
 

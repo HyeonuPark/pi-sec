@@ -157,6 +157,7 @@ textarea.
   the label.
   Below the breakpoint the field takes the whole row with the actions under it.
   The field grows to `12rem` and then scrolls, with the scrollbar not drawn.
+  One line of text keeps the height of the empty field, so the composer and the context bar do not move when typing starts.
 - **Unsent text in the composer.** The text typed and not sent is kept in the
   browser's `localStorage`, so a reload, a closed tab or a phone that drops the
   background tab brings it back. One entry belongs to the root conversation and

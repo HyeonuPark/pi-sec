@@ -67,8 +67,16 @@ export function autoSize(element: HTMLTextAreaElement | null = field): void {
     element.style.removeProperty("height");
     return;
   }
-  element.style.height = "auto";
-  element.style.height = `${Math.min(element.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`;
+  // The stylesheet's height is one row, borders included (`box-sizing:
+  // border-box`). Text that fits in it keeps that height, so one typed line is
+  // exactly as tall as the empty field.
+  element.style.removeProperty("height");
+  if (element.scrollHeight <= element.clientHeight) return;
+  // `scrollHeight` holds the padding but not the border, and the height the
+  // field is given is the border box, so the border is added back.
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  const border = (parseFloat(style?.borderTopWidth ?? "") || 0) + (parseFloat(style?.borderBottomWidth ?? "") || 0);
+  element.style.height = `${Math.min(element.scrollHeight + border, COMPOSER_MAX_HEIGHT_PX)}px`;
 }
 
 /* -------------------------------------------------------------- the draft */
