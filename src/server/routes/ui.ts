@@ -136,7 +136,9 @@ export function registerUi(router: Router, deps: AppDeps, options: UiRouteOption
 
     const extension = route.params["extension"] ?? "";
     const rest = route.params["*"] ?? "";
-    const uiDir = deps.runtime.ui.uiDir(extension);
+    // A page-only extension has no card registration: its files come from the
+    // page registry, which holds the same `<dir>/ui/` directory.
+    const uiDir = deps.runtime.ui.uiDir(extension) ?? deps.runtime.pages.uiDir(extension);
     if (uiDir === undefined) {
       notFound();
       return;

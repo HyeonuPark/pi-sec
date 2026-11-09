@@ -1,0 +1,11 @@
+.host-status table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.host-status th,
+.host-status td {
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}

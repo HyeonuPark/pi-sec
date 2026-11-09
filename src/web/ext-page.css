@@ -1,0 +1,14 @@
+/* The base style of a page that a runtime extension draws. Only the body font and
+   the theme colors: the core styles.css is not loaded here, so no core selector
+   reaches the extension's markup. */
+body.ext-page {
+  margin: 0;
+  padding: var(--space-4);
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--text);
+}
+
+body.ext-page a {
+  color: var(--accent);
+}

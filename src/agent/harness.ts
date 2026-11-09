@@ -34,6 +34,7 @@ import { createInboxItemTx } from "../extensions/notify.ts";
 import { ExtensionLoader } from "../registry/loader.ts";
 import { providerRegistryFor, warnMissingVmodels, type ProviderRegistry } from "../registry/providers.ts";
 import { Judges } from "../judges.ts";
+import { PageRegistry } from "../registry/pages.ts";
 import { UiRegistry } from "../registry/ui.ts";
 import type { SubagentHub } from "../extensions/subagents.ts";
 import { createBundledExtensions, bundledExtension } from "../extensions/index.ts";
@@ -170,6 +171,8 @@ export interface AgentRuntime {
    * keeps it current on every load pass.
    */
   readonly ui: UiRegistry;
+  /** The web pages runtime extensions offer under `/ext/<name>/`. The loader keeps it current. */
+  readonly pages: PageRegistry;
   /**
    * The one model provider login the web UI may drive, and the record of when
    * each provider last logged in. Its session lives in memory: a restart drops
@@ -551,6 +554,7 @@ export async function createAgentRuntime(options: AgentRuntimeOptions): Promise<
       : { finishedRetentionMs: options.modelLogin.finishedRetentionMs }),
   });
   const ui = new UiRegistry({ events: options.events, logger: options.logger });
+  const pages = new PageRegistry({ logger: options.logger });
   const loader = new ExtensionLoader({
     extensionsDir: options.paths.extensionsDir,
     registry,
@@ -563,6 +567,7 @@ export async function createAgentRuntime(options: AgentRuntimeOptions): Promise<
     onToolTags: (name, tags) => toolTags.declare(name, tags),
     ...(providers === undefined ? {} : { providers }),
     ui,
+    pages,
     // Every load pass, including a reload that removed a provider, ends with a
     // check that each vmodel still names a model the catalog has. A warning, not
     // a stop: the requests on that vmodel fail and the log says why.
@@ -739,6 +744,7 @@ export async function createAgentRuntime(options: AgentRuntimeOptions): Promise<
     scheduler,
     loader,
     ui,
+    pages,
     modelLogin,
     ...(providers === undefined ? {} : { providers }),
     janitor,

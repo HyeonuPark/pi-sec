@@ -12,6 +12,7 @@ import {
   type ModuleShape,
 } from "./extension-module.ts";
 import type { ProviderRegistry } from "./providers.ts";
+import type { PageDiagnostic, PageRegistry } from "./pages.ts";
 import type { UiDiagnostic, UiRegistry } from "./ui.ts";
 
 /** Builds an extension from a validated config value. */
@@ -30,6 +31,8 @@ export interface RuntimeExtensionDiagnostic {
    * load shows what the page will actually get.
    */
   readonly ui?: UiDiagnostic;
+  /** The pages this extension holds right now, and the entries that were dropped. */
+  readonly pages?: PageDiagnostic;
 }
 
 export interface ExtensionLoaderOptions {
@@ -67,6 +70,13 @@ export interface ExtensionLoaderOptions {
    * it, `ui` is ignored.
    */
   readonly ui?: UiRegistry;
+  /**
+   * Page registrations, when the runtime can hold them. The loader registers an
+   * extension's `pages` export here right after `ui`, on the same terms, and takes
+   * back the pages of an extension that has no module or whose directory is gone.
+   * Without it, `pages` is ignored.
+   */
+  readonly pages?: PageRegistry;
   /**
    * Called once every load pass has finished, whatever it did. The runtime wires
    * the vmodel catalog check here: after a reload, a vmodel may name a model
@@ -170,7 +180,12 @@ export class ExtensionLoader {
   list(): RuntimeExtensionDiagnostic[] {
     return [...this.diagnostics.values()].map((diagnostic) => {
       const ui = this.options.ui?.diagnostics(diagnostic.name);
-      return ui === undefined ? diagnostic : { ...diagnostic, ui };
+      const pages = this.options.pages?.diagnostics(diagnostic.name);
+      return {
+        ...diagnostic,
+        ...(ui === undefined ? {} : { ui }),
+        ...(pages === undefined ? {} : { pages }),
+      };
     });
   }
 
@@ -212,6 +227,7 @@ export class ExtensionLoader {
         // result, not a load failure: the rest of the extension is installed.
         for (const message of result.providerErrors) errors.push(message);
         for (const message of result.uiErrors) errors.push(`${dirName}: ${message}`);
+        for (const message of result.pageErrors) errors.push(`${dirName}: ${message}`);
       } else {
         errors.push(`${dirName}: ${result.error}`);
       }
@@ -234,6 +250,13 @@ export class ExtensionLoader {
         this.options.ui.unregister(name, "its directory is gone");
       }
     }
+    // And its pages: the routes answer 404 and the menu link goes at once.
+    if (this.options.pages !== undefined) {
+      for (const name of this.options.pages.names()) {
+        if (present.has(name)) continue;
+        this.options.pages.unregister(name, "its directory is gone");
+      }
+    }
     this.runAfterLoad();
     return { reloaded, errors };
   }
@@ -254,7 +277,7 @@ export class ExtensionLoader {
 
   private async loadOne(
     dirName: string,
-  ): Promise<{ ok: true; providerErrors: string[]; uiErrors: string[] } | { ok: false; error: string }> {
+  ): Promise<{ ok: true; providerErrors: string[]; uiErrors: string[]; pageErrors: string[] } | { ok: false; error: string }> {
     const dir = join(this.options.extensionsDir, dirName);
     try {
       const entry = await findEntry(dir);
@@ -273,6 +296,7 @@ export class ExtensionLoader {
         // can export no cards: take back whatever the directory held before it
         // lost its entry file.
         this.options.ui?.unregister(dirName, "no module");
+        this.options.pages?.unregister(dirName, "no module");
         this.diagnostics.set(dirName, {
           name: dirName,
           source: "core-override",
@@ -281,7 +305,7 @@ export class ExtensionLoader {
           configHash: hashConfig(configValue),
         });
         this.notify();
-        return { ok: true, providerErrors: [], uiErrors: [] };
+        return { ok: true, providerErrors: [], uiErrors: [], pageErrors: [] };
       }
 
       const module = await importModule(entry);
@@ -309,6 +333,10 @@ export class ExtensionLoader {
         dir,
         config: resolveExtensionConfigValue(dirName, module, configValue, configPresent),
       });
+      const pagesResult = await this.options.pages?.register(dirName, module.pages, {
+        dir,
+        config: resolveExtensionConfigValue(dirName, module, configValue, configPresent),
+      });
       this.diagnostics.set(dirName, {
         name: dirName,
         source: coreFactory !== undefined && module.create === undefined && module.default === undefined ? "core-override" : "runtime",
@@ -317,7 +345,9 @@ export class ExtensionLoader {
         configHash: configPresent ? hashConfig(configValue) : undefined,
       });
       this.notify();
-      return { ok: true, providerErrors: providerResult?.errors ?? [], uiErrors: uiResult?.errors ?? [] };
+      return { ok: true, providerErrors: providerResult?.errors ?? [], uiErrors: uiResult?.errors ?? [],
+        pageErrors: pagesResult?.errors ?? [],
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const existing = this.diagnostics.get(dirName);

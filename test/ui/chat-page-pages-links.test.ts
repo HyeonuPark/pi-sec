@@ -112,3 +112,44 @@ describe("the Pages menu with the enabled extensions' links", () => {
     expect(links(open).at(-1)!.getAttribute("href")).toBe("/github/pr/");
   });
 });
+
+describe("the Pages menu reads the list again each time it opens", () => {
+  const HOST = { label: "Host status", path: "/ext/host-status/" };
+
+  it("shows a link the server added after the page loaded, and puts the mount on it", async () => {
+    open = await loadChatPage({
+      base: "/sec",
+      url: "/sec/basic-chat",
+      pagesLinks: [PRS],
+      fetch: { "/api/ui/page-links": { body: [PRS, HOST] } },
+    });
+    expect(open.fetchCalls.filter((call) => call.path === "/sec/api/ui/page-links")).toHaveLength(0);
+    press(open, byId(open, "pages-toggle"));
+    await more(3);
+
+    expect(open.fetchCalls.filter((call) => call.path === "/sec/api/ui/page-links")).toHaveLength(1);
+    expect(links(open).map((each) => each.textContent)).toEqual(["Reports", "Usage", "Chats", "PRs", "Host status"]);
+    expect(links(open).at(-1)!.getAttribute("href")).toBe("/sec/ext/host-status/");
+  });
+
+  it("keeps the list from the data block when the read fails or answers something else", async () => {
+    for (const answer of [{ status: 500, body: { error: "x" } }, { body: "not a list" }, { body: {} }]) {
+      open = await loadChatPage({ pagesLinks: [PRS], fetch: { "/api/ui/page-links": answer } });
+      press(open, byId(open, "pages-toggle"));
+      await more(3);
+      expect(links(open).map((each) => each.textContent)).toEqual(["Reports", "Usage", "Chats", "PRs"]);
+      open.close();
+    }
+    open = undefined;
+  });
+
+  it("drops an entry the read answers that is not a usable link", async () => {
+    open = await loadChatPage({
+      pagesLinks: [],
+      fetch: { "/api/ui/page-links": { body: [{ label: "", path: "/x/" }, { label: "Rel", path: "x/" }, HOST] } },
+    });
+    press(open, byId(open, "pages-toggle"));
+    await more(3);
+    expect(links(open).map((each) => each.textContent)).toEqual(["Reports", "Usage", "Chats", "Host status"]);
+  });
+});

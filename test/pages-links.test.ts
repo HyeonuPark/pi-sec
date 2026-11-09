@@ -13,7 +13,7 @@
  * entry that fills it: `github-pr` declares `PRs` at `/github/pr/`, the path its
  * routes answer on.
  */
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultConfig } from "../src/config/schema.ts";
 import { AdminNotes } from "../src/runtime/notes.ts";
@@ -23,6 +23,7 @@ import { BUNDLED_EXTENSIONS, bundledExtension, type BundledExtension } from "../
 import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
 import type { AppDeps } from "../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { installHostStatus } from "./ext-pages-helpers.ts";
 
 let harness: TestHarness | undefined;
 let started: StartedServer | undefined;
@@ -189,5 +190,35 @@ describe("when the enabled list is read", () => {
     booted.runtime.setConfig(moved);
 
     expect(linksOf(await (await fetch(`${origin}/basic-chat`)).text())).toEqual([]);
+  });
+});
+
+describe("the links of runtime extension pages", () => {
+  const PRS_LINK = { label: "PRs", path: "/github/pr/" };
+  const HOST_LINK = { label: "Host status", path: "/ext/host-status/" };
+
+  it("appends the runtime links after the bundled ones on every page load, with no restart", async () => {
+    const { origin, harness: booted } = await boot(["pr-fixture"], pageCatalog("pr-fixture", [PRS_LINK]));
+    expect(linksOf(await (await fetch(`${origin}/basic-chat`)).text())).toEqual([PRS_LINK]);
+
+    await installHostStatus(booted);
+    await booted.runtime.loader.reload();
+    expect(linksOf(await (await fetch(`${origin}/basic-chat`)).text())).toEqual([PRS_LINK, HOST_LINK]);
+  });
+
+  it("answers the same list from GET /api/ui/page-links, and follows a reload both ways", async () => {
+    const { origin, harness: booted } = await boot(["pr-fixture"], pageCatalog("pr-fixture", [PRS_LINK]));
+    const read = async (): Promise<unknown> => (await fetch(`${origin}/api/ui/page-links`)).json();
+    expect(await read()).toEqual([PRS_LINK]);
+
+    const dir = await installHostStatus(booted);
+    await booted.runtime.loader.reload();
+    expect(await read()).toEqual([PRS_LINK, HOST_LINK]);
+    // The block and the route are built by one function, so they agree.
+    expect(linksOf(await (await fetch(`${origin}/basic-chat`)).text())).toEqual(await read());
+
+    await rm(dir, { recursive: true, force: true });
+    await booted.runtime.loader.reload();
+    expect(await read()).toEqual([PRS_LINK]);
   });
 });

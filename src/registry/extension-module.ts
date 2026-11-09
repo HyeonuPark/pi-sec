@@ -36,6 +36,11 @@ export interface ModuleShape {
    * owns the rules for slot names, card names and card scripts; see `ui.ts`.
    */
   ui?: unknown;
+  /**
+   * The web pages this extension offers under `/ext/<name>/`. Read by the
+   * `PageRegistry`, which owns the rules for page names and files; see `pages.ts`.
+   */
+  pages?: unknown;
   default?: Extension<ToolRegistration>;
 }
 

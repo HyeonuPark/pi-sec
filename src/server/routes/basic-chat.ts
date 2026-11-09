@@ -271,6 +271,16 @@ export function withPageLinks(html: string, links: readonly ExtensionPageLink[])
   return html.replace(PAGE_LINKS_MARKER, `<script type="application/json" id="pages-links">${json}</script>`);
 }
 
+/**
+ * The Pages menu list: the bundled links fixed at boot, then the runtime
+ * extension pages that declare `menu: true`, read from the live registry on every
+ * call. The data block of the chat page and `GET /api/ui/page-links` both build
+ * their list here, so the two cannot differ. A source added later is added here.
+ */
+export function pageLinks(deps: AppDeps, bundled: readonly ExtensionPageLink[] = []): ExtensionPageLink[] {
+  return [...bundled, ...deps.runtime.pages.links()];
+}
+
 /** The page route's options: how long one card may take to render, and the catalog. */
 export interface BasicChatOptions {
   readonly renderTimeoutMs?: number;
@@ -294,7 +304,14 @@ export function registerBasicChat(router: Router, deps: AppDeps, options: BasicC
   // router does not answer. Turning an extension on or off is a restart, which
   // is why one read is enough. The warning line for a dropped entry is written
   // here too, once per boot.
-  const pageLinks = collectPageLinks(catalog, deps.runtime.getConfig().agent.extensions.enabled, deps.runtime.logger);
+  const bundledLinks = collectPageLinks(catalog, deps.runtime.getConfig().agent.extensions.enabled, deps.runtime.logger);
+
+  // A read of the same list the page was planted with. The menu asks for it each
+  // time it opens, so a page that an extension added after the chat page loaded
+  // appears without a reload. Bundled links keep their boot rule.
+  router.get("/api/ui/page-links", ({ res }) => {
+    json(res, 200, pageLinks(deps, bundledLinks), { "Cache-Control": "no-store" });
+  });
 
   router.get("/basic-chat", async ({ req, res }) => {
     const raw = await readIndex(deps.webDir);
@@ -324,7 +341,7 @@ export function registerBasicChat(router: Router, deps: AppDeps, options: BasicC
     sendBody(res, {
       status: 200,
       contentType: "text/html; charset=utf-8",
-      body: withPageLinks(page.html, pageLinks),
+      body: withPageLinks(page.html, pageLinks(deps, bundledLinks)),
       headers: {
         "Cache-Control": "no-cache",
         // Byte-for-byte the policy this server sent before cards existed, unless a

@@ -16,10 +16,13 @@
  * The row draws three links itself and then the links the enabled extensions
  * declare, which the server plants in the page as the `pages-links` data block.
  * A page served by a server whose extensions declare none, or one that cannot be
- * read, draws the three and nothing else.
+ * read, draws the three and nothing else. Each time the menu opens, it reads the
+ * list again from `GET /api/ui/page-links`, so a page that a runtime extension
+ * added after the page loaded appears without a reload.
  */
 import { h, type ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { request } from "../../api/request.ts";
 import { at, mountAt } from "../../mount.ts";
 import { afterTheTask, isNarrow, setSidebar, sidebarIsOpen, sidebarMoved, watchWidth } from "../../state/panels.ts";
 
@@ -58,6 +61,11 @@ export function extensionPageLinks(doc: Document = document): PageLink[] {
   } catch {
     return [];
   }
+  return readPageLinks(parsed);
+}
+
+/** The valid links of a parsed value: every entry is checked, the rest are dropped. */
+function readPageLinks(parsed: unknown): PageLink[] {
   if (!Array.isArray(parsed)) return [];
   const links: PageLink[] = [];
   for (const entry of parsed) {
@@ -69,6 +77,23 @@ export function extensionPageLinks(doc: Document = document): PageLink[] {
     links.push({ label, path });
   }
   return links;
+}
+
+/** The route that answers the current extension links, read each time the menu opens. */
+export const PAGE_LINKS_ROUTE = "/api/ui/page-links";
+
+/**
+ * The current extension links from the server, or `undefined` when the read
+ * fails. The caller then keeps the list it has: the menu never gets emptier
+ * because a request failed.
+ */
+export async function fetchExtensionPageLinks(): Promise<PageLink[] | undefined> {
+  try {
+    const parsed = await request<unknown>(PAGE_LINKS_ROUTE);
+    return Array.isArray(parsed) ? readPageLinks(parsed) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The row's wrapper: the button and its menu share one positioning box. */
@@ -117,9 +142,15 @@ export function SidebarScrim() {
  */
 export function PagesRow() {
   const [open, setOpen] = useState(false);
-  // Read once, when the row first draws: the block is written into the page by
-  // the server, so it cannot change while the page is open.
-  const [links] = useState<readonly PageLink[]>(() => [...PAGE_LINKS, ...extensionPageLinks()]);
+  // Starts from the block the server wrote into the page. Each time the menu
+  // opens, the list is read again from the server, so a page an extension added
+  // after this page loaded appears without a reload. A failed read keeps the list.
+  const [links, setLinks] = useState<readonly PageLink[]>(() => [...PAGE_LINKS, ...extensionPageLinks()]);
+  const refreshLinks = (): void => {
+    void fetchExtensionPageLinks().then((fresh) => {
+      if (fresh !== undefined) setLinks([...PAGE_LINKS, ...fresh]);
+    });
+  };
   // A press on a link is a press that leaves, so the row puts itself away. The
   // close waits one task, so the browser has taken the link's address before the
   // menu's class changes. A middle-button press (`auxclick`, button 1) is the same
@@ -155,7 +186,10 @@ export function PagesRow() {
         aria-expanded={open ? "true" : "false"}
         aria-controls="pages-menu"
         aria-haspopup="menu"
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          if (!open) refreshLinks();
+        }}
       >
         ↗ Open
       </button>

@@ -7,6 +7,7 @@ import { serveStatic } from "./static.ts";
 import { resolveMount, stripMount } from "./proxy.ts";
 import { registerHealth } from "./routes/health.ts";
 import { registerBasicChat } from "./routes/basic-chat.ts";
+import { registerExtPages, type ExtPagesRouteOptions } from "./routes/ext-pages.ts";
 import { registerUi } from "./routes/ui.ts";
 import { UI_ACTION_TIMEOUT_MS, UI_RENDER_TIMEOUT_MS } from "./ui-page.ts";
 import { registerConversations } from "./routes/conversations.ts";
@@ -54,6 +55,8 @@ export interface ServerOptions {
    * instead of replacing a global that the whole process shares.
    */
   readonly usage?: UsageRouteOptions;
+  /** The extension page routes' limits. A test sets them small. */
+  readonly extPages?: ExtPagesRouteOptions;
   /** The model call statistics route's test settings (the clock). */
   readonly usageStats?: UsageStatsRouteOptions;
   /**
@@ -286,6 +289,9 @@ export function createServer(deps: AppDeps, options: ServerOptions = {}): Server
   registerHealth(router, deps);
   registerBasicChat(router, deps, { renderTimeoutMs, catalog: options.catalog ?? BUNDLED_EXTENSIONS });
   registerUi(router, deps, { actionTimeoutMs });
+  // Directly after the card routes and before the bundled routes below, so an
+  // extension's own `routes` cannot shadow a path under `/ext/`.
+  registerExtPages(router, deps, options.extPages);
   registerConversations(router, deps);
   registerFocusedChats(router, deps);
   registerJobs(router, deps);
