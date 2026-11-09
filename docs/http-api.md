@@ -643,19 +643,21 @@ starts its run, when it parks, and when it ends) are emitted for both jobs.
 
 ### Preferences
 
-The lists that decide what the user does *not* see — jobs cleared off the
-list, job titles opened, inbox items cleared, and the hides each list can still
-undo — are kept on the server, in `sec.settings`, so they survive a reload, a
-cleared browser store, and the next device. `localStorage` is per device, and a
-failed write there was silent: the rows simply came back on the next load.
+The UI state that every browser must show the same is kept on the server, in
+`sec.settings`, so it survives a reload, a cleared browser store, and the next
+device. It has three parts: the lists that decide what the user does *not* see
+(jobs cleared off the list, job titles opened, job groups folded, inbox items
+cleared, and the hides each list can still undo), the theme, and the folded
+sidebar panels. `localStorage` is per device, and a failed write there was
+silent: the rows simply came back on the next load.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/api/preferences` | All five lists. |
-| `PATCH` | `/api/preferences` | Replace the lists given, in `{ hiddenJobs?, expandedJobs?, clearedInbox?, revertQueueJobs?, revertQueueInbox? }`. |
+| `GET` | `/api/preferences` | The six lists, `theme` and the two fold lists when set, and `uiRevision`. |
+| `PATCH` | `/api/preferences` | Replace the fields given, in `{ hiddenJobs?, expandedJobs?, collapsedJobs?, clearedInbox?, revertQueueJobs?, revertQueueInbox?, theme?, foldedWide?, foldedNarrow?, baseRevision?, seedOnly? }`. |
 
 A patch leaves the fields it does not name alone, `sec.settings.notes` included,
-so two clients toggling different lists cannot lose each other's work. Ids are
+so two clients toggling different fields cannot lose each other's work. Ids are
 strings that need not exist — an id that names nothing matches nothing — and
 duplicates and blanks are dropped. A field that is not a list of strings is
 refused with `400` rather than dropped, because dropping it would put the
@@ -664,8 +666,43 @@ browser back to showing rows the user had cleared.
 The two revert queues, `revertQueueJobs` for the job tree and `revertQueueInbox`
 for the inbox, hold the ids a revert button can still restore, oldest first. Each
 queue holds at most ten ids: a write that carries more drops the oldest entry,
-because a revert reads the newest. The other three lists keep the shared cap of
+because a revert reads the newest. The other lists keep the shared cap of
 2000 ids and drop the entries over it.
+
+`theme` is one of `auto`, `light` and `dark`. `foldedWide` and `foldedNarrow` are
+lists of panel names from `inbox`, `jobs` and `machines`, one for screens wider
+than 860px and one for narrower screens. The store keeps a fold list in the
+sidebar's order. Any other theme, or a fold name outside the three, is refused
+with `400`. `theme`, `foldedWide` and `foldedNarrow` are absent from the answer
+until a browser has chosen them, and an absent field means "no shared choice
+yet". The document version stays 1 and every new field is optional, so an older
+build still reads the document.
+
+`uiRevision` is a whole number that rises by one on every write that changes a
+UI field, and stays where it is for a write that changes nothing. A patch may
+carry `baseRevision`, the revision the client last saw. If the stored revision is
+higher, the server writes nothing and answers `409` with the usual error envelope
+(`code` is `preferences_conflict`) and the current state in `current`. The page
+applies the same press to `current` and sends again, three tries at most. A patch
+without `baseRevision` is accepted as before. The comparison and the write happen
+in one commit, so two clients that write together cannot both succeed on the same
+revision.
+
+`seedOnly: true` applies `theme`, `foldedWide` and `foldedNarrow` only where the
+document holds none yet. A page uses it to carry the value its browser kept
+before the server held one, so the first browser wins and the others adopt it.
+
+Every write that changes a UI field emits one `preferences_updated` event, whose
+data is `{ revision }` and nothing else. The conversation streams carry it as a
+control event, and the chats list stream (`/api/focused-chats/events`) carries it
+too. The event names the change and the page reads the state back, as it does for
+`inbox_item`.
+
+The pages that carry the theme (`/basic-chat`, `/chats`, `/report`, `/usage`,
+`/usage/stats`) are served with the stored theme in `<html data-theme>` and the
+theme, the two fold lists and the revision in
+`<meta name="pi-sec-preferences">`, both escaped. A store with no theme leaves
+`auto`.
 
 ### Reports
 
@@ -913,7 +950,7 @@ deleted.
 |--------|------|---------|
 | `POST` | `/api/focused-chats` | Open a chat (`{ "title"?, "test"? }`). |
 | `GET` | `/api/focused-chats` | List: `?state=active`, or `?state=archived&q=&cursor=`. |
-| `GET` | `/api/focused-chats/events` | SSE stream of focused chat changes (§12). |
+| `GET` | `/api/focused-chats/events` | SSE stream of focused chat changes (§12), and of `preferences_updated`. |
 | `GET` | `/api/focused-chats/:id` | One chat. |
 | `PATCH` | `/api/focused-chats/:id` | Change the title (`{ "title" }`). |
 | `GET` | `/chats` | Serve the chats list page (see [ui.md](./ui.md)). |
@@ -2655,6 +2692,7 @@ On a fresh connection the first event is always `snapshot`. Then pi-durable
 | `focused_chat_updated` | pi-sec | A focused chat was opened, titled, archived or deleted. It carries `conversationId`, `name`, `title`, `openedAt`, `archivedAt` and `change` (`opened`, `titled`, `archived`, `deleted`). It reaches the chat page and the chats list page. The list page also receives it on `/api/focused-chats/events`. |
 | `inbox_update` | pi-durable | The conversation's pending-submission queue changed. |
 | `inbox_item` | pi-sec | A new notification item in `sec.inbox`. |
+| `preferences_updated` | pi-sec | The shared UI state (theme, panel folds, cleared and folded lists) changed. The payload is `{ revision }` only; the page reads `GET /api/preferences` when it is behind. |
 | `remote_machine_updated` | pi-sec | A remote machine's level, its wait for a stricter level, link state or block changed. The payload names the machine (`id`); the Machines panel re-reads `GET /api/remote-machines` for any value. |
 | `usage_hold_changed` | pi-sec | The set of providers holding conversations for a usage limit changed. The payload names them (`providers`, a list of provider ids, empty when nothing is held). The chat page re-reads `GET /api/admin/status` for the banner, which draws its `usageHold` list (section 11). |
 | `notice` | pi-sec | Human-facing status/errors. |

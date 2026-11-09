@@ -89,7 +89,10 @@ textarea.
   the breakpoint): pending `ask_user` questions, the inbox, the live job tree, the
   remote machines, and the footer. The footer holds the context readout
   (`10.7k / 983.6k`), then the theme control, then the Pages row, and the
-  `sidebar.bottom` slot comes below all three (section 8).
+  `sidebar.bottom` slot comes below all three (section 8). The theme control cycles
+  `auto`, `light` and `dark`. The mode is shared: the server stamps it into
+  `<html data-theme>` of every page it serves, so the first paint already uses it,
+  and a press on one machine changes every open page that has a stream.
   The inbox heading holds the count and `hide all` and no link, because the chat
   list and its New chat button are reached from the Pages row below. The header
   toggle collapses the panel; on a narrow screen the drawer covers the transcript
@@ -100,10 +103,11 @@ textarea.
   while the list is open and pointing right while it is folded, the way the
   composer's tool marks are drawn. The inbox, the job tree and the Machines panel
   fold. Awaiting you and Notes do not: one asks for an answer and the other
-  reports a failure, and both are read as they arrive. The browser keeps which
-  panels are folded, per browser and not per server, so a reload opens the page
-  the way the operator left it and a phone and a computer each remember their
-  own. Section 4 has the detail.
+  reports a failure, and both are read as they arrive. The server keeps which
+  panels are folded, in two lists: one for wide screens and one for narrow
+  screens. A reload opens the page the way the operator left it, every wide
+  screen shows the same folds, and every phone-width screen shows the same folds.
+  The theme is shared the same way. Section 4 has the detail.
 - **Pages row**: the row is named `Pages`, and its button reads `↗ Open`. The
   button opens a dropdown upward with the other first-party pages, in this order:
   `Reports` (`/report`), `Usage` (`/usage`), `Chats` (`/chats`), and then one entry
@@ -488,16 +492,32 @@ textarea.
       badge, and an open panel draws none either: its rows carry the marker
       themselves. Section 14 has the same rule for a stopped machine.
 
-  The choice is browser state. It is kept in `localStorage` under
-  `pi-sec-folded-panels` as a JSON list of panel names, and the fold itself is
-  drawn by one attribute: `body[data-folded]` holds the folded names, space
-  separated, and the stylesheet hides the content of a named panel. That is the
-  shape the whole-sidebar toggle uses (`body[data-sidebar]`). A stored value this
-  page cannot use — one that does not parse, or that names a panel this build does
-  not fold — is dropped whole and every panel is drawn open, as on a first visit.
-  A browser that keeps no storage still folds and unfolds on screen and only
-  forgets between page loads. Nothing about the fold goes to the server, so the
-  inbox on a phone and the same inbox on a computer fold independently.
+  The choice is shared state. The server keeps it in `sec.settings` as two lists
+  of panel names, `foldedWide` and `foldedNarrow`, and stamps both into the page
+  (`<meta name="pi-sec-preferences">`), so the first draw is already folded. The
+  page draws the list of its own screen class. The boundary is the drawer's
+  breakpoint, `(max-width: 860px)`, and a page that crosses it draws the list of
+  its new class. A press saves the new list for the current class only, so a fold
+  on a computer folds every wide screen and leaves the phones alone. The fold
+  itself is drawn by one attribute: `body[data-folded]` holds the folded names,
+  space separated, and the stylesheet hides the content of a named panel. That is
+  the shape the whole-sidebar toggle uses (`body[data-sidebar]`).
+
+  `localStorage` under `pi-sec-folded-panels` stays as a cache. The page reads it
+  only while the server holds no list for its class. The first page that finds
+  the server without a list carries the browser's value into the list of its own
+  class, and the server takes it only while it holds none. A cached value this
+  page cannot use, one that does not parse or that names a panel this build does
+  not fold, is dropped whole and every panel is drawn open, as on a first visit.
+  A browser that keeps no storage still folds and unfolds on screen.
+
+  Every open page follows a change. The server emits one `preferences_updated`
+  frame for each write that changes shared state, and the frame carries the
+  revision only. A page that is behind reads `GET /api/preferences` and draws the
+  answer. Applying an answer never saves, so two open pages cannot start a loop.
+  A page also reads the state after a stream reconnect and when its tab becomes
+  visible. The report page and the two usage pages have no stream, so they take a
+  new theme when the tab is shown again or when the page reloads.
 - The **job tree** shows parent/child nesting, a status chip per job
   (`planned`/`active`/`waiting`/`paused`/`done`/`failed`/`cancelled`), and run
   stats. A job whose record carries `routine` or `once` shows a
@@ -569,8 +589,9 @@ textarea.
   click folds the subjobs away and one more click opens them again, and
   `aria-expanded` says which state the row is in. A live job with no subjobs
   keeps a plain label, and a closed job keeps the clear button above, because
-  hiding work in progress is not tidying. Folding lasts for the session, so a
-  reload opens every group again. No group starts folded. The default folds name
+  hiding work in progress is not tidying. A fold is saved on the server
+  (`collapsedJobs`), so a reload keeps every folded group folded and every open
+  page folds the same groups. No group starts folded. The default folds name
   no job, because a schedule is a field on the record and not a container.
 - A schedule badge comes from the record's field and never from a label: it
   reads `routine` for a job with a `routine` field, and `once` for a job with a
