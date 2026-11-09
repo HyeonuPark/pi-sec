@@ -237,6 +237,22 @@ function sameWide(left: WideProps, right: WideProps): boolean {
 
 const Wide = memo(WideView, sameWide);
 
+/** What names one full-width row across a change of the rows above it. */
+function wideKey(wide: WideRow): string {
+  switch (wide.kind) {
+    case "expand":
+      return `x-${wide.gap}`;
+    case "pending":
+      return `p-${wide.index}`;
+    case "stale":
+      return `s-${wide.thread.id}`;
+    case "fileThread":
+      return `f-${wide.thread.id}`;
+    case "form":
+      return "form";
+  }
+}
+
 interface SplitGridProps {
   readonly file: GithubPrFile;
   readonly index: number;
@@ -268,6 +284,8 @@ function SplitGridView({ file, index, layout, actions }: SplitGridProps) {
   const language = languageForPath(file.path ?? file.oldPath);
   const covered = (side: DiffSide, line: number): boolean =>
     selection !== null && selection.side === side && line >= selection.from && line <= selection.to;
+  // A cell is keyed by its line number and not by its row: a row shifts when a box
+  // or a stretch opens above it, and the line it holds does not.
   const lines = layout.slots.filter((slot): slot is Extract<Slot, { kind: "line" }> => slot.kind === "line");
   const wides = layout.slots.filter((slot): slot is Extract<Slot, { kind: "wide" }> => slot.kind === "wide");
   return (
@@ -275,10 +293,10 @@ function SplitGridView({ file, index, layout, actions }: SplitGridProps) {
       <div class="pane pane-left">
         {lines.map((slot) =>
           slot.old === null ? (
-            <EmptyCell key={`lo-${slot.row}`} side="LEFT" row={slot.row} />
+            <EmptyCell key={`lo-${slot.new?.line.n ?? slot.row}`} side="LEFT" row={slot.row} />
           ) : (
             <PaneCell
-              key={`lc-${slot.row}`}
+              key={`lc-${slot.old.line.n}`}
               cell={slot.old}
               row={slot.row}
               language={language}
@@ -292,10 +310,10 @@ function SplitGridView({ file, index, layout, actions }: SplitGridProps) {
       <div class="pane pane-right">
         {lines.map((slot) =>
           slot.new === null ? (
-            <EmptyCell key={`ro-${slot.row}`} side="RIGHT" row={slot.row} />
+            <EmptyCell key={`ro-${slot.old?.line.n ?? slot.row}`} side="RIGHT" row={slot.row} />
           ) : (
             <PaneCell
-              key={`rc-${slot.row}`}
+              key={`rc-${slot.new.line.n}`}
               cell={slot.new}
               row={slot.row}
               language={language}
@@ -307,7 +325,7 @@ function SplitGridView({ file, index, layout, actions }: SplitGridProps) {
         )}
       </div>
       {wides.map((slot) => (
-        <Wide key={`w-${slot.row}`} wide={slot.wide} row={slot.row} actions={actions} />
+        <Wide key={wideKey(slot.wide)} wide={slot.wide} row={slot.row} actions={actions} />
       ))}
     </div>
   );

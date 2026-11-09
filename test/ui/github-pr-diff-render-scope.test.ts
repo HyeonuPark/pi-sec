@@ -256,6 +256,17 @@ describe("render scope of the diff page", () => {
     others();
   });
 
+  it("condition 6 (rows): a box that opens above rows draws their numbers and none of their code", async () => {
+    await mountPage(40, "c6r");
+    state.beginSelection(0, "RIGHT", 24);
+    state.releaseSelection();
+    await sleep();
+    const c = counts();
+    expect(c.PaneCellView ?? 0).toBeGreaterThan(0);
+    expect(c.CodeLineView ?? 0).toBe(0);
+    expect(c.FormRow).toBe(1);
+  });
+
   it("condition 7: a second answer with the same content draws no cell and highlights nothing", async () => {
     await mountPage(20, "c7");
     const spy = vi.spyOn(hljs, "highlight");
