@@ -446,7 +446,9 @@ Registration rules:
   extension sets it on an entry whose provider hands each request to another
   provider, so pi-sec's record of a call names the provider that answered. The
   usage page and `GET /api/usage` then carry no card for it: a card would state
-  zeros beside the card that already holds those numbers. Every other page, and
+  zeros beside the card that already holds those numbers. The statistics page and
+  `GET /api/usage/stats` leave it out as well, and the route refuses it as a
+  `provider` value. Every other page, and
   `pi-sec models`, still list it. The marker sits beside `config` rather than
   inside it, because `config` is the `ProviderConfig` that reaches the runtime
   unchanged. An entry without the marker is a provider of its own.
@@ -3112,8 +3114,8 @@ Rules that matter more than the checks:
   that the rest of it is clean. The scan reads each command's whole output up to
   8 MiB (`SCAN_LIMIT_BYTES`), not the shortened text a tool result shows, and a
   change or a list of untracked files larger than that fails the run.
-- **Each command has a hard timeout** (180 s). A gate that can hang is a tool call
-  that can hang.
+- **Each command has a hard timeout** (`validation.timeoutMs`, 600 s by default).
+  A gate that can hang is a tool call that can hang.
 - **A failure reverts nothing.** The tree is not executed, git is the source of
   truth, and reverting would destroy edits made after the one being checked. The
   failure blocks the *request* and reports its output to the agent instead.

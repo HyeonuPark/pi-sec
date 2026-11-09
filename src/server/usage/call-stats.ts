@@ -17,6 +17,12 @@
  *   stays in `calls` and in TTFT, is left out of speed and TPOT, and is counted in
  *   `bursts` of its slot. The rule is the same for old and new rows.
  * - Prompt length = input + cache read + cache write. 1k is 1000 tokens.
+ * - A row whose provider the caller's `isVirtual` selector marks is dropped before
+ *   anything is aggregated: an extension's virtual provider answers no call itself,
+ *   and the call is recorded under the provider that answered. A selector that
+ *   throws is read as "not virtual" and hides no row, the rule the usage service
+ *   holds (`#hidden` in `service.ts`): a list that is too long is a smaller fault
+ *   than one that silently drops a provider.
  */
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
@@ -168,6 +174,23 @@ export interface CallStatsInput {
   readonly step: UsageStatsStep;
   readonly provider?: string | undefined;
   readonly model?: string | undefined;
+  /** Marks a provider a caller leaves out of the statistics; see the header rules. */
+  readonly isVirtual?: ((providerId: string) => boolean) | undefined;
+}
+
+/**
+ * Whether a provider is virtual, by the caller's selector.
+ *
+ * A selector that throws is read as "not virtual" and hides nothing, so a broken
+ * registry leaves a list that is too long rather than one that drops a provider.
+ */
+export function virtualOf(isVirtual: ((providerId: string) => boolean) | undefined, providerId: string): boolean {
+  if (isVirtual === undefined) return false;
+  try {
+    return isVirtual(providerId) === true;
+  } catch {
+    return false;
+  }
 }
 
 function top<T extends { calls: number }>(items: readonly T[]): T | undefined {
@@ -179,7 +202,7 @@ function top<T extends { calls: number }>(items: readonly T[]): T | undefined {
 export function computeCallStats(input: CallStatsInput): UsageStatsAnswer {
   const { now, timezone, range, step } = input;
   const edges = slotEdges(now, range, step, timezone);
-  const rows = readRows(input.path, edges[0]!).filter((r) => r.started_at <= now);
+  const rows = readRows(input.path, edges[0]!).filter((r) => r.started_at <= now && !virtualOf(input.isVirtual, r.provider));
 
   const byProvider = new Map<string, Map<string, number>>();
   for (const r of rows) {

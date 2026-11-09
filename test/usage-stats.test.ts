@@ -15,6 +15,7 @@ import { defaultWebDir, startServer, type StartedServer } from "../src/server/se
 import type { AppDeps } from "../src/server/deps.ts";
 import { MAX_REQUEST_SPEED, bucketIndex, computeCallStats, percentiles, slotEdges } from "../src/server/usage/call-stats.ts";
 import type { UsageStatsAnswer } from "../src/shared/wire/usage-stats.ts";
+import type { UsageStatsRouteOptions } from "../src/server/routes/usage-stats.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 
 const TZ = "Asia/Tokyo";
@@ -202,6 +203,27 @@ describe("computeCallStats", () => {
     expect(named.slots.reduce((s, x) => s + x.calls, 0)).toBe(1);
   });
 
+  it("counts one routed call once, and leaves the virtual provider out", async () => {
+    const t = H14 + 60_000;
+    // A routed call leaves two rows: one under the virtual provider, with no TTFT,
+    // and one under the provider that answered. Both carry the same start, tokens
+    // and duration.
+    const answer = base(
+      await tmpDb([
+        call({ startedAt: t, provider: "router", model: "m", ttftMs: null, durationMs: 11_000 }),
+        call({ startedAt: t + 1, provider: "real", model: "m", ttftMs: 1000, durationMs: 11_000 }),
+      ]),
+      { isVirtual: (providerId: string) => providerId === "router" },
+    );
+    expect(answer.providers.map((p) => [p.provider, p.calls])).toEqual([["real", 1]]);
+    expect([answer.provider, answer.model]).toEqual(["real", "m"]);
+    const slot = answer.slots.find((s) => s.from === H14)!;
+    expect(slot.calls).toBe(1);
+    // The kept row is the one with the first token, so its TTFT and speed value stay.
+    expect(slot.buckets[0]!.ttftMs.count).toBe(1);
+    expect(slot.speed.count).toBe(1);
+  });
+
   it("answers empty when the file does not exist, and does not create it", async () => {
     dir = await mkdtemp(join(tmpdir(), "usage-stats-"));
     const path = join(dir, "none.sqlite");
@@ -213,7 +235,11 @@ describe("computeCallStats", () => {
   });
 });
 
-async function boot(path?: string, basePath?: string): Promise<{ origin: string; paths: TestHarness["paths"] }> {
+async function boot(
+  path?: string,
+  basePath?: string,
+  usageStats: UsageStatsRouteOptions = {},
+): Promise<{ origin: string; paths: TestHarness["paths"] }> {
   harness = await createTestHarness({
     config: { timezone: TZ, server: { ...defaultConfig().server, port: 0, ...(basePath === undefined ? {} : { basePath }) } },
   });
@@ -233,7 +259,7 @@ async function boot(path?: string, basePath?: string): Promise<{ origin: string;
   started = await startServer(deps, {
     webDir: defaultWebDir(),
     usage: { prefetch: false },
-    usageStats: { now: () => NOW },
+    usageStats: { now: () => NOW, ...usageStats },
   });
   return { origin: started.origin, paths: harness.paths };
 }
@@ -273,6 +299,47 @@ describe("GET /api/usage/stats", () => {
     const after = { bytes: await readFile(paths.modelCallsDb), mtime: (await stat(paths.modelCallsDb)).mtimeMs };
     expect(after.bytes.equals(before.bytes)).toBe(true);
     expect(after.mtime).toBe(before.mtime);
+  });
+
+  it("refuses a named virtual provider and keeps the empty-slot answer for a real one", async () => {
+    const { origin, paths } = await boot(undefined, undefined, {
+      isVirtual: (providerId: string) => providerId === "router",
+    });
+    const store = await ModelCallsStore.open(paths.modelCallsDb, () => NOW);
+    store.insert(call({ startedAt: H14 + 1000, provider: "real", model: "m" }));
+    store.close();
+
+    const refused = await fetch(`${origin}/api/usage/stats?range=24h&provider=router`);
+    expect(refused.status).toBe(400);
+    const error = (await refused.json()) as { error: { code: string; message: string; requestId: string } };
+    expect(error.error.code).toBe("bad_query");
+    expect(error.error.message).toBe("provider must not be a virtual provider");
+    expect(typeof error.error.requestId).toBe("string");
+
+    // A provider that is real and has no row is no error: its slots are empty.
+    const empty = await fetch(`${origin}/api/usage/stats?range=24h&provider=idle`);
+    expect(empty.status).toBe(200);
+    const body = (await empty.json()) as UsageStatsAnswer;
+    expect(body.provider).toBe("idle");
+    expect(body.slots.every((s) => s.calls === 0)).toBe(true);
+  });
+
+  it("leaves a virtual provider out of the answer", async () => {
+    const { origin, paths } = await boot(undefined, undefined, {
+      isVirtual: (providerId: string) => providerId === "router",
+    });
+    const t = H14 + 1000;
+    const store = await ModelCallsStore.open(paths.modelCallsDb, () => NOW);
+    store.insert(call({ startedAt: t, provider: "router", model: "m", ttftMs: null }));
+    store.insert(call({ startedAt: t + 1, provider: "real", model: "m" }));
+    store.close();
+
+    const res = await fetch(`${origin}/api/usage/stats?range=24h`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as UsageStatsAnswer;
+    expect(body.providers.map((p) => [p.provider, p.calls])).toEqual([["real", 1]]);
+    expect(body.provider).toBe("real");
+    expect(body.slots.reduce((s, x) => s + x.calls, 0)).toBe(1);
   });
 
   it("answers empty and creates no file when nothing was recorded yet", async () => {

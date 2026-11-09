@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
 import { ConfigError, deepMerge, envOverrides, loadConfig } from "../src/config/load.ts";
 import { defaultConfig, type Config } from "../src/config/schema.ts";
+import { VALIDATION_TIMEOUT_MS } from "../src/runtime/validation.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";
@@ -235,6 +236,29 @@ describe("config.test.ts", () => {
       );
       const loaded = await loadConfig({ home, env: {} });
       expect(loaded.config.server.publicUrl).toBe("https://example.com/sec");
+    });
+
+    it("reads the default validation timeout from a config that names no validation section", async () => {
+      // A file written before the key existed has no `validation` section, and the
+      // defaults are merged under it. The gate must still get a ceiling.
+      const home = await mkdtemp(join(tmpdir(), "pi-sec-config-"));
+      await writeFile(join(home, "config.json"), JSON.stringify({ version: 1 }));
+      const loaded = await loadConfig({ home, env: {} });
+      expect(loaded.config.validation.timeoutMs).toBe(VALIDATION_TIMEOUT_MS);
+    });
+
+    it("rejects a validation timeout below one second", async () => {
+      // One second is the floor: a smaller value would cut every gate command
+      // before it could say anything about the tree.
+      const home = await mkdtemp(join(tmpdir(), "pi-sec-config-"));
+      const base = defaultConfig();
+      await writeFile(
+        join(home, "config.json"),
+        JSON.stringify({ ...base, validation: { timeoutMs: 999 } }),
+      );
+      const error = await loadConfig({ home, env: {} }).catch((thrown: unknown) => thrown);
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as ConfigError).issues.join("\n")).toContain("/validation/timeoutMs");
     });
   });
 

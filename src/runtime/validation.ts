@@ -24,8 +24,16 @@ const HEAD_CHARS = 2000;
  * name, its expected and actual values, and a code frame.
  */
 const TAIL_CHARS = 6000;
-/** Per-command ceiling. A gate that can hang is a tool call that can hang. */
-export const VALIDATION_TIMEOUT_MS = 180_000;
+/**
+ * Per-command ceiling, in milliseconds. A gate that can hang is a tool call that
+ * can hang.
+ *
+ * 600 s is about three times the slowest full run measured on a four-core
+ * machine (194.8 s, cold cache), which leaves room for a slower machine without
+ * letting a stuck command hold the call forever. This is the default of the
+ * `validation.timeoutMs` config key; an operator can raise or lower it.
+ */
+export const VALIDATION_TIMEOUT_MS = 600_000;
 /** Ceiling for the change text a secret scan reads. Past this the scan is incomplete, and incomplete is a failure. */
 const SCAN_LIMIT_BYTES = 8 * 1024 * 1024;
 

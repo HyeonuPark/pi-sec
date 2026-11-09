@@ -1588,13 +1588,15 @@ A slot starts on a whole hour or a whole day of the `timezone` in config. The fi
 slot is the one that holds the start of the range, and the last one holds now. If
 the answer would need more than 744 slots (for example `range=90d&step=hour`), the
 route answers HTTP 400 `range_too_large`. A value that is not in the table gives
-HTTP 400 `bad_query`. Both use the error shape of §3. A `provider` or `model` that has
-no call is not an error: its slots are empty.
+HTTP 400 `bad_query`. Both use the error shape of §3. A `provider` that an extension
+declares virtual answers HTTP 400 `bad_query` as well, because its calls are
+recorded under the provider that answered. A `provider` or `model` that has no
+call is not an error: its slots are empty.
 
 The answer:
 
 - `generatedAt` (epoch ms), `timezone`, `provider`, `model`, `range`, `step`.
-- `providers`: each provider with a call in the range, `{ provider, calls, models: [{ model, calls }] }`, most calls first.
+- `providers`: each provider with a call in the range, `{ provider, calls, models: [{ model, calls }] }`, most calls first. A provider that an extension declares virtual is left out, because its calls are recorded under the provider that answered.
 - `buckets`: the prompt length buckets, `{ key, label, from, to }`. Prompt length is input + cache read + cache write, and 1k is 1000 tokens. The buckets are `<64k`, `64k-128k`, `128k-256k`, `256k-512k` and `≥512k` (`to` is `null` for the last one).
 - `slots`: `{ from, to, calls, failed, bursts, speed, buckets }`. `calls` counts every call that started in the slot, and `failed` counts the ones with stop reason `error` or `aborted`. `bursts` counts the successful calls that the speed rule below leaves out of `speed` and TPOT. `speed` is `{ p50, p90, count }` in tokens per second after the first token. `buckets` has one `{ ttftMs, tpotMs }` per bucket, in the order of the top-level `buckets`, each `{ p50, p90, count }` (milliseconds, and milliseconds per token).
 

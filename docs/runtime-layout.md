@@ -130,6 +130,8 @@ stored here; use `secrets/` or environment variables.
     "workspace": "~/.pi/sec/workspace"  // modification tree (never executed)
   },
 
+  "validation": { "timeoutMs": 600000 },  // ceiling of each restart-gate command (typecheck, test suite)
+
   // Model aliases, named by key. There is no default alias: the file declares
   // every key, and `agent.vmodel` names the root's.
   "vmodels": {

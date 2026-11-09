@@ -24,12 +24,14 @@ import { defaultConfig, type Config } from "../src/config/schema.ts";
 import { SecAgent } from "../src/documents.ts";
 import { CONVENTIONS_TEXT } from "../src/extensions/conventions-text.ts";
 import {
+  COMMON_SYLLABLES,
   REPORT_CHECK_QUESTIONS,
   REPORT_CHECK_UNCHECKED_ITEMS,
   checkCells,
   checkHashes,
   checkIds,
   checkRefs,
+  checkSyllables,
   programFindings,
   scanTables,
 } from "../src/extensions/reports.ts";
@@ -284,7 +286,7 @@ describe("report rules and the table check", () => {
   });
 });
 
-describe("the program checks of items 10 to 13", () => {
+describe("the program checks of items 10 to 14", () => {
   /** A document with headings 3 and 3.2, and appendix A, all above any finding. */
   const HEADINGS = ["# 계획", "", "## 3. 바꾸는 것", "", "## 3.2 질문", ""];
 
@@ -381,6 +383,29 @@ describe("the program checks of items 10 to 13", () => {
   it("item 13: reads no table inside a fenced code block", () => {
     const text = ["```text", `| a | ${"x".repeat(121)} |`, "|---|---|", "```", ""].join("\n");
     expect(checkCells(text)).toEqual([]);
+  });
+
+  it("item 14: finds a Korean syllable outside the 2350 of KS X 1001, and passes the corrected sentence", () => {
+    const broken = [...HEADINGS, "sudo 1.9.17 설명서에 기됱니다. 그리고 쟽니다.", ""].join("\n");
+    const found = checkSyllables(broken);
+    expect(found.map(({ line, syllable }) => ({ line, syllable }))).toEqual([
+      { line: 7, syllable: "됱" },
+      { line: 7, syllable: "쟽" },
+    ]);
+    expect(found[0]!.context).toContain("기됱니다");
+    const fixed = [...HEADINGS, "sudo 1.9.17 설명서에 기댑니다. 그리고 잽니다.", ""].join("\n");
+    expect(checkSyllables(fixed)).toEqual([]);
+  });
+
+  it("item 14: reads no line inside a fence and no line in the appendix", () => {
+    const text = [...HEADINGS, "```text", "기됱니다", "```", "", "## 부록 A. 인용", "", "기됱니다", ""].join("\n");
+    expect(checkSyllables(text)).toEqual([]);
+  });
+
+  it("item 14: holds the 2350 common syllables of KS X 1001", () => {
+    expect(COMMON_SYLLABLES.size).toBe(2350);
+    expect(COMMON_SYLLABLES.has("묻")).toBe(true);
+    expect(COMMON_SYLLABLES.has("댃")).toBe(false);
   });
 
   it("names every finding with its item and its line, in item order", () => {
@@ -673,14 +698,14 @@ describe("report_check: the answer", () => {
 
     expect(judge.requests).toHaveLength(1);
     expect(lines[0]).toBe(
-      "report_check: 7 questions, 1 to review (yes below 0.95). 4 program checks, 1 finding. Tables: 3 found, 1 without a delimiter row.",
+      "report_check: 7 questions, 1 to review (yes below 0.95). 5 program checks, 1 finding. Tables: 3 found, 1 without a delimiter row.",
     );
     expect(lines[1]).toBe(`REVIEW 9. ${questionOf(9)} (yes 0.21)`);
     // The program found the hash value on line 7 of the body, which is item 12.
     expect(lines[2]).toBe("CHECK 12 at line 7: a hash value in the body: 1a2b3c4");
     expect(lines[3]).toBe("TABLE at line 9: the second line is not a delimiter row.");
     expect(lines[4]).toBe("no review needed: 1 (0.99), 2 (0.99), 3 (0.99), 4 (0.99), 5 (0.99), 10 (0.99)");
-    expect(lines[5]).toBe("program checks with no finding: 10, 11, 13");
+    expect(lines[5]).toBe("program checks with no finding: 10, 11, 13, 14");
     expect(lines[6]).toBe("not checked, your own check and the root's check only: 6, 7, 8");
     expect(lines[7]).toBe(
       "Yes at 0.95 or more means that the item is clear. An item to review is one to look at once, and it does not mean that the item is bad.",
@@ -708,7 +733,7 @@ describe("report_check: the answer", () => {
     expect(details.questions["q9"]).toEqual({ probability: 0.21, review: true });
     expect(details.questions["q1"]).toEqual({ probability: 0.99, review: false });
     expect(details.program).toEqual({
-      checks: [10, 11, 12, 13],
+      checks: [10, 11, 12, 13, 14],
       findings: [{ item: 12, line: 7, what: "a hash value in the body: 1a2b3c4" }],
       unchecked: [6, 7, 8],
     });
@@ -725,12 +750,12 @@ describe("report_check: the answer", () => {
 
     expect(judge.requests).toHaveLength(1);
     expect(lines[0]).toBe(
-      "report_check: 7 questions, 2 to review (yes below 0.95). 4 program checks, 0 findings. Tables: 0 found, 0 without a delimiter row.",
+      "report_check: 7 questions, 2 to review (yes below 0.95). 5 program checks, 0 findings. Tables: 0 found, 0 without a delimiter row.",
     );
     expect(lines[1]).toBe(`REVIEW 3. ${questionOf(3)} (refused to answer)`);
     expect(lines[2]).toBe(`REVIEW 9. ${questionOf(9)} (yes 0.18)`);
     expect(lines[3]).toBe("no review needed: 1 (0.99), 2 (0.99), 4 (0.99), 5 (0.99), 10 (0.99)");
-    expect(lines[4]).toBe("program checks with no finding: 10, 11, 12, 13");
+    expect(lines[4]).toBe("program checks with no finding: 10, 11, 12, 13, 14");
     expect(lines[5]).toBe("not checked, your own check and the root's check only: 6, 7, 8");
     const details = result.details as {
       review: number[];

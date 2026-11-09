@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectChangeText, runValidation } from "../src/runtime/validation.ts";
+import { collectChangeText, runValidation, VALIDATION_TIMEOUT_MS } from "../src/runtime/validation.ts";
+import { defaultConfig } from "../src/config/schema.ts";
 
 /** Run git in one tree with a fixed identity, so a commit works on any machine. */
 function git(cwd: string, ...args: string[]): string {
@@ -235,6 +236,21 @@ describe("validation gate", () => {
     expect(run.output).toContain("was cancelled");
     // The child is gone: `close` fires only after Node reaped it.
     expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  it("stops a command that runs past its per-command ceiling, and says how long it waited", async () => {
+    // `tsc` passes; the test runner takes three seconds. A ceiling of 100 ms cuts
+    // it, and the refusal names the ceiling so a reader can tell a timeout from a
+    // failing tree. Without the ceiling the same command passes in three seconds.
+    const root = await failingRunner("sleep 3\nexit 0");
+    const run = await runValidation({ root, timeoutMs: 100 });
+    expect(run.typecheck).toBe(true);
+    expect(run.tests).toBe(false);
+    expect(run.output).toContain("did not finish within 100ms");
+  }, 30000);
+
+  it("defaults the per-command ceiling to the validation constant", () => {
+    expect(defaultConfig().validation.timeoutMs).toBe(VALIDATION_TIMEOUT_MS);
   });
 
   it("keeps the failed test's name and the run's summary out of a long run's middle", async () => {

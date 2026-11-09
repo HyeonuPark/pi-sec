@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { VALIDATION_TIMEOUT_MS } from "../runtime/validation.ts";
 
 const ThinkingLevelSchema = Type.Union([
   Type.Literal("off"),
@@ -428,6 +429,26 @@ export const ConfigSchema = Type.Object(
       {
         snapshot: Type.String(),
         workspace: Type.String(),
+      },
+      { additionalProperties: false },
+    ),
+    /**
+     * The restart gate: the checks a core change passes before the user is asked
+     * to restart onto it.
+     *
+     * The gate runs the typecheck and the full test suite in the workspace tree,
+     * so a command's ceiling has to fit the slowest of them. The value is read
+     * on each gate run (`src/extensions/self-edit.ts`), never copied at boot.
+     */
+    validation: Type.Object(
+      {
+        /**
+         * Ceiling of one gate command, in milliseconds. The floor of one second
+         * keeps a value that would cut every command at once out of the file.
+         * The default is three times the slowest full run measured so far
+         * ({@link VALIDATION_TIMEOUT_MS}).
+         */
+        timeoutMs: Type.Integer({ minimum: 1000 }),
       },
       { additionalProperties: false },
     ),
@@ -1021,6 +1042,7 @@ export function defaultConfig(): Config {
     // `applyHomeDefaults` moves `root` under `PI_SEC_HOME`, like `code.snapshot`.
     registry: { root: REGISTRY_ROOT_DEFAULT, cacheKeep: 2, refreshHours: 24, buildDirs: [], mode: "auto" },
     readFull: { maxBytes: 262144 },
+    validation: { timeoutMs: VALIDATION_TIMEOUT_MS },
     auth: { authPath: "~/.pi/sec/auth.json", modelsPath: "~/.pi/sec/models.json" },
     secrets: {
       dir: "~/.pi/sec/secrets",

@@ -16,6 +16,7 @@ import {
   defaultStep,
   MAX_SLOTS,
   slotEdges,
+  virtualOf,
 } from "../usage/call-stats.ts";
 import {
   USAGE_STATS_RANGES,
@@ -26,10 +27,16 @@ import {
 
 export interface UsageStatsRouteOptions {
   readonly now?: () => number;
+  /**
+   * Marks a provider the statistics leave out, and whose name the route refuses.
+   * Defaults to the provider registry, the selector the `/usage` cards use.
+   */
+  readonly isVirtual?: ((providerId: string) => boolean) | undefined;
 }
 
 export function registerUsageStats(router: Router, deps: AppDeps, options: UsageStatsRouteOptions = {}): void {
   const now = options.now ?? Date.now;
+  const isVirtual = options.isVirtual ?? ((providerId: string) => deps.runtime.providers?.isVirtual(providerId) === true);
 
   // The page shell, stamped with the mount prefix and the zone like `/usage`. It
   // carries no extension slot and no first-paint block: the page asks the route
@@ -70,13 +77,20 @@ export function registerUsageStats(router: Router, deps: AppDeps, options: Usage
     const step = (stepRaw ?? defaultStep(range)) as UsageStatsStep;
     const timezone = deps.runtime.getConfig().timezone;
     const at = now();
+    const providerRaw = url.searchParams.get("provider");
+    const provider = providerRaw === null || providerRaw === "" ? undefined : providerRaw;
+    // A virtual provider answers no call of its own: the call is recorded under the
+    // provider that answered, so a name of one is a query value this route refuses.
+    if (provider !== undefined && virtualOf(isVirtual, provider)) {
+      apiError(res, 400, "bad_query", "provider must not be a virtual provider", requestId);
+      return;
+    }
     // One slot per step, plus the partial one the range starts in.
     if (slotEdges(at, range, step, timezone).length - 1 > MAX_SLOTS) {
       apiError(res, 400, "range_too_large", `range ${range} with step ${step} needs more than ${MAX_SLOTS} slots`, requestId);
       return;
     }
     try {
-      const provider = url.searchParams.get("provider");
       const model = url.searchParams.get("model");
       json(
         res,
@@ -87,8 +101,9 @@ export function registerUsageStats(router: Router, deps: AppDeps, options: Usage
           timezone,
           range,
           step,
-          provider: provider === null || provider === "" ? undefined : provider,
+          provider,
           model: model === null || model === "" ? undefined : model,
+          isVirtual,
         }),
       );
     } catch (error) {

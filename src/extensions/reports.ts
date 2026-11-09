@@ -44,7 +44,7 @@ export interface ReportCheckQuestion {
  * Three of the four rules an orchestrator applies to a draft are items 1 to 3, and
  * the ten items of the Reports section of the common conventions are items 4 to 13.
  * The fourth rule ("passes the ten items") is those ten items together with the
- * table check, so it has no question of its own. Items 10 to 13 are checked by a
+ * table check, so it has no question of its own. Items 10 to 14 are checked by a
  * program, and item 10 is asked as well: the program finds a reference whose place
  * is missing, and the judge reads whether the place holds what the sentence says.
  * Items 6 to 8 are checked by nobody here, because the judge did not answer them in
@@ -144,11 +144,12 @@ export function scanTables(text: string): { found: number; withoutDelimiter: num
  *
  * These are approximations: a reference that names another
  * document without looking like one is reported, and so is a reference to this
- * document that follows a word that looks like a document name. Each rule reads
- * the body only, which ends at the first top-level appendix heading, and never a
- * line inside a fenced code block.
+ * document that follows a word that looks like a document name. Item 14 reports a
+ * rare real word as well, because such a word can sit outside the 2350 common
+ * syllables. Each rule reads the body only, which ends at the first top-level
+ * appendix heading, and never a line inside a fenced code block.
  */
-export const PROGRAM_CHECK_ITEMS: readonly number[] = [10, 11, 12, 13];
+export const PROGRAM_CHECK_ITEMS: readonly number[] = [10, 11, 12, 13, 14];
 
 /** One place a program check found, with the item it belongs to and its 1-based line. */
 export interface ProgramFinding {
@@ -156,6 +157,54 @@ export interface ProgramFinding {
   readonly line: number;
   /** What the check found, as the phrase that follows the colon of its `CHECK` line. */
   readonly what: string;
+}
+
+/**
+ * The 2350 Hangul syllables of KS X 1001, read from the EUC-KR byte ranges of
+ * that standard: a lead byte of 0xB0 to 0xC8 and a trail byte of 0xA1 to 0xFE.
+ *
+ * The decoder is the WHATWG one, whose `euc-kr` label is CP949, so the two ranges
+ * hold the 2350 common syllables of KS X 1001 and nothing else. Building the set
+ * costs about 4 ms at load, and a test pins the count.
+ */
+export const COMMON_SYLLABLES: ReadonlySet<string> = (() => {
+  const decoder = new TextDecoder("euc-kr");
+  const set = new Set<string>();
+  for (let lead = 0xb0; lead <= 0xc8; lead += 1) {
+    for (let trail = 0xa1; trail <= 0xfe; trail += 1) {
+      const syllable = decoder.decode(new Uint8Array([lead, trail]));
+      if ([...syllable].length === 1) set.add(syllable);
+    }
+  }
+  return set;
+})();
+
+/**
+ * Item 14: a Korean syllable outside the 2350 common syllables of KS X 1001,
+ * with a few characters of context. A broken character leaves one behind, and a
+ * rare real word lands here too, so the finding is a place to look at once. It is
+ * not one of the 13 report rules, and it reads the body only, as every program
+ * check does.
+ */
+export function checkSyllables(text: string, context = 6): { line: number; syllable: string; context: string }[] {
+  const lines = text.split(/\r?\n/);
+  const mask = fenceMask(lines);
+  const end = bodyEnd(lines, mask);
+  const found: { line: number; syllable: string; context: string }[] = [];
+  for (let index = 0; index < end; index += 1) {
+    if (mask[index]) continue;
+    const line = lines[index]!;
+    for (let at = 0; at < line.length; at += 1) {
+      const code = line.charCodeAt(at);
+      if (code < 0xac00 || code > 0xd7a3 || COMMON_SYLLABLES.has(line[at]!)) continue;
+      found.push({
+        line: index + 1,
+        syllable: line[at]!,
+        context: line.slice(Math.max(0, at - context), at + 1 + context),
+      });
+    }
+  }
+  return found;
 }
 
 /** `true` for every line that is a fence of a code block or inside one. */
@@ -357,6 +406,13 @@ export function programFindings(text: string): ProgramFinding[] {
   }
   for (const cell of checkCells(text)) {
     found.push({ item: 13, line: cell.line, what: `a table cell of ${cell.chars} characters: ${cell.text}` });
+  }
+  for (const syllable of checkSyllables(text)) {
+    found.push({
+      item: 14,
+      line: syllable.line,
+      what: `a Korean syllable outside the 2350 of KS X 1001: ${syllable.syllable} in ${syllable.context}`,
+    });
   }
   return found;
 }
@@ -1306,7 +1362,7 @@ Publishing a report and appending a revision each leave one notice in the user's
   const reportCheck = defineTool({
     name: "report_check",
     description:
-      "Check a draft before you send it: one request asks the judge named `report-check` seven of the 13 items of the report rules, each as an item of its own, and a program checks items 10 to 13 and every table. The answer marks for review each item whose probability of yes is below the review threshold, with its number, its question and the probability, marks each item that the judge refused to answer, with its number, its question and the words \"refused to answer\", names each program finding with its item and its line, names each table whose second line is not a delimiter row, with its line, and names the items that nothing checks. A probability at or above the threshold means that the item is clear. A mark for review means that you look at the item once, and it does not mean that the item is bad: you judge it, and the root makes the final judgement. This is a quick self-test, and it does not replace your own check or the root's. An item that nothing checks has those two checks only. Only an orchestrator has this tool.",
+      "Check a draft before you send it: one request asks the judge named `report-check` seven of the 13 items of the report rules, each as an item of its own, and a program checks items 10 to 14 and every table. Item 14 is not one of the 13 report rules: it names a Korean syllable outside the 2350 of KS X 1001, which a broken character leaves behind. The answer marks for review each item whose probability of yes is below the review threshold, with its number, its question and the probability, marks each item that the judge refused to answer, with its number, its question and the words \"refused to answer\", names each program finding with its item and its line, names each table whose second line is not a delimiter row, with its line, and names the items that nothing checks. A probability at or above the threshold means that the item is clear. A mark for review means that you look at the item once, and it does not mean that the item is bad: you judge it, and the root makes the final judgement. This is a quick self-test, and it does not replace your own check or the root's. An item that nothing checks has those two checks only. Only an orchestrator has this tool.",
     parameters: obj(
       {
         draftId: opt(str({ description: "A draft id: the text is read from the draft store." })),

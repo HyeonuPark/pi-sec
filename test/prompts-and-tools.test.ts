@@ -339,6 +339,27 @@ describe("conventions.test.ts", () => {
       expect(CONVENTIONS_TEXT).toContain("Point the test at a directory of its own under the job directory.");
     });
 
+    it("keeps a test's directories temporary and fake, so it names no real path of the install", () => {
+      // A plan wrote the memory directory into its test
+      // code, and the commit hooks read a staged file and not a plan, so the rule
+      // has to say that a plan's test code follows it too.
+      expect(CONVENTIONS_TEXT).toContain("A test builds the directories it needs with");
+    });
+
+    it("keeps the rule that reads where a copied program finds the home before it runs it", () => {
+      // An installer found the home with `getent passwd`
+      // and wrote into the real one while `HOME` named a job directory.
+      expect(CONVENTIONS_TEXT).toContain("Before a test runs a copy of someone else's program");
+    });
+
+    it("keeps bwrap as the isolation means for a program that `HOME` cannot hold", () => {
+      // A program that ignores `HOME` still runs, inside bwrap with an empty directory
+      // over the home. A temporary systemd unit is optional, because a machine can have
+      // no user manager.
+      expect(CONVENTIONS_TEXT).toContain("run it under `bwrap --unshare-user` with an empty directory mounted over the home");
+      expect(CONVENTIONS_TEXT).toContain("Wrap it in a temporary systemd unit only where");
+    });
+
     it("keeps the user's own record for the root and a focused chat", () => {
       // The root reads and writes it, a focused
       // chat reads it, and no other agent opens it.

@@ -1013,15 +1013,20 @@ export function createSelfEditExtension(context: ExtensionContext): Extension<To
       }
 
       const files = args.files ?? [];
-      // The gate takes about two minutes, so the root may run this call in the
-      // background and cancel it when the batch changes. The signal reaches both
-      // commands, and a cancelled gate raises nothing: a check that did not finish
-      // is not a pass.
+      // The gate runs the full test suite, so its time follows that run: every
+      // command it starts is bounded by `validation.timeoutMs`. The root may run
+      // this call in the background and cancel it when the batch changes. The
+      // signal reaches both commands, and a cancelled gate raises nothing: a check
+      // that did not finish is not a pass.
       const signal = ctx.abortSignal;
       // Read through a call, so the value is taken after each await instead of
       // being narrowed once from the state it had before the gate started.
       const cancelled = (): boolean => signal?.aborted === true;
-      const gate = await runValidation({ root: workspaceRoot, signal });
+      const gate = await runValidation({
+        root: workspaceRoot,
+        timeoutMs: context.getConfig().validation.timeoutMs,
+        signal,
+      });
       if (cancelled()) return cancelledRestart();
       const change = await collectChangeText(workspaceRoot, snapshotRoot, { signal });
       if (cancelled()) return cancelledRestart();
