@@ -39,9 +39,13 @@ Rules:
   as the user's own account.
 - **Startup is fail-closed.** Invalid config, an unreadable data dir, or a missing
   default model aborts startup rather than running degraded.
-- **Graceful shutdown** (`SIGTERM`): stop accepting → close SSE → drain active
-  work with a deadline → `harness.close(context)` → close storage. SIGKILL is safe:
-  unfinished tasks are committed and resume on boot.
+- **Graceful shutdown** (`SIGTERM`, `SIGINT`, or the restart button): close the
+  event streams and refuse new ones → stop accepting connections → wait for the
+  extension cleanups → end the remaining connections after a 5-second grace →
+  close the runtime, which ends with `harness.close(context)`. The whole stop has
+  a 20-second deadline: when it passes, the daemon logs the step that is still
+  running and exits with its exit code. SIGKILL is safe: unfinished tasks are
+  committed and resume on boot.
 - **Cold restart** is how core changes apply. It means **stop the running process
   and start a new one** after `user-tools/update-and-restart` advances the snapshot
   to the new HEAD. The running process never replaces its own loaded core modules;

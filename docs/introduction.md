@@ -269,7 +269,8 @@ systemd (or `pi-sec start`), as the dedicated pi-sec user
 
 A second `start` on the same home exits with an error before it opens the store.
 
-Graceful shutdown drains requests and closes the store. A hard kill is safe:
+Graceful shutdown closes the event streams, stops accepting connections, and
+closes the runtime, within a deadline of 20 seconds. A hard kill is safe:
 unfinished tasks are committed and resume on the next boot.
 
 ---

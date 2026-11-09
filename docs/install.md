@@ -504,7 +504,8 @@ the runner runs `user-tools/update-and-restart` and starts the daemon again. Any
 other exit code ends the runner with that code and the daemon is not started
 again: a refusal to start or a crash would repeat, and a loop would hide the
 reason from you. If you want more than that, run the runner under your own
-supervisor.
+supervisor. The daemon ends within 20 seconds of a stop request, so the runner always gets
+an exit code.
 
 The update's output goes to the terminal and to
 `~/.pi/sec/logs/update-and-restart.log`.
