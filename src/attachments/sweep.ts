@@ -1,14 +1,14 @@
 import type { AttachmentContext } from "./store.ts";
-import { dropForJobs, sweep } from "./store.ts";
+import { sweep } from "./store.ts";
 
 /**
- * The two cleanup entry points, in the module the harness wiring reads.
+ * The cleanup entry point, in the module the harness wiring reads.
  *
  * The work itself is in `store.ts`, next to the index it walks. This module is
- * the seam: the archive hook calls `dropForJobs`, the boot pass calls
- * `sweepAttachments`, and neither has to know how the two roots are laid out.
+ * the seam: the boot pass calls `sweepAttachments`, and it does not have to know
+ * how the two roots are laid out.
  */
-export { dropForJobs, sweep };
+export { sweep };
 
 /** What one sweep pass did, for the boot log. */
 export interface AttachmentSweepSummary {
@@ -19,20 +19,12 @@ export interface AttachmentSweepSummary {
 /**
  * One call for the boot sweep.
  *
- * `liveJobIds` is the set of jobs still in the live store. A job that has left it
- * can no longer read what it owns, so its files go; `undefined` means the caller
- * has no live store to compare against, and the ownership rule is skipped rather
- * than guessed. Pass it: without it only the unowned grace and the orphan file
- * checks run.
- *
- * `dropForJobs` is the other half, and it is not called from here: the archive
- * hook knows exactly which jobs left, so it names them instead of waiting for a
- * later boot to notice. Both reach the same `dispose`, so both leave an audit row
- * with the file name, the id and the job id.
+ * A stored file with an owner job is kept, also after the job is archived. A
+ * stored file with no owner job is temporary: this pass deletes it once it is 24
+ * hours old. The pass also retires a row whose file is gone, and deletes a file
+ * that no row names. Every deletion leaves an audit row with the file name, the
+ * id and the reason.
  */
-export async function sweepAttachments(
-  ctx: AttachmentContext,
-  liveJobIds?: ReadonlySet<string>,
-): Promise<AttachmentSweepSummary> {
-  return await sweep(ctx, liveJobIds);
+export async function sweepAttachments(ctx: AttachmentContext): Promise<AttachmentSweepSummary> {
+  return await sweep(ctx);
 }

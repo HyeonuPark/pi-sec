@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";
 import { submitEnveloped } from "../src/submit-envelope.ts";
@@ -17,7 +17,6 @@ import * as store from "../src/attachments/store.ts";
 import {
   assignAttachments,
   createAttachment,
-  dropForJobs,
   getAttachment,
   type AttachmentContext,
   type AttachmentRoots,
@@ -377,35 +376,41 @@ describe("serving routes", () => {
 });
 
 describe("archive disposal", () => {
-  it("removes the file an archived job owns, and the row with it", async () => {
+  it("keeps the file an archived job owns and keeps serving it", async () => {
     const f = await boot();
     const png = pngBytes(16, 16);
     const response = await upload(f.origin, png, "image/png", "owned.png");
     expect(response.status).toBe(201);
     const { id } = (await response.json()) as UploadedBody;
 
-    const jobId = ulid();
-    const assigned = await assignAttachments(
-      {
-        ...f.ctx(),
-        jobs: { get: async (_context, id2) => (id2 === jobId ? { id: jobId } : undefined) },
-      },
-      [id],
-      jobId,
-    );
+    const { jobs, archive } = f.h.runtime;
+    const job = await jobs.create(BACKGROUND_CONTEXT, { title: "finished work" });
+    const assigned = await assignAttachments(f.ctx(jobs), [id], job.id);
     expect(assigned.assigned).toEqual([id]);
+    const shared = await createAttachment(f.ctx(), {
+      kind: "share",
+      name: "shared.png",
+      mime: "image/png",
+      data: png,
+      jobId: job.id,
+    });
 
     const record = await getAttachment(f.ctx(), id);
     expect(record).toBeDefined();
     const path = record!.storagePath;
+
+    await jobs.update(BACKGROUND_CONTEXT, job.id, { status: "done" });
+    await archive.sweep(BACKGROUND_CONTEXT, 0);
+    expect(await jobs.get(BACKGROUND_CONTEXT, job.id)).toBeUndefined();
+
     await expect(stat(path)).resolves.toBeDefined();
-
-    expect(await dropForJobs(f.ctx(), [jobId], "job-archived")).toBe(1);
-
-    await expect(stat(path)).rejects.toThrow();
-    expect(await getAttachment(f.ctx(), id)).toBeUndefined();
-    const gone = await fetch(`${f.origin}/api/attachments/${id}`);
-    expect(gone.status).toBe(404);
+    expect((await getAttachment(f.ctx(), id))?.jobId).toBe(job.id);
+    const kept = await fetch(`${f.origin}/api/attachments/${id}`);
+    expect(kept.status).toBe(200);
+    expect(await bytesOf(kept)).toEqual(png);
+    const sharedAnswer = await fetch(`${f.origin}/api/share/${basename(shared.storagePath)}`);
+    expect(sharedAnswer.status).toBe(200);
+    expect(await bytesOf(sharedAnswer)).toEqual(png);
   });
 });
 

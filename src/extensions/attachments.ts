@@ -154,7 +154,7 @@ export function createAttachmentsExtension(context: ExtensionContext): Extension
           description: "Path to the image, absolute or relative to the workspace, or a base64 data: URL.",
         }),
         name: opt(str({ description: "File name to publish under. Defaults to the source name." })),
-        jobId: opt(str({ description: "Job that owns the file. Omit to leave it unowned." })),
+        jobId: opt(str({ description: "Job that owns the file. A file with a job is kept, also after the job is archived. Omit to leave it unowned: an unowned file is deleted at the first daemon start 24 hours after it was stored, unless it is given to a job first." })),
         alt: opt(str({ description: "Alt text for the markdown image tag." })),
       },
     ),
@@ -264,7 +264,7 @@ export function createAttachmentsExtension(context: ExtensionContext): Extension
   const assign = defineTool({
     name: "attachments_assign",
     description:
-      "Give files to a job, so they live as long as the job does and are deleted when it is archived. The root's tool.",
+      "Give files to a job. A file with a job is kept, also after the job is archived. A file with no job is deleted at the first daemon start 24 hours after it was stored. The root's tool.",
     parameters: obj(
       {
         ids: arr(str(), { description: "Attachment or share ids." }),

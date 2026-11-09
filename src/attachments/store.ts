@@ -485,29 +485,6 @@ async function dispose(ctx: AttachmentContext, record: AttachmentRecord, reason:
   recordAudit(ctx, record, reason);
 }
 
-/**
- * Every file one of these jobs owns, dropped together.
- *
- * Called when the jobs leave the live store. A file owned by a job has no other
- * life, so it goes with the job rather than waiting for a reader that cannot
- * come.
- */
-export async function dropForJobs(
-  ctx: AttachmentContext,
-  jobIds: readonly string[],
-  reason: "job-archived",
-): Promise<number> {
-  const wanted = new Set(jobIds);
-  if (wanted.size === 0) return 0;
-  let dropped = 0;
-  for (const record of await listAttachments(ctx)) {
-    if (record.jobId === undefined || !wanted.has(record.jobId)) continue;
-    await dispose(ctx, record, reason);
-    dropped += 1;
-  }
-  return dropped;
-}
-
 /** Attachment directories are named by ULID, so anything else is not ours. */
 function looksLikeOurs(entry: string): boolean {
   return isUlid(entry);
@@ -587,16 +564,14 @@ async function orphanShareFiles(ctx: AttachmentContext, known: ReadonlySet<strin
 }
 
 /**
- * The boot and archive sweep: the three kinds of orphan, and the unowned grace.
+ * The boot sweep: rows whose file is gone, unowned rows past the grace, and
+ * files no row names.
  *
- * `liveJobIds` is what the caller knows about the live store. Absent, the
- * ownership check is skipped rather than guessed: a store with no job registry
- * must not read as "no job is live".
+ * A row with an owner job is kept, also when the job has left the live store:
+ * nothing here deletes a file because of its job. Only a row with no owner job
+ * is temporary, and it goes once it is `UNOWNED_GRACE_MS` old.
  */
-export async function sweep(
-  ctx: AttachmentContext,
-  liveJobIds?: ReadonlySet<string>,
-): Promise<SweepResult> {
+export async function sweep(ctx: AttachmentContext): Promise<SweepResult> {
   const now = Date.now();
   const records = await listAttachments(ctx);
   const known = new Set<string>();
@@ -608,13 +583,7 @@ export async function sweep(
       dropped += 1;
       continue;
     }
-    if (record.jobId !== undefined) {
-      if (liveJobIds !== undefined && !liveJobIds.has(record.jobId)) {
-        await dispose(ctx, record, "orphaned");
-        dropped += 1;
-        continue;
-      }
-    } else if (now - record.collectedAt >= UNOWNED_GRACE_MS) {
+    if (record.jobId === undefined && now - record.collectedAt >= UNOWNED_GRACE_MS) {
       await dispose(ctx, record, "unowned");
       dropped += 1;
       continue;

@@ -7,10 +7,10 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { readImageSize, sniffImageFormat, imageFormatOf } from "../src/attachments/image-size.ts";
 import {
   SecAttachment,
+  SecShare,
   UNOWNED_GRACE_MS,
   assignAttachments,
   createAttachment,
-  dropForJobs,
   getAttachment,
   listAttachments,
   readAttachmentBytes,
@@ -514,7 +514,7 @@ describe("attachment layout change", () => {
   it("reads, serves and disposes a row that still points at <id>/<id>.<ext>", async () => {
     const f = await boot();
     const data = pngBytes(8, 8);
-    const legacy = await legacyRow(f, "old.png", "image/png", data, "job-live");
+    const legacy = await legacyRow(f, "old.png", "image/png", data);
 
     const record = await getAttachment(f.ctx(), legacy.id);
     expect(record?.storagePath).toBe(legacy.path);
@@ -525,18 +525,24 @@ describe("attachment layout change", () => {
       name: "snippet",
       mime: "text/plain",
       data: Buffer.from("new layout"),
-      jobId: "job-live",
     });
 
     // The sweep counts what an indexed row points at, so neither layout is an
     // orphan and neither directory loses its file.
-    expect(await sweepAttachments(f.ctx(), new Set(["job-live"]))).toEqual({ dropped: 0, orphanFiles: 0 });
+    expect(await sweepAttachments(f.ctx())).toEqual({ dropped: 0, orphanFiles: 0 });
     expect(await readAttachmentBytes(record!)).toEqual(data);
     expect(await readdir(legacy.dir)).toEqual([`${legacy.id}.png`]);
     expect(await readdir(dirname(fresh.storagePath))).toEqual(["snippet.txt"]);
 
     // `dispose` deletes `dirname(storagePath)`, so both layouts go the same way.
-    expect(await dropForJobs(f.ctx(), ["job-live"], "job-archived")).toBe(2);
+    // Both rows have no owner job, so the unowned rule removes them once they are old.
+    await f.h.runtime.harness.commit(async (tx) => {
+      for (const id of [legacy.id, fresh.id]) {
+        const doc = await tx.doc(SecAttachment, id, id);
+        doc.collectedAt = Date.now() - UNOWNED_GRACE_MS - 60_000;
+      }
+    }, BACKGROUND_CONTEXT);
+    expect(await sweepAttachments(f.ctx())).toEqual({ dropped: 2, orphanFiles: 0 });
     expect(await stat(legacy.dir).then(() => true, () => false)).toBe(false);
     expect(await stat(dirname(fresh.storagePath)).then(() => true, () => false)).toBe(false);
     expect(await getAttachment(f.ctx(), legacy.id)).toBeUndefined();
@@ -634,18 +640,11 @@ describe("attachment assignment", () => {
 });
 
 describe("attachment sweep", () => {
-  it("drops what an archived job owns, and records the file, the id and the job", async () => {
+  it("keeps what an archived job owns", async () => {
     const f = await boot();
-    const kept = await createAttachment(f.ctx(), {
+    const upload = await createAttachment(f.ctx(), {
       kind: "attachment",
       name: "kept.png",
-      mime: "image/png",
-      data: pngBytes(8, 8),
-      jobId: "job-keep",
-    });
-    const gone = await createAttachment(f.ctx(), {
-      kind: "attachment",
-      name: "gone.png",
       mime: "image/png",
       data: pngBytes(8, 8),
       jobId: "job-archived",
@@ -658,24 +657,58 @@ describe("attachment sweep", () => {
       jobId: "job-archived",
     });
 
-    expect(await dropForJobs(f.ctx(), ["job-archived"], "job-archived")).toBe(2);
-    expect(await getAttachment(f.ctx(), gone.id)).toBeUndefined();
-    expect(await getAttachment(f.ctx(), shared.id)).toBeUndefined();
-    expect(await readAttachmentBytes(kept)).toEqual(pngBytes(8, 8));
-    expect(await stat(join(f.roots.attachments, kept.id)).then(() => true)).toBe(true);
+    expect(await sweepAttachments(f.ctx())).toEqual({ dropped: 0, orphanFiles: 0 });
+    expect(await getAttachment(f.ctx(), upload.id)).toBeDefined();
+    expect(await getAttachment(f.ctx(), shared.id)).toBeDefined();
+    expect(await readAttachmentBytes(upload)).toEqual(pngBytes(8, 8));
+    expect(await readAttachmentBytes(shared)).toEqual(pngBytes(8, 8));
+    const disposed = (await auditEvents(f.h)).filter((event) => event.type === "attachment_disposed");
+    expect(disposed).toEqual([]);
+  });
 
+  it("drops an unowned upload and an unowned share file, and records the file, the id and the kind", async () => {
+    const f = await boot();
+    const upload = await createAttachment(f.ctx(), {
+      kind: "attachment",
+      name: "old.png",
+      mime: "image/png",
+      data: pngBytes(8, 8),
+    });
+    const shared = await createAttachment(f.ctx(), {
+      kind: "share",
+      name: "shared.png",
+      mime: "image/png",
+      data: pngBytes(8, 8),
+    });
+    const fresh = await createAttachment(f.ctx(), {
+      kind: "share",
+      name: "fresh.png",
+      mime: "image/png",
+      data: pngBytes(8, 8),
+    });
+    await f.h.runtime.harness.commit(async (tx) => {
+      const docs = [
+        await tx.doc(SecAttachment, upload.id, upload.id),
+        await tx.doc(SecShare, shared.id, shared.id),
+      ];
+      for (const doc of docs) doc.collectedAt = Date.now() - UNOWNED_GRACE_MS - 60_000;
+    }, BACKGROUND_CONTEXT);
+
+    expect(await sweepAttachments(f.ctx())).toEqual({ dropped: 2, orphanFiles: 0 });
+    expect(await getAttachment(f.ctx(), upload.id)).toBeUndefined();
+    expect(await getAttachment(f.ctx(), shared.id)).toBeUndefined();
+    expect(await getAttachment(f.ctx(), fresh.id)).toBeDefined();
     const disposed = (await auditEvents(f.h)).filter((event) => event.type === "attachment_disposed");
     expect(disposed).toHaveLength(2);
     for (const event of disposed) {
-      expect(event.reason).toBe("job-archived");
-      expect(event.jobId).toBe("job-archived");
+      expect(event.reason).toBe("unowned");
       expect(typeof event.attachmentId).toBe("string");
       expect(typeof event.fileName).toBe("string");
     }
     expect(disposed.map((event) => event.kind).sort()).toEqual(["attachment", "share"]);
   });
 
-  it("drops a row whose job left the live store", async () => {
+  it("keeps a row whose job left the live store", async () => {
     const f = await boot();
     const record = await createAttachment(f.ctx(), {
       kind: "attachment",
@@ -684,11 +717,9 @@ describe("attachment sweep", () => {
       data: pngBytes(8, 8),
       jobId: "job-live",
     });
-    const swept = await sweepAttachments(f.ctx(), new Set(["job-other"]));
-    expect(swept).toEqual({ dropped: 1, orphanFiles: 0 });
-    expect(await getAttachment(f.ctx(), record.id)).toBeUndefined();
-    const disposed = (await auditEvents(f.h)).filter((event) => event.type === "attachment_disposed");
-    expect(disposed[0]).toMatchObject({ reason: "orphaned", jobId: "job-live", attachmentId: record.id });
+    const swept = await sweepAttachments(f.ctx());
+    expect(swept).toEqual({ dropped: 0, orphanFiles: 0 });
+    expect(await getAttachment(f.ctx(), record.id)).toBeDefined();
   });
 
   it("keeps what a live job owns and what an unowned file still has time for", async () => {
@@ -706,7 +737,7 @@ describe("attachment sweep", () => {
       mime: "image/png",
       data: pngBytes(8, 8),
     });
-    const swept = await sweepAttachments(f.ctx(), new Set(["job-live"]));
+    const swept = await sweepAttachments(f.ctx());
     expect(swept).toEqual({ dropped: 0, orphanFiles: 0 });
     expect(await getAttachment(f.ctx(), owned.id)).toBeDefined();
     expect(await getAttachment(f.ctx(), fresh.id)).toBeDefined();
@@ -745,7 +776,7 @@ describe("attachment sweep", () => {
       jobId: "job-live",
     });
     await rm(record.storagePath, { force: true });
-    const swept = await sweepAttachments(f.ctx(), new Set(["job-live"]));
+    const swept = await sweepAttachments(f.ctx());
     expect(swept.dropped).toBe(1);
     expect(await getAttachment(f.ctx(), record.id)).toBeUndefined();
     const disposed = (await auditEvents(f.h)).filter((event) => event.type === "attachment_disposed");
@@ -761,7 +792,7 @@ describe("attachment sweep", () => {
     await mkdir(join(f.roots.attachments, "not-ours"), { recursive: true, mode: 0o700 });
     await writeFile(join(f.roots.attachments, "not-ours", "keep.txt"), "body", { mode: 0o600 });
 
-    const swept = await sweepAttachments(f.ctx(), new Set());
+    const swept = await sweepAttachments(f.ctx());
     expect(swept).toEqual({ dropped: 0, orphanFiles: 2 });
     expect(await stat(join(f.roots.attachments, strayId)).then(() => true, () => false)).toBe(false);
     expect(await stat(join(f.roots.share, "stray.png")).then(() => true, () => false)).toBe(false);
@@ -777,7 +808,7 @@ describe("attachment sweep", () => {
     await writeFile(join(dir, `${strayId}.png`), "a", { mode: 0o600 });
     await writeFile(join(dir, ".tmp-leftover"), "b", { mode: 0o600 });
 
-    const swept = await sweepAttachments(f.ctx(), new Set());
+    const swept = await sweepAttachments(f.ctx());
     expect(swept.orphanFiles).toBe(2);
     expect(await stat(dir).then(() => true, () => false)).toBe(false);
   });
@@ -793,7 +824,7 @@ describe("attachment sweep", () => {
     // A crash between the write and the rename leaves this behind. The row is
     // live, so the sweep must take the leftover and keep the directory.
     await writeFile(join(f.roots.attachments, record.id, ".tmp-dead"), "half", { mode: 0o600 });
-    const swept = await sweepAttachments(f.ctx(), new Set());
+    const swept = await sweepAttachments(f.ctx());
     expect(swept).toEqual({ dropped: 0, orphanFiles: 1 });
     expect(await getAttachment(f.ctx(), record.id)).toBeDefined();
     expect(await readdir(join(f.roots.attachments, record.id))).toEqual(["a.png"]);

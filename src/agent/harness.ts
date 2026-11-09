@@ -18,7 +18,7 @@ import type { AuditLog } from "../runtime/audit.ts";
 import type { SecretRegistry } from "../secrets/registry.ts";
 import { createEnvFactory } from "./env.ts";
 import { sweepContextFiles } from "./context-file.ts";
-import { dropForJobs, sweepAttachments } from "../attachments/sweep.ts";
+import { sweepAttachments } from "../attachments/sweep.ts";
 import { resolveDefaultConversation } from "./conversation.ts";
 import { isModelSetupMode } from "./model-setup.ts";
 import { createLiveSettings } from "./settings.ts";
@@ -437,25 +437,8 @@ export async function createAgentRuntime(options: AgentRuntimeOptions): Promise<
       // dropped here instead of being moved. The reason reaches the audit row,
       // which is the only place the disposal survives.
       await drafts.dropForJobs(sweepContext, jobIds, "job-archived");
-      // An attachment and a share file belong to their job the same way: a job that
-      // has left the live store can never read them again, so the files go with it.
-      // Warn only, because the archive move above has already happened and a file
-      // left behind is the sweep's to find rather than a reason to fail the hook.
-      try {
-        await dropForJobs(
-          {
-            storage: options.storage,
-            harness,
-            audit: options.audit,
-            jobs,
-            context: sweepContext,
-          },
-          jobIds,
-          "job-archived",
-        );
-      } catch (error) {
-        options.logger.warn("attachment disposal failed", { error });
-      }
+      // A stored file with a job is kept after the archive. The boot sweep removes
+      // only unowned and orphan files.
     },
   });
   context.archive = archive;
@@ -681,25 +664,19 @@ export async function createAgentRuntime(options: AgentRuntimeOptions): Promise<
         options.logger.warn("draft sweep failed", { error });
       }
       // The attachment roots hold real files, so a row going away does not remove
-      // one. This pass drops what no live job can read, what lost its body, and
-      // what no row indexes. Warn only: boot must not wait for it.
+      // one. This pass drops what lost its body, what has no job after 24 hours,
+      // and what no row indexes. Warn only: boot must not wait for it.
       try {
-        const liveJobIds = new Set(
-          (await jobs.list(BACKGROUND_CONTEXT)).map((job) => job.id),
-        );
-        const attachments = await sweepAttachments(
-          {
-            storage: options.storage,
-            harness,
-            audit: options.audit,
-            jobs,
-            context: BACKGROUND_CONTEXT,
-            // The roots are configuration, so the sweep reads the same two
-            // directories the tools and the routes do.
-            getConfig,
-          },
-          liveJobIds,
-        );
+        const attachments = await sweepAttachments({
+          storage: options.storage,
+          harness,
+          audit: options.audit,
+          jobs,
+          context: BACKGROUND_CONTEXT,
+          // The roots are configuration, so the sweep reads the same two
+          // directories the tools and the routes do.
+          getConfig,
+        });
         if (attachments.dropped > 0 || attachments.orphanFiles > 0) {
           options.logger.info("attachment sweep", { ...attachments });
         }

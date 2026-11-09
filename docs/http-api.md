@@ -2628,6 +2628,29 @@ Serving, reading and the sweep all use that field, so an old row is read from th
 old path and no migration exists. The sweep removes the directory the row points
 at, which holds one file in either layout.
 
+### Lifetime of stored files
+
+pi-sec keeps a stored file as long as it has an owner job. This holds for an
+upload under `attachments.dir` and for a file an agent published under
+`attachments.shareDir`. A file gets an owner job when `share_image` names one or
+when `attachments_assign` gives it to one. When the job finishes and later moves
+to the archive, the file stays where it is, its record keeps the job id, and its
+URL keeps answering. pi-sec does not move the file to the archive and does not
+delete it.
+
+A file with no owner job is temporary. The sweep that runs once at each daemon
+start deletes it, with its record, when it is 24 hours old or older. Nothing
+deletes it between two starts, so an unowned file can stay longer than 24 hours.
+
+The same sweep retires a record whose file is gone. It also deletes a file in
+the share directory that no record names, and a ULID-named entry in the
+attachment directory that no record names. Each deletion writes an
+`attachment_disposed` or `attachment_orphan_removed` entry to the audit log.
+
+No tool or route deletes one kept file. To delete one by hand, remove the file
+from its directory. The next daemon start retires its record, and its URL then
+answers 404.
+
 ### Shared files
 
 | Method | Path | Purpose |
