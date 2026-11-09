@@ -296,7 +296,12 @@ textarea.
   alignment, blockquotes, rules, strikethrough, autolinks, and inline
   code/emphasis/links. It runs with `html: false`, so raw HTML in a message
   stays text, and its link validation refuses `javascript:` URLs. Both matter
-  here: the transcript renders model and tool output. A message bubble is never
+  here: the transcript renders model and tool output. A link in message content
+  opens a new tab: every link whose address does not start with `#` carries
+  `target="_blank"` and `rel="noopener noreferrer"`, whether it is an outside
+  address, a bare URL or one of the page's own routes. A `#` link stays in the
+  same tab. The report name in a feedback card head and in an approval card head
+  follows the same rule. A message bubble is never
   wider than the transcript, so a narrow screen does not scroll sideways. A long
   line in a code block wraps at the bubble's edge, a long word included, and
   keeps its line breaks and indentation. A wide table scrolls inside its own
@@ -792,6 +797,10 @@ fills it, and the browser script runs its controls.
 
 `/report` is a second page, deliberately not a pane in the chat: a report is a
 document, and reading one should not compete with a transcript.
+
+The report body is drawn by the same markdown renderer as the transcript (section
+3), so a link in it follows the same rule: a link whose address does not start
+with `#` opens a new tab, and a `#` link stays in the same tab.
 
 - **`/report`** lists reports in six groups — the briefing (the morning briefing
   report, at the top under `Briefing`), active plans, results (a result report

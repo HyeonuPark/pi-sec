@@ -16,8 +16,12 @@
  *   behind a path-prefix proxy. The hand-written chat page did this and its
  *   report page did not; every page gets it now, and
  *   `test/ui/common-markdown.test.ts` holds it.
- * - Every link carries `rel="noopener noreferrer"`, and markdown-it's own link
- *   validation still refuses `javascript:` and the other dangerous schemes.
+ * - Every link carries `rel="noopener noreferrer"`. A link whose address does
+ *   not start with `#` also carries `target="_blank"`, so a press opens a new
+ *   tab and the page keeps its place; this holds for outside addresses, bare
+ *   URLs and the page's own routes alike. A `#` link stays in the same tab.
+ *   Markdown-it's own link validation still refuses `javascript:` and the other
+ *   dangerous schemes.
  *
  * If the parser cannot be built, or throws on one text, the text is escaped into
  * a `<p>`: a page that cannot draw markdown still shows what was said, which is
@@ -55,6 +59,8 @@ function markdownRenderer(): InstanceType<typeof MarkdownIt> | null {
         const href = token.attrGet("href");
         if (typeof href === "string" && href.startsWith("/")) token.attrSet("href", mountedHref(href));
         token.attrSet("rel", "noopener noreferrer");
+        const final = token.attrGet("href");
+        if (typeof final === "string" && !final.startsWith("#")) token.attrSet("target", "_blank");
       }
       return previous !== undefined
         ? previous(tokens, index, options, env, self)

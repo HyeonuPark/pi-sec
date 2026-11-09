@@ -130,6 +130,8 @@ describe("the three special cards", () => {
     expect(row?.querySelector(".review-head")?.textContent).toContain("feedback · ");
     expect(row?.querySelector(".review-head a")?.getAttribute("href")).toBe("/report/example-plan");
     expect(row?.querySelector(".review-head")?.textContent).toContain("v3");
+    expect(row?.querySelector(".review-head a")?.getAttribute("target")).toBe("_blank");
+    expect(row?.querySelector(".review-head a")?.getAttribute("rel")).toBe("noopener noreferrer");
     expect(row?.querySelector(".review-body")?.textContent).toContain("the note body");
   });
 
@@ -163,6 +165,8 @@ describe("the three special cards", () => {
     expect(row?.textContent).toContain("v2");
     expect(row?.textContent).not.toContain("[pi-sec approve]");
     expect(row?.querySelector("a")?.getAttribute("href")).toBe("/report/r1");
+    expect(row?.querySelector(".approval-head a")?.getAttribute("target")).toBe("_blank");
+    expect(row?.querySelector(".approval-head a")?.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
   it("draws a Done as its own line, with the follow-up words the user wrote", async () => {

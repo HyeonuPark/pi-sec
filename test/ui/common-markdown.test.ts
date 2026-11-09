@@ -131,6 +131,19 @@ describe("markdown", () => {
     for (const link of message.querySelectorAll("a")) expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
+  it("opens every link but a # link in a new tab", () => {
+    const message = drawn(draw("[out](https://example.com/a) and https://example.org/b and [route](/report/x) and [here](#x)"));
+    const links = [...message.querySelectorAll("a")];
+
+    expect(links.length).toBe(4);
+    for (const link of links.slice(0, 3)) {
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    }
+    expect(links[3]?.getAttribute("href")).toBe("#x");
+    expect(links[3]?.hasAttribute("target")).toBe(false);
+  });
+
   it("draws into the element the surrounding markup needs", () => {
     const article = drawn(draw("# Plan\n\nbody", { tag: "article", class: "report-body", id: "report-body" }));
 

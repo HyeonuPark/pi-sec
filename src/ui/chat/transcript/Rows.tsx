@@ -228,7 +228,7 @@ export function TranscriptRow({ row }: { readonly row: TranscriptRow }) {
       return (
         <div class="message review" data-row-key={row.key} {...live}>
           <div class="review-head">
-            feedback · <a href={reportHref(row.review.report)}>{row.review.report}</a>
+            feedback · <a href={reportHref(row.review.report)} target="_blank" rel="noopener noreferrer">{row.review.report}</a>
             {row.review.version === "" ? null : ` · v${row.review.version}`}
           </div>
           <Markdown class="review-body" text={row.review.body} />
@@ -247,7 +247,7 @@ export function TranscriptRow({ row }: { readonly row: TranscriptRow }) {
       return (
         <div class="message approval" data-row-key={row.key} {...live}>
           <div class="approval-head">
-            {verb} · <a href={reportHref(row.approval.report)}>{named}</a>
+            {verb} · <a href={reportHref(row.approval.report)} target="_blank" rel="noopener noreferrer">{named}</a>
             {row.approval.version === "" ? null : ` · v${row.approval.version}`}
           </div>
           {row.approval.text === "" ? null : <Markdown class="approval-body" text={row.approval.text} />}
