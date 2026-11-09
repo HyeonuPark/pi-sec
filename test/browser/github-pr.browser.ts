@@ -77,6 +77,7 @@ let browser: Browser | undefined;
 let context: BrowserContext | undefined;
 let gh: FakeGhFixture | undefined;
 let origin = "";
+let draftsDir = "";
 
 /** Every request each page sent with a method other than GET or HEAD, in order. */
 const writes: string[] = [];
@@ -132,6 +133,47 @@ async function makeRemote(): Promise<string> {
 beforeAll(async () => {
   const remote = await makeRemote();
   const repoRoot = await mkdtemp(join(tmpdir(), "gh-repo-browser-"));
+  // The drafts directory is this test's own, and one saved review is in it before
+  // the server starts, as if an earlier session had left it.
+  draftsDir = await mkdtemp(join(tmpdir(), "gh-drafts-browser-"));
+  await writeFile(
+    join(draftsDir, `${REPO.replace("/", "+")}+${NUMBER}.json`),
+    JSON.stringify({
+      version: 1,
+      repo: REPO,
+      number: NUMBER,
+      listed: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      summary: "saved overall comment",
+      event: "COMMENT",
+      comments: [
+        {
+          id: "saved-in-a-fold",
+          path: "src/cache.ts",
+          side: "RIGHT",
+          line: 10,
+          startLine: null,
+          body: "this line sits in a folded stretch",
+          headSha: "",
+          anchor: null,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: "saved-second",
+          path: "src/index.ts",
+          side: "RIGHT",
+          line: 2,
+          startLine: null,
+          body: "second saved comment",
+          headSha: "",
+          anchor: null,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    }),
+    "utf8",
+  );
   gh = await fakeGhFixture();
 
   harness = await createTestHarness({
@@ -163,6 +205,7 @@ beforeAll(async () => {
         ghPath: gh.clientOptions.ghPath,
         ghEnv: gh.clientOptions.env ?? {},
         repoRoot,
+        draftsDir,
         remoteUrl: () => remote,
         timers: NEVER_FIRE,
       },
@@ -447,6 +490,58 @@ it("opens the diff page of one commit, with its header and files and no review c
   expect(seen.review).toBe(0);
   await shoot(page, "commit-diff");
   expectClean(await facts(), path);
+  await page.close();
+}, 60000);
+
+it("lists a saved review in the panel, and a press or the Enter key brings its comment into view, focused and marked", async () => {
+  const { page, facts } = await openPage(`/github/pr/${REPO}/${NUMBER}/diff`);
+  await page.waitForFunction(() => document.querySelectorAll("#view .file-diff").length >= 2, undefined, { timeout: 30000 });
+  await page.click(".review-bar-btn");
+  await page.waitForSelector(".review-link", { state: "attached", timeout: 30000 });
+  const links = await page.evaluate(() => [...document.querySelectorAll(".review-link")].map((e) => e.textContent ?? ""));
+  expect(links).toEqual([
+    "src/cache.ts new 10 this line sits in a folded stretch",
+    "src/index.ts new 2 second saved comment",
+  ]);
+  expect(await page.inputValue(".review-summary")).toBe("saved overall comment");
+
+  const state = (): Promise<{ inView: boolean; focused: boolean; marked: boolean; folded: boolean }> =>
+    page.evaluate(() => {
+      const row = document.querySelector('[data-pending-id="saved-in-a-fold"]') as HTMLElement | null;
+      const box = row?.getBoundingClientRect();
+      return {
+        inView: box !== undefined && box.height > 0 && box.top >= 0 && box.bottom <= window.innerHeight,
+        focused: document.activeElement === row,
+        marked: row?.classList.contains("pending-target") ?? false,
+        folded: document.getElementById("file-0")?.classList.contains("collapsed") ?? false,
+      };
+    });
+
+  // A press on the link: the file was folded, the line is inside a folded stretch.
+  await page.click("#file-0 .file-collapse");
+  await page.evaluate(() => {
+    const content = document.querySelector(".diff-content") as HTMLElement;
+    content.scrollTop = content.scrollHeight;
+  });
+  expect((await state()).folded).toBe(true);
+  await page.click('[data-link-id="saved-in-a-fold"]');
+  await page.waitForFunction(() => document.activeElement?.getAttribute("data-pending-id") === "saved-in-a-fold", undefined, { timeout: 30000 });
+  const afterPress = await state();
+  expect(afterPress).toEqual({ inView: true, focused: true, marked: true, folded: false });
+
+  // The Enter key on a focused link does the same.
+  await page.evaluate(() => {
+    const content = document.querySelector(".diff-content") as HTMLElement;
+    content.scrollTop = content.scrollHeight;
+    (document.activeElement as HTMLElement).blur();
+  });
+  expect((await state()).inView).toBe(false);
+  await page.focus('[data-link-id="saved-in-a-fold"]');
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.activeElement?.getAttribute("data-pending-id") === "saved-in-a-fold", undefined, { timeout: 30000 });
+  expect(await state()).toEqual({ inView: true, focused: true, marked: true, folded: false });
+  await shoot(page, "diff-review-links");
+  expectClean(await facts(), `/github/pr/${REPO}/${NUMBER}/diff`);
   await page.close();
 }, 60000);
 

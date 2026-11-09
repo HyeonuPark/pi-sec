@@ -484,6 +484,26 @@ pre.has-copy { position: relative; padding-top: 34px; padding-bottom: 34px; }
 .pending-loc { color: var(--fg-muted); font-size: 12px; flex-shrink: 0; }
 .pending-body { flex: 1; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pending-remove { font-size: 12px; padding: 1px 8px; flex-shrink: 0; }
+/* a comment whose line holds other code since it was written */
+.pending-moved {
+  font-size: 11px; font-weight: 600; color: #82071e;
+  border: 1px solid #cf222e; border-radius: 2em; padding: 0 8px; flex-shrink: 0;
+}
+.pending-saved {
+  font-family: var(--mono); font-size: 12px; color: var(--fg-muted);
+  max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1;
+}
+/* the row a link of the review panel took the reader to */
+.pending-row:focus { outline: none; }
+.pending-row.pending-target { outline: 2px solid var(--accent); outline-offset: -2px; animation: pending-target-fade 1.5s ease-out; }
+@keyframes pending-target-fade {
+  from { background: #fff8c5; outline-color: var(--accent); }
+  to { background: transparent; outline-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* no fade: the outline stays until the next press */
+  .pending-row.pending-target { animation: none; }
+}
 
 /* stale row: an outdated thread's review-time hunk, placed as a full-width grid row */
 .split-grid .stale-row { background: var(--bg-subtle); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; }
@@ -510,6 +530,23 @@ pre.has-copy { position: relative; padding-top: 34px; padding-bottom: 34px; }
   border: 1px solid var(--border); border-radius: 6px; resize: vertical; margin-bottom: 8px;
 }
 .review-panel textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.review-save-failed { color: #82071e; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.review-retry { font-size: 12px; padding: 1px 8px; margin-left: 6px; }
+.review-links { list-style: none; margin: 0 0 8px; padding: 0; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.review-links li { border-bottom: 1px solid var(--border); }
+.review-links li:last-child { border-bottom: none; }
+.review-link {
+  display: block; width: 100%; text-align: left; background: none; border: none; padding: 4px 8px;
+  font: inherit; font-size: 12px; color: var(--accent); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.review-link:hover { text-decoration: underline; }
+.review-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.review-missing { margin-bottom: 8px; }
+.review-missing-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.review-missing-text { font-size: 12px; color: var(--fg-muted); padding: 4px 8px; display: inline-block; }
+.review-missing-remove { font-size: 12px; padding: 1px 8px; }
+.review-moved-count { color: #82071e; font-size: 12px; font-weight: 600; margin-top: 8px; }
 .review-event { display: block; padding: 2px 0; font-size: 13px; cursor: pointer; }
 .review-event input { accent-color: var(--accent); margin-right: 6px; }
 .review-panel .reply-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }

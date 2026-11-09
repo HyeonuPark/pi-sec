@@ -37,7 +37,20 @@ import {
 } from "../api/github-pr.ts";
 import { mount } from "../mount.ts";
 import {
+  afterFrame,
+  dropDraftQueue,
+  flushSummary,
+  saveAdd,
+  saveDiscard,
+  saveEvent,
+  saveRemove,
+  saveSummary,
+  settleDraft,
+  startDraft,
+} from "../state/github-pr-draft.ts";
+import {
   addPendingComment,
+  newCommentId,
   begin,
   commitStoreKey,
   diffStoreKey,
@@ -53,8 +66,11 @@ import {
 } from "../state/github-pr.ts";
 import { readMeta } from "./blocks.ts";
 import {
+  anchorOf,
   hasThreads,
   isDiffAnswer,
+  standingOf,
+  stretchHolding,
   nextReveal,
   readDiffRoute,
   revealRows,
@@ -186,10 +202,21 @@ export const pending = pendingComments;
 
 /* ------------------------------------------------------------------ actions */
 
-/** Start the page's collection of comments for this pull request. */
+/**
+ * Start the page's collection of comments for this pull request.
+ *
+ * The tab's copy is drawn at once. With the write switch on, the server's draft
+ * is then read and replaces it, so a review started in another tab or browser is
+ * found here, together with its overall comment and verdict.
+ */
 export function startPending(): void {
   if (route === null || commitMode) return;
   loadPendingComments(route.repo, route.number);
+  if (!writes) return;
+  void startDraft(route.repo, route.number, (draft) => {
+    reviewSummary.value = draft.summary;
+    reviewEvent.value = draft.event;
+  });
 }
 
 /* -------------------------------------------------------------------- reads */
@@ -418,27 +445,107 @@ export function collectComment(body: string): boolean {
   if (file === undefined) return false;
   const path = file.path ?? file.oldPath ?? "";
   if (path === "") return false;
-  addPendingComment({
+  const startLine = form.startLine === form.line ? null : form.startLine;
+  const comment = {
+    id: newCommentId(),
     path,
     side: form.side,
     line: form.line,
-    startLine: form.startLine === form.line ? null : form.startLine,
+    startLine,
     body,
-  });
+    headSha: diff !== null && "headSha" in diff ? diff.headSha : "",
+    anchor: anchorOf(file, form.side, startLine, form.line),
+  };
+  addPendingComment(comment);
+  saveAdd(comment);
   openForm.value = null;
   return true;
 }
 
 /** Drop one collected comment, by its place in the collection. */
 export function removePending(index: number): void {
-  removePendingComment(index);
+  const id = pending.value[index]?.id;
+  if (removePendingComment(index) && id !== undefined) saveRemove(id);
 }
 
 /** Throw the whole collection away. */
 export function discardPending(): void {
   setPendingComments([]);
   reviewOpen.value = false;
+  saveDiscard();
+  // The server's discard empties its overall comment too, and the page keeps the
+  // one the reader wrote, so it is sent again.
+  if (reviewSummary.value !== "") saveSummary(reviewSummary.value);
 }
+
+/** The overall comment changed: keep it on the page, and send it when typing stops. */
+export function setSummary(text: string): void {
+  reviewSummary.value = text;
+  saveSummary(text);
+}
+
+/** The overall comment field lost focus: send what waits. */
+export function commitSummary(): void {
+  flushSummary();
+}
+
+/** The verdict changed. */
+export function setEvent(choice: ReviewEvent): void {
+  reviewEvent.value = choice;
+  saveEvent(choice);
+}
+
+/** The panel is a full-width cover on a narrow screen, where a press on a link closes it. */
+const NARROW = "(max-width: 768px)";
+
+/**
+ * Take the reader to one collected comment.
+ *
+ * The rule, in order: unfold the file when it is folded; open the whole folded
+ * stretch that holds the comment's line, and no other, unless the comment moved
+ * (its line holds other code now, so its row sits at the top of the file and no
+ * stretch is worth opening); then scroll to the row, move the focus to it and
+ * mark it. Scroll, focus and mark act on the element itself, so a press on a
+ * comment that is already drawn writes no signal and draws no component.
+ */
+export function jumpToComment(id: string): void {
+  const diff = answer.value;
+  const comment = pending.value.find((entry) => entry.id === id);
+  if (diff === null || comment === undefined) return;
+  const headSha = "headSha" in diff ? diff.headSha : "";
+  const standing = standingOf(diff.files, comment, headSha);
+  const file = diff.files[standing.fileIndex];
+  if (file === undefined) return;
+  let wrote = false;
+  if (folded.value.has(standing.fileIndex)) {
+    toggleFile(standing.fileIndex);
+    wrote = true;
+  }
+  if (!standing.moved) {
+    const gap = stretchHolding(file, revealedOf(standing.fileIndex), comment.side, comment.line);
+    if (gap !== null) {
+      revealGap(standing.fileIndex, gap, "all");
+      wrote = true;
+    }
+  }
+  if (typeof matchMedia === "function" && matchMedia(NARROW).matches) reviewOpen.value = false;
+  const arrive = (tries: number): void => {
+    const row = [...document.querySelectorAll<HTMLElement>("[data-pending-id]")].find((entry) => entry.dataset["pendingId"] === id) ?? null;
+    if (row === null) {
+      if (tries > 0) afterFrame(() => arrive(tries - 1));
+      return;
+    }
+    for (const old of document.querySelectorAll(".pending-target")) old.classList.remove("pending-target");
+    row.scrollIntoView?.({ block: "center" });
+    row.focus({ preventScroll: true });
+    row.classList.add("pending-target");
+    row.addEventListener("animationend", () => row.classList.remove("pending-target"), { once: true });
+  };
+  if (wrote) afterFrame(() => arrive(10));
+  else arrive(0);
+}
+
+
 
 /** Fold or unfold one outdated thread's review-time code. */
 export function toggleStale(id: string): void {
@@ -475,6 +582,9 @@ export async function submit(): Promise<boolean> {
   submitting.value = true;
   reviewNotice.value = null;
   try {
+    // What the page holds must be on the server before the review goes, or a late
+    // add would bring a submitted comment back after the server removed it.
+    await settleDraft();
     await submitReview(route.repo, route.number, {
       body,
       event: reviewEvent.value,
@@ -485,7 +595,9 @@ export async function submit(): Promise<boolean> {
         line: comment.line,
         startLine: comment.startLine,
       })),
+      draftCommentIds: comments.map((comment) => comment.id),
     });
+    dropDraftQueue();
     setPendingComments([]);
     reviewSummary.value = "";
     // The panel stays open, because the page does not navigate away and a note

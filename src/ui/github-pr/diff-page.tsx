@@ -29,16 +29,21 @@ import { ErrorBanner } from "./banner.tsx";
 import { TopBar } from "./topbar.tsx";
 import { closeDrawer } from "./sidebar.ts";
 import { DiffFile, type FileActions } from "./diff-file.tsx";
-import { buildTree, layoutFile, placeThreads, type FileLayout, type PendingOnFile, type ThreadPlacement } from "./diff-model.ts";
+import { buildTree, commentMoved, layoutFile, placeThreads, savedTextOf, standingOf, type FileLayout, type PendingOnFile, type ThreadPlacement } from "./diff-model.ts";
 import type { GithubPrFile } from "../api/github-pr.ts";
 import { DiffTree } from "./diff-tree.tsx";
-import { ReviewBar } from "./diff-review.tsx";
+import { ReviewBar, type ReviewLink } from "./diff-review.tsx";
+import { draftFailed, retryDraft } from "../state/github-pr-draft.ts";
 import {
   NO_ROUTE,
   activeFile,
   answer,
   commitMode,
   beginSelection,
+  commitSummary,
+  jumpToComment,
+  setEvent,
+  setSummary,
   cancelForm,
   collectComment,
   discardPending,
@@ -58,7 +63,6 @@ import {
   revealedOf,
   revealGap,
   reviewEvent,
-  type ReviewEvent,
   reviewNotice,
   reviewOpen,
   reviewSummary,
@@ -302,6 +306,7 @@ function layoutOf(
   placement: ThreadPlacement,
   placed: ReadonlyMap<string, string>,
   cache: Map<number, CachedLayout>,
+  headSha: string,
 ): FileLayout {
   const path = file.path ?? file.oldPath ?? "";
   const comments: PendingOnFile[] = [];
@@ -311,12 +316,19 @@ function layoutOf(
   if (writes) {
     pending.value.forEach((comment, position) => {
       if (comment.path !== path) return;
+      // A comment written on an older head whose line holds other code now is
+      // marked, and its row goes to the top of the file. The mark is a value of the
+      // comment, so it is part of the layout's key below.
+      const moved = commentMoved(file, comment, headSha);
       comments.push({
         index: position,
+        id: comment.id,
         side: comment.side,
         startLine: comment.startLine,
         line: comment.line,
         body: comment.body,
+        moved,
+        savedText: moved ? savedTextOf(comment.anchor) : "",
       });
     });
   }
@@ -374,11 +386,44 @@ function selectFile(index: number): void {
   closeDrawer();
 }
 
-/** The review bar, which reads the review's own signals itself. */
+/**
+ * The review bar, which reads the review's own signals itself.
+ *
+ * It reads the comments, the overall comment, the verdict, the save state and the
+ * file list of the answer, and nothing a code cell draws from.
+ */
 function ReviewPanel() {
+  const diff = answer.value;
+  const headSha = diff !== null && "headSha" in diff ? diff.headSha : "";
+  const files = diff?.files ?? [];
+  const comments = pending.value;
+  const links: ReviewLink[] = [];
+  const missing: ReviewLink[] = [];
+  let moved = 0;
+  comments.forEach((comment, index) => {
+    const standing = standingOf(files, comment, headSha);
+    if (standing.moved) moved += 1;
+    const link: ReviewLink = { id: comment.id, comment, index, order: standing.fileIndex, moved: standing.moved };
+    if (standing.fileIndex < 0) missing.push(link);
+    else links.push(link);
+  });
+  links.sort(
+    (a, b) =>
+      a.order - b.order ||
+      (a.comment.side === b.comment.side ? 0 : a.comment.side === "LEFT" ? -1 : 1) ||
+      a.comment.line - b.comment.line,
+  );
   return (
     <ReviewBar
-      count={pending.value.length}
+      count={comments.length}
+      links={links}
+      missing={missing}
+      movedCount={moved}
+      saveFailed={draftFailed.value}
+      onRetry={retryDraft}
+      onJump={jumpToComment}
+      onRemove={removePending}
+      onSummaryBlur={commitSummary}
       open={reviewOpen.value}
       summary={reviewSummary.value}
       event={reviewEvent.value}
@@ -391,14 +436,6 @@ function ReviewPanel() {
       onSubmit={submitReviewPress}
     />
   );
-}
-
-function setSummary(text: string): void {
-  reviewSummary.value = text;
-}
-
-function setEvent(choice: ReviewEvent): void {
-  reviewEvent.value = choice;
 }
 
 function submitReviewPress(): void {
@@ -415,13 +452,14 @@ function submitReviewPress(): void {
  */
 function DiffBody({ repo, number }: { readonly repo: string; readonly number: number }) {
   const diff = answer.value;
+  const headSha = diff !== null && "headSha" in diff ? diff.headSha : "";
   const panes = useRef<HTMLDivElement | null>(null);
   const cache = useRef(new Map<number, CachedLayout>());
   const placement = useMemo(() => placeThreads(threads.value), [threads.value]);
   const placed = useMemo(() => placementKeys(placement), [placement]);
   // Every file's rows are built from its own inputs, and an unchanged file keeps the
   // object it had: a diff of two thousand lines is walked by the file that changed.
-  const layouts = diff === null ? [] : diff.files.map((file, index) => layoutOf(index, file, placement, placed, cache.current));
+  const layouts = diff === null ? [] : diff.files.map((file, index) => layoutOf(index, file, placement, placed, cache.current, headSha));
   /**
    * Mark the file the reader is looking at.
    *

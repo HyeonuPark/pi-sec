@@ -152,12 +152,25 @@ export function isCurrent(key: string, ticket: number): boolean {
 
 /** One comment a reader wrote on a diff's line and has not submitted yet. */
 export interface GithubPrPendingComment {
+  /** Random, made by the browser: the server's draft names a comment by it. */
+  readonly id: string;
   readonly path: string;
   readonly side: "LEFT" | "RIGHT";
   readonly line: number;
   /** The first line of a range, or `null` for a single line. */
   readonly startLine: number | null;
   readonly body: string;
+  /** The head commit of the diff the comment was written on, or `""` for a copy that predates it. */
+  readonly headSha: string;
+  /** The text of the first and the last line of the range, or `null` when the diff had no file text. */
+  readonly anchor: { readonly first: string; readonly last: string } | null;
+}
+
+/** A new random id for a collected comment. */
+export function newCommentId(): string {
+  const crypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
+  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 /**
@@ -173,13 +186,27 @@ export const pendingComments = signal<readonly GithubPrPendingComment[]>([]);
 /** The keys whose comments {@link pendingComments} currently holds. */
 let pendingKey: string | null = null;
 
+/**
+ * The comments of a tab copy that predates the draft on the server: they had no
+ * id, so this load gave them one. The draft module sends them to the server once,
+ * and only when the server has no draft.
+ */
+export const legacyComments: GithubPrPendingComment[] = [];
+
 /** Read the collected comments of one pull request, and make them the open ones. */
 export function loadPendingComments(repo: string, number: number): readonly GithubPrPendingComment[] {
   const key = pendingStoreKey(repo, number);
-  const stored = readStored<GithubPrPendingComment[]>(key);
-  const list = Array.isArray(stored) ? stored : [];
+  const stored = readStored<Partial<GithubPrPendingComment>[]>(key);
+  legacyComments.length = 0;
+  const list = (Array.isArray(stored) ? stored : []).map((item): GithubPrPendingComment => {
+    if (typeof item.id === "string" && item.id !== "") return item as GithubPrPendingComment;
+    const filled = { ...item, id: newCommentId(), headSha: item.headSha ?? "", anchor: item.anchor ?? null } as GithubPrPendingComment;
+    legacyComments.push(filled);
+    return filled;
+  });
   pendingKey = key;
   pendingComments.value = list;
+  if (legacyComments.length > 0) writeStored(key, list);
   return list;
 }
 

@@ -540,10 +540,16 @@ export interface OpenForm {
 /** One comment a reader collected on this file, with its index in the collection. */
 export interface PendingOnFile {
   readonly index: number;
+  /** The comment's id, which names its row for the link in the review panel. */
+  readonly id: string;
   readonly side: DiffSide;
   readonly startLine: number | null;
   readonly line: number;
   readonly body: string;
+  /** True when the code on its line changed since it was written: the row goes to the top of the file. */
+  readonly moved: boolean;
+  /** The saved text of its line, shown on a moved comment, or `""`. */
+  readonly savedText: string;
 }
 
 /** A row that spans both panes. */
@@ -561,10 +567,13 @@ export type WideRow =
   | {
       readonly kind: "pending";
       readonly index: number;
+      readonly id: string;
       readonly side: DiffSide;
       readonly startLine: number | null;
       readonly line: number;
       readonly body: string;
+      readonly moved: boolean;
+      readonly savedText: string;
     }
   | { readonly kind: "stale"; readonly thread: GithubPrThread; readonly open: boolean }
   | { readonly kind: "fileThread"; readonly thread: GithubPrThread }
@@ -668,14 +677,20 @@ export function layoutFile(input: FileLayoutInput): FileLayout {
   };
 
   for (const comment of input.pending) {
-    place(comment.side, comment.line, {
+    const wide: WideRow = {
       kind: "pending",
       index: comment.index,
+      id: comment.id,
       side: comment.side,
       startLine: comment.startLine,
       line: comment.line,
       body: comment.body,
-    });
+      moved: comment.moved,
+      savedText: comment.savedText,
+    };
+    // A comment whose line holds other code now has no line to sit under.
+    if (comment.moved) leading.push(wide);
+    else place(comment.side, comment.line, wide);
   }
   for (const stale of input.threads.stale) {
     if ((stale.thread.path ?? "") !== path) continue;
@@ -752,6 +767,112 @@ export function layoutFile(input: FileLayoutInput): FileLayout {
     for (const wide of under) slots.push({ kind: "wide", row: nextRow(), wide });
   }
   return { slots, rows: row };
+}
+
+/* ------------------------------------------------------ comments and commits */
+
+/** The part of a collected comment that decides where it sits after new commits. */
+export interface PlaceableComment {
+  readonly path: string;
+  readonly side: DiffSide;
+  readonly line: number;
+  readonly startLine: number | null;
+  readonly headSha: string;
+  readonly anchor: { readonly first: string; readonly last: string } | null;
+}
+
+/** The text of one line of a file on one side, `undefined` past the end, `null` when the answer has no text. */
+export function sideText(file: GithubPrFile, side: DiffSide, n: number): string | undefined | null {
+  const lines = side === "LEFT" ? file.oldContent : file.newContent;
+  if (lines == null) return null;
+  return lines[n - 1];
+}
+
+/**
+ * The text a comment saves with itself: the first and the last line of its range,
+ * or `null` when the answer holds no text for that side of the file.
+ */
+export function anchorOf(
+  file: GithubPrFile,
+  side: DiffSide,
+  startLine: number | null,
+  line: number,
+): { first: string; last: string } | null {
+  const first = sideText(file, side, startLine ?? line);
+  const last = sideText(file, side, line);
+  if (typeof first !== "string" || typeof last !== "string") return null;
+  return { first, last };
+}
+
+/**
+ * Whether the code under a comment is no longer the code it was written on.
+ *
+ * Only a comment written on another head commit is compared, and only by the text
+ * of the first and the last line of its range. A comment with no saved text, or
+ * on a file the answer has no text for, is compared by its line number against the
+ * end of the file that the diff shows.
+ */
+export function commentMoved(file: GithubPrFile, comment: PlaceableComment, headSha: string): boolean {
+  if (comment.headSha === "" || comment.headSha === headSha) return false;
+  const first = sideText(file, comment.side, comment.startLine ?? comment.line);
+  const last = sideText(file, comment.side, comment.line);
+  if (first === null || last === null) {
+    // No text to compare: only a line past the end of the file's own rows is known to be wrong.
+    return comment.line > lastLineOf(file, comment.side);
+  }
+  if (first === undefined || last === undefined) return true;
+  if (comment.anchor === null) return false;
+  return comment.anchor.first !== first || comment.anchor.last !== last;
+}
+
+/** The highest line number the diff of a file names on one side. */
+function lastLineOf(file: GithubPrFile, side: DiffSide): number {
+  let top = 0;
+  for (const hunk of file.hunks) {
+    top = Math.max(top, side === "LEFT" ? hunk.oldStart + hunk.oldLines - 1 : hunk.newStart + hunk.newLines - 1);
+  }
+  return top;
+}
+
+/** The text a moved comment shows: the saved line, or the saved range ends. */
+export function savedTextOf(anchor: PlaceableComment["anchor"]): string {
+  if (anchor === null) return "";
+  return anchor.first === anchor.last ? anchor.last : `${anchor.first} … ${anchor.last}`;
+}
+
+/**
+ * The folded stretch of a file that holds one line, or `null` when no stretch does.
+ *
+ * Only a stretch that is still folded counts, so a line that is already drawn
+ * answers `null`.
+ */
+export function stretchHolding(
+  file: GithubPrFile,
+  gaps: Readonly<Record<string, RevealedGap>>,
+  side: DiffSide,
+  line: number,
+): number | null {
+  for (const row of revealRows(file, gaps)) {
+    if (row.kind !== "gap") continue;
+    const start = side === "LEFT" ? row.oldStart : row.newStart;
+    if (line >= start && line < start + row.count) return row.gap;
+  }
+  return null;
+}
+
+/** Where one collected comment stands in a diff answer. */
+export interface CommentStanding {
+  /** The file's place in the answer, or `-1` when the diff no longer has the file. */
+  readonly fileIndex: number;
+  readonly moved: boolean;
+}
+
+/** Find the file of a collected comment and say whether its line moved. */
+export function standingOf(files: readonly GithubPrFile[], comment: PlaceableComment, headSha: string): CommentStanding {
+  const fileIndex = files.findIndex((file) => filePath(file) === comment.path);
+  const file = files[fileIndex];
+  if (file === undefined) return { fileIndex: -1, moved: false };
+  return { fileIndex, moved: commentMoved(file, comment, headSha) };
 }
 
 /* -------------------------------------------------------------------- title */

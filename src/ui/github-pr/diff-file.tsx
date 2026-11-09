@@ -195,6 +195,9 @@ function WideView({ wide, row, actions }: WideProps) {
       return (
         <PendingRow
           index={wide.index}
+          id={wide.id}
+          moved={wide.moved}
+          savedText={wide.savedText}
           side={wide.side}
           startLine={wide.startLine}
           line={wide.line}
@@ -243,7 +246,7 @@ function wideKey(wide: WideRow): string {
     case "expand":
       return `x-${wide.gap}`;
     case "pending":
-      return `p-${wide.index}`;
+      return `p-${wide.id}`;
     case "stale":
       return `s-${wide.thread.id}`;
     case "fileThread":

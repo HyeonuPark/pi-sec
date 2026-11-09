@@ -377,4 +377,62 @@ describe("render scope of the diff page", () => {
     expect(crossing).toBeGreaterThan(0);
     expect(html.highlightCell("a < b", language, { from: 0, to: 3 }, "seg-add")).toContain('<span class="seg-add">');
   }, 120000);
+
+  /** One collected comment, with the fields the review draft adds. */
+  function collected(id: string, path: string, line: number, over: Record<string, unknown> = {}) {
+    return { id, path, side: "RIGHT", line, startLine: null, body: `note ${id}`, headSha: "2".repeat(40), anchor: null, ...over };
+  }
+
+  it("condition 18: a press on a link to a comment that is already drawn renders no cell and no file", async () => {
+    await mountPage(20, "c18");
+    state.pending.value = [collected("p1", "src/f0.ts", 24)] as never;
+    await sleep();
+    expect(document.querySelectorAll('[data-pending-id="p1"]').length).toBe(1);
+    drawn = [];
+    state.jumpToComment("p1");
+    await sleep();
+    expect(drawn.length).toBe(0);
+    expect(document.activeElement).toBe(document.querySelector('[data-pending-id="p1"]'));
+  });
+
+  it("condition 19: a press that unfolds a file and opens a stretch renders no cell of another file", async () => {
+    await mountPage(20, "c19");
+    state.pending.value = [collected("p2", "src/f1.ts", 5)] as never;
+    await sleep();
+    state.toggleFile(1);
+    await sleep();
+    const numbers = (): string[] =>
+      [...document.querySelectorAll('.split-grid[data-idx="1"] .pane-right .num')].map((e) => e.textContent ?? "");
+    expect(document.querySelectorAll(".file-diff.collapsed").length).toBe(1);
+    expect(numbers()).not.toContain("5");
+    drawn = [];
+    state.jumpToComment("p2");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(cellsOf().length).toBeGreaterThan(0);
+    expect(cellsOf().filter((entry) => entry.props.index !== 1)).toEqual([]);
+    expect(drawn.filter((entry) => entry.name === "DiffFileView" && entry.props.index !== 1)).toEqual([]);
+    expect(document.querySelectorAll(".file-diff.collapsed").length).toBe(0);
+    expect(numbers()).toContain("5");
+    expect(document.activeElement).toBe(document.querySelector('[data-pending-id="p2"]'));
+  });
+
+  it("condition 20: typing in the overall comment and a change of the save state render no cell and no file, with links in the panel", async () => {
+    const drafts = await import("../../src/ui/state/github-pr-draft.ts");
+    await mountPage(20, "c20");
+    state.pending.value = [collected("p3", "src/f0.ts", 24), collected("p4", "src/f2.ts", 24)] as never;
+    await sleep();
+    expect(document.querySelectorAll(".review-link").length).toBe(2);
+    drawn = [];
+    state.reviewSummary.value = "typing";
+    drafts.draftFailed.value = true;
+    await sleep();
+    drafts.draftFailed.value = false;
+    await sleep();
+    const c = counts();
+    expect(c.PaneCellView ?? 0).toBe(0);
+    expect(c.DiffFileView ?? 0).toBe(0);
+    expect(c.SplitGridView ?? 0).toBe(0);
+    expect(c.DiffBody ?? 0).toBe(0);
+    expect(c.ReviewPanel).toBeGreaterThan(0);
+  });
 });

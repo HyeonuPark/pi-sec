@@ -261,6 +261,12 @@ export function lineSpan(startLine: number | null, line: number): string {
 export interface PendingRowProps {
   /** The comment's place in the collection, which is what `Remove` names. */
   readonly index: number;
+  /** The comment's id: the row carries it so the panel's link can find the row. */
+  readonly id: string;
+  /** True when the code on the comment's line changed since it was written. */
+  readonly moved: boolean;
+  /** The saved text of the comment's line, shown when it moved. */
+  readonly savedText: string;
   readonly side: DiffSide;
   readonly startLine: number | null;
   readonly line: number;
@@ -271,13 +277,15 @@ export interface PendingRowProps {
 }
 
 /** One comment a reader collected, under the line it was written on. */
-export function PendingRow({ index, side, startLine, line, body, style, onRemove }: PendingRowProps) {
+export function PendingRow({ index, id, moved, savedText, side, startLine, line, body, style, onRemove }: PendingRowProps) {
   return (
-    <div class="wide-row pending-row" style={style}>
+    <div class="wide-row pending-row" style={style} data-pending-id={id} tabIndex={-1}>
       <div class="pending-comment">
         <span class="pending-badge">Pending</span>
         <span class="pending-loc">{`${side === "LEFT" ? "old" : "new"} ${lineSpan(startLine, line)}`}</span>
+        {moved ? <span class="pending-moved">Line changed since it was written</span> : null}
         <span class="pending-body">{body}</span>
+        {moved && savedText !== "" ? <code class="pending-saved">{savedText}</code> : null}
         <button
           class="btn pending-remove"
           type="button"

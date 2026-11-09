@@ -47,6 +47,7 @@ const META_READ_ONLY = { viewer: "octocat", repos: [{ repo: "acme/widgets" }], w
 const DIFF_PATH = "/api/github/pr/acme/widgets/12/diff";
 const PR_PATH = "/api/github/pr/acme/widgets/12";
 const REVIEW_PATH = "/api/github/pr/acme/widgets/12/review";
+const DRAFT_PATH = "/api/github/pr/acme/widgets/12/draft";
 
 /** One hunk line: context, removed or added. */
 function line(t: "ctx" | "add" | "del", s: string) {
@@ -214,7 +215,7 @@ function prAnswer(over: Partial<Record<string, unknown>> = {}) {
 /* ------------------------------------------------------------------- harness */
 
 type Answer = { status?: number; body?: unknown };
-type Reply = Answer | (() => Answer | Promise<Answer>);
+type Reply = Answer | ((call: Call) => Answer | Promise<Answer>);
 
 interface Call {
   readonly path: string;
@@ -290,13 +291,14 @@ async function openDiff(
 
   (window as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string; body?: string }) => {
     const url = new URL(String(input), "http://localhost");
-    calls.push({
+    const entry: Call = {
       path: url.pathname + url.search,
       method: (init?.method ?? "GET").toUpperCase(),
       body: init?.body ?? null,
-    });
+    };
+    calls.push(entry);
     const reply = replies.get(url.pathname + url.search) ?? replies.get(url.pathname) ?? { status: 200, body: {} };
-    const answer = typeof reply === "function" ? await reply() : reply;
+    const answer = typeof reply === "function" ? await reply(entry) : reply;
     const status = answer.status ?? 200;
     const text = answer.body === undefined ? "" : JSON.stringify(answer.body);
     return {
@@ -811,6 +813,7 @@ describe("the reads the page makes", () => {
       expect(page.calls.map((call) => call.path).sort()).toEqual([
         "/sec/api/github/pr/acme/widgets/12",
         "/sec/api/github/pr/acme/widgets/12/diff",
+        "/sec/api/github/pr/acme/widgets/12/draft",
       ]);
       expect(page.document.querySelector(".side-nav-btn")?.getAttribute("href")).toBe("/sec/github/pr/acme/widgets/12");
       expect(page.document.querySelector(".diff-head-title")?.textContent).toBe("Fix the flux capacitor");
@@ -1067,12 +1070,12 @@ describe("the review a reader collects", () => {
       await page.settle();
 
       // It is in the tab, drawn under the line it was written on, and nothing went
-      // to the server.
+      // to GitHub: the only POST is the change of the server's own draft.
       const pending = page.document.querySelector('.split-grid[data-idx="1"] .pending-row');
       expect(pending?.querySelector(".pending-loc")?.textContent).toBe("new 10–12");
       expect(pending?.querySelector(".pending-body")?.textContent).toBe("This range needs a test");
       expect(page.document.querySelector(".review-bar-btn")?.textContent).toBe("Finish review (1)");
-      expect(page.calls.filter((call) => call.method === "POST")).toEqual([]);
+      expect(page.calls.filter((call) => call.method === "POST" && !call.path.endsWith("/draft"))).toEqual([]);
       // The collection survives a reload of the page: it lives in this tab.
       const stored = JSON.parse(
         page.window.sessionStorage.getItem(`${STORE_PREFIX}${pendingStoreKey("acme/widgets", 12)}`) ?? "null",
@@ -1191,7 +1194,7 @@ describe("the review a reader collects", () => {
       send.click();
       await page.settle();
 
-      const writes = page.calls.filter((call) => call.method === "POST");
+      const writes = page.calls.filter((call) => call.method === "POST" && !call.path.endsWith("/draft"));
       expect(writes).toHaveLength(1);
       expect(writes[0]?.path).toBe(REVIEW_PATH);
       const body = JSON.parse(writes[0]?.body ?? "null");
@@ -1503,9 +1506,309 @@ describe("one commit's diff", () => {
   it("leaves the pull request diff address as it was", async () => {
     const page = await openDiff({ replies: { [PR_PATH]: { body: prAnswer() }, [DIFF_PATH]: { body: diffAnswer() } } });
     try {
-      expect(page.calls.map((call) => call.path).sort()).toEqual([DIFF_PATH, PR_PATH].sort());
+      expect(page.calls.map((call) => call.path).sort()).toEqual([DIFF_PATH, DRAFT_PATH, PR_PATH].sort());
       expect(page.document.querySelector(".diff-head-title")?.textContent).toBe("Fix the flux capacitor");
       expect(page.document.querySelector(".commit-head")).toBeNull();
+    } finally {
+      page.close();
+    }
+  });
+});
+
+/* ------------------------------------------------------- the draft on the server */
+
+interface FakeDraftComment {
+  id: string;
+  path: string;
+  side: "LEFT" | "RIGHT";
+  line: number;
+  startLine: number | null;
+  body: string;
+  headSha: string;
+  anchor: { first: string; last: string } | null;
+}
+
+/** A stand-in for the draft route: it keeps one draft, applies each change, and answers the whole draft. */
+function draftServer(initial: { summary?: string; event?: string; comments?: FakeDraftComment[] } = {}) {
+  const draft = { summary: "", event: "COMMENT", comments: [] as FakeDraftComment[], ...initial };
+  const posts: Record<string, unknown>[] = [];
+  const control = { fail: 0 };
+  const reply = (call: Call): Answer => {
+    if (call.method === "POST") {
+      if (control.fail > 0) {
+        control.fail -= 1;
+        return { status: 502, body: { error: "the daemon is down" } };
+      }
+      const change = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
+      posts.push(change);
+      if (change["op"] === "add") {
+        const next = change["comment"] as FakeDraftComment;
+        if (!draft.comments.some((c) => c.id === next.id)) draft.comments.push(next);
+      } else if (change["op"] === "remove") {
+        draft.comments = draft.comments.filter((c) => c.id !== change["id"]);
+      } else if (change["op"] === "set") {
+        if (typeof change["summary"] === "string") draft.summary = change["summary"];
+        if (typeof change["event"] === "string") draft.event = change["event"];
+      } else if (change["op"] === "discard") {
+        draft.summary = "";
+        draft.comments = [];
+      }
+    }
+    return { body: { ...draft, comments: [...draft.comments] } };
+  };
+  return { draft, posts, control, reply };
+}
+
+const SAME_HEAD = "2222222222222222222222222222222222222222";
+const OLD_HEAD = "1111111111111111111111111111111111111111";
+
+function saved(id: string, over: Partial<FakeDraftComment> = {}): FakeDraftComment {
+  return {
+    id,
+    path: "src/flux.ts",
+    side: "RIGHT",
+    line: 11,
+    startLine: null,
+    body: `body of ${id}`,
+    headSha: SAME_HEAD,
+    anchor: { first: "  const a = 2;", last: "  const a = 2;" },
+    ...over,
+  };
+}
+
+async function pagewith(server: ReturnType<typeof draftServer>, before?: (window: JSDOM["window"]) => void): Promise<Page> {
+  return await openDiff({
+    replies: { [PR_PATH]: { body: prAnswer() }, [DIFF_PATH]: { body: diffAnswer() }, [DRAFT_PATH]: server.reply },
+    ...(before === undefined ? {} : { before }),
+  });
+}
+
+async function click(page: Page, selector: string): Promise<void> {
+  const element = page.document.querySelector(selector);
+  if (!(element instanceof page.window.HTMLElement)) throw new Error(`no element ${selector}`);
+  element.click();
+  await page.settle();
+}
+
+async function collectOn(page: Page, from: number, text: string): Promise<void> {
+  await dragLines(page, 1, "RIGHT", from, from);
+  const field = page.document.querySelector('.split-grid[data-idx="1"] .review-form textarea');
+  if (!(field instanceof page.window.HTMLTextAreaElement)) throw new Error("no comment field");
+  await type(page, field, text);
+  await click(page, '.split-grid[data-idx="1"] .review-form .submit-btn');
+}
+
+describe("the review draft on the server", () => {
+  it("condition 10: Add to review sends an add and draws the comment; a fresh page draws the server's draft", async () => {
+    const server = draftServer();
+    const page = await pagewith(server);
+    try {
+      await collectOn(page, 11, "from this tab");
+      expect(server.posts).toHaveLength(1);
+      expect(server.posts[0]).toMatchObject({ op: "add", comment: { path: "src/flux.ts", side: "RIGHT", line: 11, body: "from this tab", headSha: SAME_HEAD } });
+      expect(page.document.querySelectorAll(".pending-row")).toHaveLength(1);
+    } finally {
+      page.close();
+    }
+
+    const other = draftServer({ summary: "from another browser", event: "REQUEST_CHANGES", comments: [saved("c1"), saved("c2", { line: 12, anchor: { first: "  return a;", last: "  return a;" } })] });
+    const fresh = await pagewith(other);
+    try {
+      expect(fresh.document.querySelectorAll(".pending-row")).toHaveLength(2);
+      expect(fresh.document.querySelector(".review-bar-btn")?.textContent).toBe("Finish review (2)");
+      expect((fresh.document.querySelector(".review-summary") as HTMLTextAreaElement).value).toBe("from another browser");
+      const checked = [...fresh.document.querySelectorAll('input[name="review-event"]')].find((input) => (input as HTMLInputElement).checked);
+      expect((checked as HTMLInputElement).value).toBe("REQUEST_CHANGES");
+      expect(other.posts).toEqual([]);
+    } finally {
+      fresh.close();
+    }
+  });
+
+  it("condition 11: Remove and Discard all send their changes, and a submit sends draftCommentIds and empties the page", async () => {
+    const server = draftServer();
+    const page = await pagewith(server);
+    try {
+      await collectOn(page, 11, "one");
+      await collectOn(page, 12, "two");
+      await click(page, ".pending-row .pending-remove");
+      expect(server.posts.map((post) => post["op"])).toEqual(["add", "add", "remove"]);
+      expect(server.posts[2]?.["id"]).toBe((server.posts[0]?.["comment"] as { id: string }).id);
+
+      await click(page, ".review-bar-btn");
+      await click(page, ".review-panel .review-discard");
+      expect(server.posts.map((post) => post["op"])).toEqual(["add", "add", "remove", "discard"]);
+      expect(page.document.querySelectorAll(".pending-row")).toHaveLength(0);
+
+      await collectOn(page, 11, "three");
+      const id = (server.posts[4]?.["comment"] as { id: string }).id;
+      await click(page, ".review-panel .review-submit");
+      const review = page.calls.find((call) => call.path === REVIEW_PATH);
+      expect(JSON.parse(review?.body ?? "null").draftCommentIds).toEqual([id]);
+      expect(page.document.querySelectorAll(".pending-row")).toHaveLength(0);
+      expect(page.document.querySelector(".review-bar-btn")?.textContent).toBe("Finish review (0)");
+    } finally {
+      page.close();
+    }
+  });
+
+  it("condition 12: after new commits a changed line is marked and moved to the top of its file", async () => {
+    const server = draftServer({
+      comments: [
+        saved("same", { headSha: OLD_HEAD }),
+        saved("changed", { headSha: OLD_HEAD, line: 12, anchor: { first: "  return old;", last: "  return old;" } }),
+        saved("gone", { headSha: OLD_HEAD, path: "src/removed.ts" }),
+      ],
+    });
+    const page = await pagewith(server);
+    try {
+      const rows = [...page.document.querySelectorAll('.split-grid[data-idx="1"] .pending-row')] as HTMLElement[];
+      expect(rows).toHaveLength(2);
+      const byId = (id: string): HTMLElement => rows.find((row) => row.dataset["pendingId"] === id) as HTMLElement;
+      expect(byId("changed").style.getPropertyValue("--row")).toBe("1");
+      expect(byId("changed").querySelector(".pending-moved")?.textContent).toBe("Line changed since it was written");
+      expect(byId("changed").querySelector(".pending-saved")?.textContent).toBe("  return old;");
+      expect(byId("same").querySelector(".pending-moved")).toBeNull();
+      expect(Number(byId("same").style.getPropertyValue("--row"))).toBeGreaterThan(1);
+
+      await click(page, ".review-bar-btn");
+      expect(page.document.querySelector(".review-missing-title")?.textContent).toBe("Comments on files not in this diff");
+      expect(page.document.querySelectorAll(".review-missing li")).toHaveLength(1);
+      expect(page.document.querySelector(".review-moved-count")?.textContent).toBe("1 comment points at a line that changed");
+      expect(page.document.querySelector(".review-bar-btn")?.textContent).toBe("Finish review (3)");
+    } finally {
+      page.close();
+    }
+  });
+
+  it("condition 13: a failed change shows Not saved to server, keeps the comment, and the next change sends the queue first", async () => {
+    const server = draftServer();
+    const page = await pagewith(server);
+    try {
+      server.control.fail = 1;
+      await collectOn(page, 11, "first");
+      expect(page.document.querySelectorAll(".pending-row")).toHaveLength(1);
+      await click(page, ".review-bar-btn");
+      expect(page.document.querySelector(".review-save-failed")?.textContent).toContain("Not saved to server");
+      expect(server.posts).toEqual([]);
+
+      await collectOn(page, 12, "second");
+      expect(server.posts.map((post) => (post["comment"] as { body: string }).body)).toEqual(["first", "second"]);
+      expect(page.document.querySelector(".review-save-failed")).toBeNull();
+    } finally {
+      page.close();
+    }
+  });
+
+  it("condition 14: a tab copy without ids is sent once when the server has no draft, and dropped when it has one", async () => {
+    const old = JSON.stringify([{ path: "src/flux.ts", side: "RIGHT", line: 11, startLine: null, body: "from an old tab" }]);
+    const plant = (window: JSDOM["window"]): void => {
+      window.sessionStorage.setItem(`${STORE_PREFIX}${pendingStoreKey("acme/widgets", 12)}`, old);
+    };
+    const empty = draftServer();
+    const page = await pagewith(empty, plant);
+    try {
+      expect(empty.posts).toHaveLength(1);
+      expect(empty.posts[0]).toMatchObject({ op: "add", comment: { body: "from an old tab" } });
+      expect(typeof (empty.posts[0]?.["comment"] as { id: string }).id).toBe("string");
+    } finally {
+      page.close();
+    }
+    const full = draftServer({ comments: [saved("kept")] });
+    const second = await pagewith(full, plant);
+    try {
+      expect(full.posts).toEqual([]);
+      expect([...second.document.querySelectorAll(".pending-body")].map((e) => e.textContent)).toEqual(["body of kept"]);
+    } finally {
+      second.close();
+    }
+  });
+
+  it("condition 15: the overall comment is sent once after typing stops", async () => {
+    const server = draftServer();
+    const page = await pagewith(server);
+    try {
+      await click(page, ".review-bar-btn");
+      const field = page.document.querySelector(".review-summary");
+      if (!(field instanceof page.window.HTMLTextAreaElement)) throw new Error("no summary");
+      await type(page, field, "a");
+      await type(page, field, "ab");
+      await type(page, field, "abc");
+      expect(server.posts).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      expect(server.posts).toEqual([{ op: "set", summary: "abc" }]);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("condition 16: the panel lists one link per comment in diff order, and none for a missing file", async () => {
+    const server = draftServer({
+      comments: [
+        saved("b", { line: 12, body: "x".repeat(80), anchor: { first: "  return a;", last: "  return a;" } }),
+        saved("gone", { path: "src/removed.ts" }),
+        saved("a", { path: "src/long.ts", line: 50, startLine: 48, body: "line one\nline two", anchor: { first: "line 48", last: "line 50" } }),
+        saved("c", { side: "LEFT", line: 11, anchor: { first: "  const a = 1;", last: "  const a = 1;" } }),
+      ],
+    });
+    const page = await pagewith(server);
+    try {
+      await click(page, ".review-bar-btn");
+      const links = [...page.document.querySelectorAll(".review-panel .review-links:not(.review-missing .review-links) .review-link")];
+      expect(links.map((link) => link.textContent)).toEqual([
+        "src/flux.ts old 11 body of c",
+        `src/flux.ts new 12 ${"x".repeat(60)}…`,
+        "src/long.ts new 48–50 line one line two",
+      ]);
+      expect(links[1]?.getAttribute("title")).toBe("x".repeat(80));
+      expect(page.document.querySelectorAll(".review-missing li")).toHaveLength(1);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("condition 17: a press unfolds the file, opens only the stretch that holds the line, focuses and marks the row", async () => {
+    const server = draftServer({
+      comments: [
+        saved("f", { line: 11 }),
+        saved("deep", { path: "src/long.ts", line: 50, anchor: { first: "line 50", last: "line 50" } }),
+        saved("moved", { path: "src/long.ts", line: 60, headSha: OLD_HEAD, anchor: { first: "something else", last: "something else" } }),
+      ],
+    });
+    const page = await pagewith(server);
+    try {
+      await click(page, ".review-bar-btn");
+      const frames = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 80));
+
+      // A folded file unfolds.
+      await click(page, "#file-1 .file-collapse");
+      expect(page.document.querySelector("#file-1")?.classList.contains("collapsed")).toBe(true);
+      await click(page, '[data-link-id="f"]');
+      await frames();
+      expect(page.document.querySelector("#file-1")?.classList.contains("collapsed")).toBe(false);
+      const row = page.document.querySelector('[data-pending-id="f"]');
+      expect(page.document.activeElement).toBe(row);
+      expect(row?.classList.contains("pending-target")).toBe(true);
+      expect(row?.getAttribute("tabindex")).toBe("-1");
+
+      // A line inside a folded stretch opens that stretch and not the other one.
+      expect(numbersIn(page.document, 5, "right")).not.toContain("50");
+      await click(page, '[data-link-id="deep"]');
+      await frames();
+      const numbers = numbersIn(page.document, 5, "right");
+      expect(numbers).toContain("50");
+      expect(numbers).not.toContain("104");
+      const deep = page.document.querySelector('[data-pending-id="deep"]');
+      expect(page.document.activeElement).toBe(deep);
+      expect(deep?.classList.contains("pending-target")).toBe(true);
+      expect(row?.classList.contains("pending-target")).toBe(false);
+
+      // A comment whose line changed goes to its row at the top, and opens no stretch.
+      const before = numbersIn(page.document, 5, "right").length;
+      await click(page, '[data-link-id="moved"]');
+      await frames();
+      expect(numbersIn(page.document, 5, "right")).toHaveLength(before);
+      expect(page.document.activeElement).toBe(page.document.querySelector('[data-pending-id="moved"]'));
     } finally {
       page.close();
     }

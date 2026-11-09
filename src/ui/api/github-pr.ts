@@ -269,6 +269,8 @@ export interface GithubPrReviewBody {
   readonly body: string;
   readonly event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
   readonly comments: readonly GithubPrReviewComment[];
+  /** The ids of the saved draft comments this review sends, so the server removes them from the draft. */
+  readonly draftCommentIds?: readonly string[];
 }
 
 /** What a write answers: the original's `{"ok": true}`. */
@@ -365,7 +367,13 @@ export function diskLimitOf(
 /** One request's answer, read as JSON, with a refusal thrown as {@link GithubPrError}. */
 async function call<T>(
   path: string,
-  options: { readonly method?: string; readonly body?: unknown; readonly signal?: AbortSignal } = {},
+  options: {
+    readonly method?: string;
+    readonly body?: unknown;
+    readonly signal?: AbortSignal;
+    /** Let the request outlive the page, for a send at `pagehide`. */
+    readonly keepalive?: boolean;
+  } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const body = options.body === undefined ? undefined : JSON.stringify(options.body);
@@ -375,6 +383,7 @@ async function call<T>(
     body,
     headers,
     signal: options.signal,
+    ...(options.keepalive === true ? { keepalive: true } : {}),
   });
   const text = await response.text();
   let parsed: unknown;
@@ -535,5 +544,59 @@ export async function submitReview(
     method: "POST",
     body,
     signal: options.signal,
+  });
+}
+
+/* ------------------------------------------------------------ review drafts */
+
+/** The text of the first and the last line of a comment's range, saved with it. */
+export interface GithubPrDraftAnchor {
+  readonly first: string;
+  readonly last: string;
+}
+
+/** One comment of a saved draft. */
+export interface GithubPrDraftComment {
+  readonly id: string;
+  readonly path: string;
+  readonly side: "LEFT" | "RIGHT";
+  readonly line: number;
+  readonly startLine: number | null;
+  readonly body: string;
+  readonly headSha: string;
+  readonly anchor: GithubPrDraftAnchor | null;
+  readonly createdAt?: string;
+}
+
+/** What the draft routes answer: the whole saved review of one pull request. */
+export interface GithubPrDraft {
+  readonly summary: string;
+  readonly event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+  readonly comments: readonly GithubPrDraftComment[];
+}
+
+/** One change of a saved draft, as the POST route takes it. */
+export type GithubPrDraftOp =
+  | { readonly op: "add"; readonly comment: GithubPrDraftComment }
+  | { readonly op: "remove"; readonly id: string }
+  | { readonly op: "set"; readonly summary?: string; readonly event?: GithubPrDraft["event"] }
+  | { readonly op: "discard" };
+
+/** Read the saved draft of one pull request. */
+export async function fetchDraft(repo: string, number: number): Promise<GithubPrDraft> {
+  return await call<GithubPrDraft>(prItemPath(repo, number, "/draft"));
+}
+
+/** Send one change of the saved draft, and read the whole draft after it. */
+export async function postDraft(
+  repo: string,
+  number: number,
+  change: GithubPrDraftOp,
+  options: { readonly keepalive?: boolean } = {},
+): Promise<GithubPrDraft> {
+  return await call<GithubPrDraft>(prItemPath(repo, number, "/draft"), {
+    method: "POST",
+    body: change,
+    ...(options.keepalive === true ? { keepalive: true } : {}),
   });
 }
