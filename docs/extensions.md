@@ -1218,7 +1218,7 @@ document.getElementById("refresh")?.addEventListener("click", async () => {
 | `registry` | `repos_list`: one read-only tool over the git repositories, worktrees and buildfs caches of the registry, returning the same listing as `repos list --json`. It has no section and no hook. Installed in the app phase, because the listing reads a worktree's job title and status from the job store the extension context holds. In the default enabled list. See [The repository registry](#registry-tool). | — |
 | `scheduler` | Durable cron, read from the job record: a job with `routine` recurs and a job with `once` runs one time, and each due occurrence submits its prompt on a new conversation. The boot migration moves each entry of `config.scheduler.jobs` onto a record's `routine` and empties the list, and the list is not a schedule after that. A routine is created, changed, and removed only through the routine gate. Timezone/catch-up/overlap semantics in [architecture.md](./architecture.md#scheduling). | M3 |
 | `reports` | `reports_create`/`add_version`/`set_pending`/`move`/`list`/`get`; long documents owned by a job, with an append-only revision history and a viewer at `/report/<slug>`. `move` hands a live report to another live job and changes nothing else about it: the revisions, the approvals inside them, the feedback, the name and the title stay, and the drafts of the old job stay with that job. It refuses a report that is not live, including one that has moved to the archive, a report whose job has ended, a job the live store does not have, a job that has ended, and a report that already belongs to the job named; a refusal writes nothing, and a successful move leaves a `report_moved` audit row naming the report and both jobs. Only the root has it, so a subagent and a scheduled run cannot reach it. `set_pending` moves a live report between its open standing, `active` for a plan and `result` for a result report, and `pending`. Bringing a report back with an `answer` is the message form of an answer to user feedback, and that one call clears the flag and writes the inbox notice for that answer in the same commit. A report that waits on an answer to feedback cannot come back without one (`answer_required`), a report that is not waiting on one is refused when an `answer` is given (`not_awaiting`), a report whose job has ended is refused as `not_active`, and a result report that still waits for the user's Done or Feedback cannot be set aside at all (`needs_user_check`). `list` marks a report that is set aside while its newest entry is user feedback as `unanswered`; both forms of answer clear the mark, and a report that an approval set aside carries none. The draft flow rides on top: a subagent writes a temporary draft with `reports_draft` (and drops one nobody will use with `reports_draft_drop`), the root reads it by id with `reports_get`, and `reports_publish_draft` turns it into a report without the text passing through the chat. `reports_draft` takes the text as `content` or reads it from a markdown file named with `path`, exactly one of the two, and a file over the size cap of `read_full` or one it cannot read is refused with nothing written. Both `reports_draft` and `report_check` declare the execution mode `sequential`, so a bundle that holds either tool runs its calls one at a time in the order they are written, and a call that follows an edit of the same file reads the text the edit wrote. A report has one of three kinds, and the tools carry it: `reports_draft` and `reports_create` take `kind`, though a draft cannot name `briefing` because the root writes a briefing report itself with `reports_create`; `reports_publish_draft` takes it for a new report and refuses it next to `reportId` because a revision keeps its report's kind, and it refuses `briefing` as well; the listing marks a result report with `kind=result` and a briefing with `kind=briefing`. A briefing report asks for no approval, so it stays under a gate that asks for one (`report_is_briefing`), cannot be set aside (`briefing`), and a newer briefing moves it, with the notices that point at it and the items of kind `briefing`, into the archive database. A draft belongs to a job rather than to the session that wrote it: `reports_draft` requires `jobId`, and the tool refuses a call without one and a call that names a job that is neither the caller's own assigned job nor a job below it in the job tree. An agent that holds a top-level job therefore drafts the plans of its subjobs too. Deleting the draft's author leaves the draft in that job, and `reports_publish_draft` publishes it into that job and no other. The draft is open work of its job, which `jobs_get` and `reports_list` show, and it is dropped when the job ends. With `reportId`, `reports_publish_draft` makes the draft the next revision of an existing live report of the draft's own job instead of a new report. That write leaves the same inbox notice and `report_updated` event that `reports_add_version` leaves, and `title` and `name` are refused with it, because a revision keeps the report's own. A draft records the sha256 of its text when it is written, and both forms of publishing refuse a draft whose file no longer holds that text: the fix is a new draft. A draft row written before the field existed carries no sha256 and is not checked. | — |
-| `attachments` | Four tools. `share_image` puts a file under `attachments.shareDir` and returns the `/api/share/<name>` URL and the markdown that shows it, so an agent can put an image where its own words need one. The URL is mount-prefixed (it carries the deployment's path prefix when `server.basePath` is set), so use the URL the tool returns and do not rebuild the path. `attachment_open` reads a stored file back as an `image` part, which is how an original is shown again after a compaction removed the text that named it. `attachments_list` names the files of a conversation or a job. `attachments_assign` gives unowned files to a job and is the root's alone: a file with a job is kept after the job is archived, and a file with no job is deleted at the first daemon start 24 hours after it was stored. | — |
+| `attachments` | Five tools. `share_page` stores one HTML page that the user can open and use (a chart, an interactive demo, a small app), from a string or a file of up to 1 MiB, and returns the id, the `/rich-pages/<id>` URL and a markdown image tag that draws the page in a sandboxed frame (see [Rich pages](#rich-pages)). `share_image` puts a file under `attachments.shareDir` and returns the `/api/share/<name>` URL and the markdown that shows it, so an agent can put an image where its own words need one. The URL is mount-prefixed (it carries the deployment's path prefix when `server.basePath` is set), so use the URL the tool returns and do not rebuild the path. `attachment_open` reads a stored file back as an `image` part, which is how an original is shown again after a compaction removed the text that named it. `attachments_list` names the files of a conversation or a job. `attachments_assign` gives unowned files to a job and is the root's alone: a file with a job is kept after the job is archived, and a file with no job is deleted at the first daemon start 24 hours after it was stored. | — |
 | `ask-user` | `ask_user` (fixed choices, returns at once while the question waits in the active list), `questions_open`, `question_withdraw`. The answer arrives as input from the user. `ask_user` is never a background call: it returns at once, so it carries no `complex` tag and `async_call` refuses it. See [http-api.md](./http-api.md#user-queries). | M3 |
 | `web` | `fetch_url`; HTML→text; fetched content is external and untrusted. | M3 |
 | `expiry-check` | `expiry_check`: reads a JSON expiry registry that the user keeps and reports the entries inside their warning window, measured in the harness timezone. Read-only, no section, no secret. Not in the default enabled list: add the name to `agent.extensions.enabled` once a registry exists. | — |
@@ -1296,6 +1296,89 @@ A `routes` function that throws is one `error` line and one admin note, and the
 boot carries on: the rest of the server answers, and the paths of that extension
 answer `404`. `test/extension-routes.test.ts` holds the checks for the order, the
 enabled list, the per-extension options and the cleanup.
+
+### Rich pages <a id="rich-pages"></a>
+
+`share_page` (in the bundled `attachments` extension) lets an agent write a page
+on demand: a chart, an interactive demo or a small app. The agent passes `title`
+and either `html` (one document) or `source` (a file path), and optionally `name`
+and `jobId`. The tool refuses both or neither of `html` and `source`, an empty
+document, a document over 1 MiB (1048576 bytes), text that is not UTF-8, and a job
+that is not live. It stores the page as a share file with a mark on its record
+(`richPage`), and answers `id`, `url` (the `/rich-pages/<id>` address with the
+configured mount prefix), `markdown`, `bytes` and `ownedBy`. `attachments_list`
+shows `richPage: true` on a page. A page cannot change after it is stored. A new
+version is a new page.
+
+The agent pastes `markdown` into a chat answer or a report body. The one markdown
+renderer draws it as a sandboxed frame with a caption and a link that opens the
+page in a new tab ([ui.md](./ui.md#3-transcript-rendering)). The page follows the
+share file lifetime rules: see [Lifetime of stored files](./http-api.md#lifetime-of-stored-files).
+
+The page runs isolated. Its scripts run, but it cannot reach pi-sec, the network or
+the page around it ([security.md](./security.md#rich-pages)). So a page follows these
+rules:
+
+- Put every script, style and image inline. Use `data:` URLs or inline SVG for
+  images. A file that the page loads from any address does not load.
+- Size the page by its content. A page that uses `100vh` stays at the starting
+  height of the frame.
+- A link inside the page does not open.
+- Write no secret value into a page. The user and anyone who opens the address can
+  read it.
+- A library can go into the document text, within the 1 MiB limit. A library that
+  loads more files at run time does not work.
+
+A small example, a bar chart with a hover readout. The agent calls `share_page`
+with `title: "Weekly tool calls"` and this text as `html`:
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weekly tool calls</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 12px; color: #222; }
+  .bar { fill: #4a7bd0; }
+  .bar:hover { fill: #2b5bb0; }
+  #readout { min-height: 1.4em; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h3>Tool calls per day</h3>
+<svg id="chart" width="100%" height="180" viewBox="0 0 350 180" role="img" aria-label="Bar chart of tool calls per day"></svg>
+<div id="readout">Point at a bar.</div>
+<script>
+  const data = [["Mon", 12], ["Tue", 30], ["Wed", 22], ["Thu", 41], ["Fri", 18], ["Sat", 7], ["Sun", 9]];
+  const svg = document.getElementById("chart");
+  const readout = document.getElementById("readout");
+  const max = Math.max(...data.map((d) => d[1]));
+  const ns = "http://www.w3.org/2000/svg";
+  data.forEach(([day, value], i) => {
+    const h = (value / max) * 140;
+    const bar = document.createElementNS(ns, "rect");
+    bar.setAttribute("class", "bar");
+    bar.setAttribute("x", String(10 + i * 48));
+    bar.setAttribute("y", String(150 - h));
+    bar.setAttribute("width", "36");
+    bar.setAttribute("height", String(h));
+    bar.addEventListener("mouseenter", () => { readout.textContent = day + ": " + value + " calls"; });
+    svg.appendChild(bar);
+    const label = document.createElementNS(ns, "text");
+    label.setAttribute("x", String(28 + i * 48));
+    label.setAttribute("y", "170");
+    label.setAttribute("text-anchor", "middle");
+    label.textContent = day;
+    svg.appendChild(label);
+  });
+</script>
+</body>
+</html>
+```
+
+The same text is `test/fixtures/rich-page-example.html`, which the browser test
+`test/browser/rich-pages.browser.ts` uses.
 
 ### Page links of a bundled extension <a id="extension-pages"></a>
 
@@ -2400,6 +2483,7 @@ the root. Its list is:
 - a restart: `await_orders`, `restart_session`;
 - its own title: `focused_chat_title`;
 - a picture in an answer: `share_image`;
+- an HTML page in an answer: `share_page`;
 - shell and files: `bash`, `write`, `edit`, `js`. The role file restricts the
   shell to reading commands and the file tools to the chat's own state file.
   That is a prompt rule, not a gate.

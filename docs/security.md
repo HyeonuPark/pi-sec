@@ -613,6 +613,57 @@ scripts, and it applies to an extension page as it applies to a core page.
   extension, whose server code already has the daemon's rights, so the core policy
   takes over the defense against outside text.
 
+### Rich pages <a id="rich-pages"></a>
+
+A rich page is HTML that a model wrote with `share_page`. The model reads internet
+text, so the page is untrusted code. Unlike an extension page, it gets no part of
+the user's rights. The frame route (`/rich-pages/<id>/frame`) sends a policy that
+holds these parts:
+
+- `sandbox allow-scripts allow-forms` without `allow-same-origin` gives the
+  document an opaque origin, also when a browser opens it without a frame. It
+  allows no popup, no top navigation, no dialog and no download.
+- `default-src 'none'` and `connect-src 'none'` block every request of the page,
+  the daemon included: fetch, XHR, WebSocket, EventSource, beacons and every file
+  type. Images come as `data:` or `blob:` addresses or inline SVG.
+- `script-src 'unsafe-inline' 'unsafe-eval'` lets the model's inline code run.
+  Every script in the document is model-written, so a nonce would protect nothing,
+  and it would block the `onclick` attributes that models write.
+- `form-action 'none'` lets a submit event fire and stops the submission.
+- `frame-ancestors 'self'` stops another site from framing the page.
+
+The chat page, the report page and the shell send `default-src 'self'`, which also
+stops the page from navigating its own frame to an outside address. The page can
+navigate its frame to a same-origin address. That is a `GET` without the Lax or
+Strict cookies, and no `GET` route writes (§8).
+
+The page cannot call the daemon API, load a daemon file, read or change the page
+around it, navigate that page, open a window, submit a form anywhere, or read
+cookies and storage. `test/browser/rich-pages.browser.ts` runs a hostile page in a
+real browser and counts the requests at the server.
+
+What the page can still do:
+
+- **Send small data to any host through WebRTC.** CSP does not cover it, and the
+  browser used in the probe does not enforce `webrtc 'block'`. The same request shows
+  the user's IP address to that host. The agent can already send any data it holds
+  to any address (see Egress in §8), so the new exposure is what the user types into
+  a page.
+- **Draw anything inside its own box,** such as a fake button or a form that asks for
+  a secret. The caption (`Generated page`) and the shell bar are drawn by the core,
+  outside the frame, and the page cannot change them.
+- **Use CPU without limit.** A busy loop can freeze the chat tab when the browser
+  runs the frame in the same process as the page. The chat unloads a page frame that
+  is more than three pane heights from the view, which limits a runaway page to the
+  pages near the screen.
+- **Navigate itself to an outside address** when a person opens the raw frame address
+  as a top-level page in a browser that does not send `Sec-Fetch-Dest`. The route
+  redirects a browser that sends it to the shell, and no core link points to the raw
+  address.
+
+The tests ran in Chromium only. A page follows the share file lifetime rules (see
+[http-api.md](./http-api.md#lifetime-of-stored-files)). No tool deletes one page.
+
 ### The pull request dashboard <a id="github-pr-writes"></a>
 
 The `github-pr` extension reads GitHub and, when the operator allows it, writes

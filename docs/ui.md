@@ -306,6 +306,30 @@ textarea.
   line in a code block wraps at the bubble's edge, a long word included, and
   keeps its line breaks and indentation. A wide table scrolls inside its own
   box.
+- **A generated page** (rich page) is a markdown image whose address ends in
+  `/rich-pages/<id>`. The one markdown renderer draws it as a block: a sandboxed
+  frame (`sandbox="allow-scripts allow-forms"`, never `allow-same-origin`), a
+  caption with the label `Generated page`, the title and a link `Open in new tab`.
+  The frame starts at 360 pixels. The page reports its content height with
+  `postMessage`, and one listener (`src/ui/components/rich-page-frames.ts`) sets
+  the height of the frame that sent it, between 80 and 1200 pixels. The listener
+  finds the frame by `event.source`, so a message from anything else changes
+  nothing. Any other image stays an `<img>`, and raw `<iframe>` text stays text.
+  The tool and the isolation are in [extensions.md](./extensions.md#rich-pages) and
+  [security.md](./security.md#rich-pages).
+- **Far images and page frames do not load in the chat.** In the chat page (the
+  root chat and a focused chat), a markdown image, an uploaded image and a page
+  frame carry `data-defer-src` and no `src`. Two `IntersectionObserver`s, with the
+  transcript pane as root, decide (`src/ui/chat/transcript/deferred-media.ts`).
+  An element loads when it comes within one pane height of the visible part
+  (margin `100% 0px`). A page frame that has loaded goes back to `about:blank`
+  when it is more than three pane heights away (margin `300% 0px`), and its box
+  keeps its last height. Whatever the reader did inside that page starts over when
+  it loads again. A picture is never unloaded. A markdown image of unknown size
+  and an uploaded image without a size keep a 160 pixel box (class
+  `defer-media-pending`) until they load. Without `IntersectionObserver`, every
+  address is set at once. The report viewer and the chat's report panel do not
+  defer: a report loads its page frames when it is drawn.
 - **Tool calls** draw one small panel per call inside the folded card of their
   stretch: the tool's name and its status, then its output. A panel's output is
   clamped by its own height and scrolls.
@@ -819,7 +843,16 @@ document, and reading one should not compete with a transcript.
 
 The report body is drawn by the same markdown renderer as the transcript (section
 3), so a link in it follows the same rule: a link whose address does not start
-with `#` opens a new tab, and a `#` link stays in the same tab.
+with `#` opens a new tab, and a `#` link stays in the same tab. A generated page
+tag in a report body draws the same sandboxed frame as in the chat, and the report
+viewer loads it when the report is drawn.
+
+A generated page also has its own address, `/rich-pages/<id>`, which the caption
+link opens in a new tab. That page is a small core page (the shell): a bar with
+the label `Generated page`, the title, the creation time and a link back to the
+chat, and the page itself in a sandboxed frame below the bar. The shell holds no
+script. A browser that opens the raw frame address `/rich-pages/<id>/frame` as a
+top-level page is sent to the shell.
 
 - **`/report`** lists reports in six groups — the briefing (the morning briefing
   report, at the top under `Briefing`), active plans, results (a result report

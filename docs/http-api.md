@@ -2656,6 +2656,8 @@ answers 404.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/share/<name>` | Serve a file an agent published, from the share directory (`attachments.shareDir`). This is the route a `share_image` URL names. |
+| `GET` | `/rich-pages/<id>` | The shell of a rich page: a core page with a label bar and the page in a sandboxed frame. This is the address `share_page` returns. An unknown id answers `404` with the sentence "This page no longer exists". |
+| `GET` | `/rich-pages/<id>/frame` | The page content of a rich page, under the isolation header described below. A request with `Sec-Fetch-Dest: document` answers `302` to the shell. `If-None-Match` with the `ETag` answers `304`. An id that is not a page answers `404` with the same sentence in a small HTML body. |
 | `POST` | `/api/attachments` | Store one uploaded file. The body is the bytes and the name comes in `?name=`. The answer is `201` with `id`, `url`, `name`, `mime`, `bytes`, `sha256` and, for an image, the pixel size. |
 | `GET` | `/api/attachments/<id>` | Serve a stored file. `<id>/download` sends it as an attachment, and `<id>/meta` answers its name, type, size and host-root `url` without the bytes. |
 
@@ -2668,6 +2670,28 @@ document, it would be same-origin, and opening one directly would run whatever
 script it carries. Responses carry `X-Content-Type-Options: nosniff`, and a
 response that is not a raster image also carries `Content-Security-Policy:
 default-src 'none'; sandbox`, so a browser that opens it runs nothing.
+
+A rich page is a share file that `share_page` stored with a mark on its record.
+It follows the share file lifetime rules in [Lifetime of stored files](#lifetime-of-stored-files).
+`/rich-pages/<id>/frame` serves only a record with that mark, with kind `share` and
+type `text/html`. An HTML file that reached the share directory another way, such as
+`share_image` with a `data:text/html` source, stays a download at
+`/api/share/<name>`, and the page routes answer `404` for it. The frame answer
+carries these headers:
+
+```text
+Content-Type: text/html; charset=utf-8
+Content-Security-Policy: sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+Cache-Control: no-cache
+ETag: "<sha256 of the stored bytes>-<version of the height script>"
+```
+
+The body is the stored bytes followed by one inline script that posts the content
+height to the parent page. The shell sends the same policy as the report page,
+`nosniff` and `no-referrer`. The isolation and its limits are in
+[security.md](./security.md#rich-pages).
 
 `url` in the upload answer and in the `meta` answer is a host-root path, such
 as `/api/attachments/<id>`: the page that receives it adds the mount itself. A URL
