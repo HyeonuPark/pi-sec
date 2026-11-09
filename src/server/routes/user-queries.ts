@@ -107,7 +107,7 @@ export function registerUserQueries(router: Router, deps: AppDeps): void {
   router.get("/api/user-queries/events", async (route: RouteContext) => {
     const channel = deps.sse.channel("user-queries");
     const { writer, needsSnapshot } = channel.attach(route.req, route.res);
-    if (needsSnapshot) {
+    if (needsSnapshot && writer !== undefined) {
       writer.send("snapshot", {
         type: "snapshot",
         apiVersion: API_VERSION,

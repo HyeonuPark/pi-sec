@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createGzip, constants as zlibConstants, type Gzip } from "node:zlib";
 import { acceptsGzip } from "./compress.ts";
+import { apiError } from "./router.ts";
 
 export interface SseFrame {
   readonly id: number;
@@ -206,9 +207,24 @@ export interface SseAttachOptions {
   readonly snapshot?: "auto" | "always";
 }
 
+/**
+ * Answer a stream request that arrives after the shutdown began.
+ *
+ * A stream opened now would stay open and hold the HTTP server's close callback
+ * back for good. The browser does not retry an event stream that answered with a
+ * status other than 200 by itself, so the page's own stream client opens it again
+ * after its backoff, and that request reaches the next daemon.
+ */
+export function refuseStream(res: ServerResponse): void {
+  const header = res.getHeader("X-Request-Id");
+  const requestId = typeof header === "string" ? header : "";
+  apiError(res, 503, "shutting_down", "the server is shutting down", requestId);
+}
+
 /** Fan-out channel for one SSE endpoint. */
 export class SseChannel {
   private readonly writers = new Set<SseWriter>();
+  private closed = false;
   private nextId = 1;
 
   readonly key: string;
@@ -221,8 +237,20 @@ export class SseChannel {
     this.buffer = buffer;
   }
 
-  /** Attach a client; replays buffered frames when possible. Returns whether a snapshot is still needed. */
-  attach(req: IncomingMessage, res: ServerResponse, options: SseAttachOptions = {}): { writer: SseWriter; needsSnapshot: boolean } {
+  /**
+   * Attach a client; replays buffered frames when possible. Returns whether a
+   * snapshot is still needed. After `closeAll` the client is refused with 503 and
+   * no writer is made, so the writer is `undefined`.
+   */
+  attach(
+    req: IncomingMessage,
+    res: ServerResponse,
+    options: SseAttachOptions = {},
+  ): { writer: SseWriter | undefined; needsSnapshot: boolean } {
+    if (this.closed) {
+      refuseStream(res);
+      return { writer: undefined, needsSnapshot: false };
+    }
     const header = req.headers["last-event-id"];
     const lastId = typeof header === "string" ? Number.parseInt(header, 10) : Number.NaN;
     const buffered =
@@ -251,6 +279,7 @@ export class SseChannel {
   }
 
   closeAll(): void {
+    this.closed = true;
     for (const writer of [...this.writers]) writer.close();
   }
 
@@ -265,6 +294,7 @@ export class SseHub {
   private readonly buffer: SseBuffer;
 
   private readonly options: SseOptions;
+  private closed = false;
 
   constructor(options: SseOptions) {
     this.options = options;
@@ -275,11 +305,15 @@ export class SseHub {
     const existing = this.channels.get(key);
     if (existing !== undefined) return existing;
     const channel = new SseChannel(key, this.options, this.buffer);
+    // A channel made after the close refuses its first client.
+    if (this.closed) channel.closeAll();
     this.channels.set(key, channel);
     return channel;
   }
 
+  /** Close every stream and refuse the ones that arrive later. */
   closeAll(): void {
+    this.closed = true;
     for (const channel of this.channels.values()) channel.closeAll();
   }
 }

@@ -22,7 +22,7 @@ import {
   type AttachmentLookup,
 } from "./routes/basic-chat.ts";
 import type { RouteContext } from "./router.ts";
-import type { SseChannel, SseHub } from "./sse.ts";
+import { refuseStream, type SseChannel, type SseHub } from "./sse.ts";
 import { slimAgentEvent, slimSnapshot } from "./stream-entries.ts";
 import { hasEntriesBefore } from "./routes/history.ts";
 
@@ -579,6 +579,7 @@ export class StreamHub {
   #jobUnsubscribe: (() => void) | undefined;
   #focusedChatChannel: SseChannel | undefined;
   #focusedChatUnsubscribe: (() => void) | undefined;
+  #closed = false;
 
   private readonly deps: StreamDeps;
 
@@ -588,6 +589,7 @@ export class StreamHub {
 
   /** Attach one more client to a conversation's events. */
   async attachConversation(route: RouteContext, conversationId: number): Promise<void> {
+    if (this.#closed) return refuseStream(route.res);
     const stream = this.#conversation(conversationId);
     await stream.exclusive(async () => {
       stream.pause();
@@ -598,7 +600,7 @@ export class StreamHub {
           snapshot: stream.attached === 0 ? "always" : "auto",
           onClose: () => stream.release(),
         });
-        if (writer.isClosed) return;
+        if (writer === undefined || writer.isClosed) return;
         stream.retain();
 
         const started = await stream.start();
@@ -626,6 +628,7 @@ export class StreamHub {
    * every job event once per open window.
    */
   async attachJobs(route: RouteContext): Promise<void> {
+    if (this.#closed) return refuseStream(route.res);
     const channel = this.#jobChannel ?? (this.#jobChannel = this.deps.sse.channel("jobs"));
     if (this.#jobUnsubscribe === undefined) {
       this.#jobUnsubscribe = this.deps.bus.subscribe((event) => {
@@ -633,7 +636,7 @@ export class StreamHub {
       });
     }
     const { writer, needsSnapshot } = channel.attach(route.req, route.res);
-    if (!needsSnapshot) return;
+    if (writer === undefined || !needsSnapshot) return;
     const tree = await this.deps.runtime.jobs.tree(BACKGROUND_CONTEXT);
     // The first screen is filled from this snapshot, so it carries the derived
     // "working now" list just as `GET /api/jobs` does; without it the marker
@@ -666,6 +669,7 @@ export class StreamHub {
    * connection.
    */
   attachFocusedChatEvents(route: RouteContext): void {
+    if (this.#closed) return refuseStream(route.res);
     const channel =
       this.#focusedChatChannel ?? (this.#focusedChatChannel = this.deps.sse.channel("focused-chats"));
     if (this.#focusedChatUnsubscribe === undefined) {
@@ -674,12 +678,13 @@ export class StreamHub {
       });
     }
     const { writer, needsSnapshot } = channel.attach(route.req, route.res);
-    if (!needsSnapshot || writer.isClosed) return;
+    if (writer === undefined || !needsSnapshot || writer.isClosed) return;
     writer.send("snapshot", { type: "snapshot", apiVersion: API_VERSION });
   }
 
   /** Drop the endpoint-level subscriptions; attached clients are closed by the hub. */
   close(): void {
+    this.#closed = true;
     this.#jobUnsubscribe?.();
     this.#jobUnsubscribe = undefined;
     this.#jobChannel = undefined;

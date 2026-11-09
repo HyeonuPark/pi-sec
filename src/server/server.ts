@@ -33,7 +33,12 @@ import { registerUsageStats, type UsageStatsRouteOptions } from "./routes/usage-
 import { registerRemoteMachines } from "./routes/remote-machines.ts";
 import { BUNDLED_EXTENSIONS, type BundledExtension, type ExtensionRouteCleanup } from "../extensions/index.ts";
 
+/** How long `close` lets running requests finish before it ends their connections. */
+export const CLOSE_GRACE_MS = 5_000;
+
 export interface ServerOptions {
+  /** The grace of `close`, in milliseconds. A test sets it small. */
+  readonly closeGraceMs?: number;
   readonly webDir?: string;
   /**
    * Where uploaded and published files are stored. A test points these at a
@@ -484,12 +489,26 @@ export async function startServer(deps: AppDeps, options: ServerOptions = {}): P
     close: async () => {
       deps.streams.close();
       deps.sse.closeAll();
-      // Before `server.close` waits for the sockets: a poll timer that fires
-      // while the last request drains would keep the work alive past this call.
+      // The listener stops first. A page whose stream just ended opens it again
+      // after a few seconds, and a listener that still accepts then lets in a
+      // stream that the close callback below would wait for.
+      const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       // Awaited, so this call answers only after a cleanup that waits has
       // finished, and a caller may remove what the extension was writing then.
+      // A poll timer that fires meanwhile would keep the work alive past this call.
       await closeExtensionRoutes(server);
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      // A stream attached in the gap before the flags were set.
+      deps.sse.closeAll();
+      let timer: NodeJS.Timeout | undefined;
+      const graceMs = options.closeGraceMs ?? CLOSE_GRACE_MS;
+      const grace = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, graceMs);
+      });
+      await Promise.race([closed, grace]);
+      clearTimeout(timer);
+      // What still runs after the grace would fail anyway when the process ends.
+      server.closeAllConnections();
+      await closed;
     },
   };
 }
