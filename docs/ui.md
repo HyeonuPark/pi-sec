@@ -132,8 +132,19 @@ textarea.
   same press, nor the repeat keydowns of a held key. Three actions
   stand beside the field at every width: Stop, the `⋯` dropdown, and Send. Stop is
   inert until a run is active.
-  Send and `Enter` send nothing while the ring turns, because the agent cannot
-  take a message at once then. The text stays in the field until the ring stops.
+  `Enter` sends nothing while a run is active, because the agent cannot take a
+  message at once then. The text stays in the field until the run ends.
+  While a run is active on a connected page, Send keeps its faded look and gets a
+  dark ring, and it is not disabled. A press on it queues the message: the field
+  gets the same ring, and the page sends the text once, by the same path as a
+  press on an idle page, when the agent is next idle. A queued message has a
+  hidden status text for screen readers, and the busy Send carries a tooltip.
+  Stop does not cancel the queue: the run ends and the queued text is sent. Any
+  input in the field and any change to the attachments cancel the queue. A reload
+  or a move to another conversation drops it, because it lives only in the page.
+  An empty field is not queued, and neither is a message while a file uploads.
+  A lost connection, a model that is not set up, and a send on its way keep Send
+  disabled and queue nothing.
   New session, Compact, Restart UI, Restart server,
   and Force reinstall and restart live in the dropdown, which opens upward from
   its own button. New session asks for confirmation. If a sub-agent of the
@@ -690,6 +701,9 @@ textarea.
 - System font stack for UI; a monospace stack for code.
 - Subtle motion only (200 ms ease); respects `prefers-reduced-motion`.
 - A restrained accent color for status and focus.
+- `--send-queue-ring` is the ring of a busy Send button and of a queued message:
+  the accent at 60% toward black in the light theme, and toward white in the dark
+  theme, where a darker blue would not show beside the faded fill.
 
 ---
 
