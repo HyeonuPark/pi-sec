@@ -122,6 +122,16 @@ export const canSend = computed<boolean>(
   () => !modelSetupRequired.value && activityStage.value === "" && !sending.value,
 );
 
+/**
+ * Whether the agent is busy on a page that can still reach it: a run is active,
+ * the stream is open and no send is on its way. A press on Send queues the
+ * message in this state. Every other reason the composer is closed (offline, no
+ * model, a send on its way) is not busy.
+ */
+export const agentBusy = computed<boolean>(
+  () => (activityStage.value === "tool" || activityStage.value === "model") && !sending.value,
+);
+
 /** Forget every live call. */
 export function clearTools(): void {
   liveTools.value = new Map();

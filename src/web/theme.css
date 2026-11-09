@@ -49,6 +49,10 @@
   --chat-header-bg: #e9edff;
   --chat-header-border: #c3cdf7;
   --chat-header-text: #2f3f7a;
+
+  /* The ring a busy Send and a queued message carry: the accent at 60% toward
+     black, so it reads as a darker edge of the same blue. */
+  --send-queue-ring: #2f4a99;
 }
 
 [data-theme="dark"] {
@@ -65,6 +69,9 @@
   --chat-header-bg: #1b2136;
   --chat-header-border: #33406b;
   --chat-header-text: #b9c6f5;
+  /* A darker blue disappears beside the faded fill on a dark page, so the dark
+     theme takes the accent at 60% toward white. */
+  --send-queue-ring: #95b0ff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -80,6 +87,7 @@
     --chat-header-bg: #1b2136;
     --chat-header-border: #33406b;
     --chat-header-text: #b9c6f5;
+    --send-queue-ring: #95b0ff;
   }
 }
 

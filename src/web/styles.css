@@ -296,6 +296,18 @@ body[data-chat="focused"] .app-header {
   background: #3f68e0;
 }
 
+/* Send while the agent is busy. The button takes a press (it queues the
+   message), so it is not :disabled and the 0.5 opacity is not applied. The fill
+   and the label are painted as the faded button would look over the composer's
+   own background, and the ring is drawn at full strength on top. */
+.button-primary.send-busy {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 50%, var(--bg-elevated));
+  color: color-mix(in srgb, white 50%, var(--bg-elevated));
+  border-color: var(--send-queue-ring);
+  box-shadow: inset 0 0 0 1px var(--send-queue-ring);
+}
+
 .button-danger {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
@@ -1868,6 +1880,13 @@ button.status-chip.job-working:hover {
   scrollbar-width: none;
 }
 
+/* A queued message: the field carries the busy Send button's ring until the
+   message goes out or the queue is cancelled. */
+.composer textarea.send-queued {
+  border-color: var(--send-queue-ring);
+  box-shadow: inset 0 0 0 1px var(--send-queue-ring);
+}
+
 .composer textarea::-webkit-scrollbar {
   display: none;
 }
@@ -2774,6 +2793,13 @@ img.defer-media-pending {
  * where `color-mix()` works.
  */
 @supports not (color: color-mix(in srgb, red, blue)) {
+  /* The busy Send fades the whole button, as the disabled one does. */
+  .button-primary.send-busy {
+    opacity: 0.5;
+    background: var(--accent);
+    color: white;
+  }
+
   .spinner {
     border: 2px solid var(--border);
     border-top-color: var(--accent);

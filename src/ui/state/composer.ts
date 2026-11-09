@@ -10,11 +10,14 @@
  * it out. The browser's copy (`./drafts.ts`) follows the same rule from the other
  * side: it is written on every keystroke and read once, when the page opens.
  *
- * A press is decided once, where both the button and `Enter` end up. `Enter`
+ * A send is decided once, where both the button and `Enter` end up. `Enter`
  * submits the form, and a submit is the only entry into {@link submitComposer},
  * so the activity ring is checked there and not only on the button: a ring that
  * is turning is the page saying the agent cannot take a message now, and the
- * draft, its files and the cursor stay where they are until it stops.
+ * draft, its files and the cursor stay where they are until it stops. A press on
+ * Send while the agent is busy does not submit: it queues the message
+ * (`send-queue.ts`), and `Enter` never queues. The queue sends by calling
+ * {@link submitComposer} once the page is idle.
  *
  * The rest of this file is the menu: Stop, Compact, New session, and the two
  * restarts. They change the conversation or the daemon, not this page, and each

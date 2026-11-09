@@ -13,6 +13,9 @@
  * the conversation branch's, and what this part needs from it is registered here
  * (`onConversationEvent`) rather than opened here.
  *
+ * The queue of a Send pressed while the agent is busy (`../state/send-queue.ts`)
+ * is watched here, and a `pagehide` clears it.
+ *
  * Two things belong to the page and not to a component: the text a reload has to
  * carry (`restoreUiState`, then the browser's own draft), and the two listeners
  * that close the `⋯` menu (`Esc`, and a press anywhere outside the row). Both are
@@ -22,6 +25,7 @@ import { h, type ComponentType, type VNode } from "preact";
 import { mountAt } from "../mount.ts";
 import { restoreComposerDraft, restoreUiState, setComposerMenu } from "../state/composer.ts";
 import { CONTEXT_ENTRY_KINDS, refreshContext } from "../state/context.ts";
+import { cancelQueuedSend, watchSendQueue } from "../state/send-queue.ts";
 import { onConversationEvent } from "../streams/conversation.ts";
 import { Composer } from "./composer/Composer.tsx";
 import { ContextBar, ContextReadout } from "./context/ContextBar.tsx";
@@ -96,11 +100,18 @@ export function mountChatComposer(doc: Document = document): ChatComposerHandle 
     if (target === null || typeof target.closest !== "function") return;
     if (target.closest(".composer-actions") === null) setComposerMenu(false);
   };
+  // A queued message lives in this page's memory. A page the browser restores
+  // from its back-forward cache must not send an old queue.
+  const onPageHide = () => cancelQueuedSend();
+  const stopQueue = watchSendQueue();
+  view?.addEventListener("pagehide", onPageHide);
   view?.addEventListener("keydown", onKeyDown as EventListener);
   doc.addEventListener("click", onClick);
 
   return {
     unmount() {
+      stopQueue();
+      view?.removeEventListener("pagehide", onPageHide);
       view?.removeEventListener("keydown", onKeyDown as EventListener);
       doc.removeEventListener("click", onClick);
       for (const off of offStream) off();

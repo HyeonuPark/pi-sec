@@ -17,6 +17,7 @@
  */
 import { useLayoutEffect, useRef } from "preact/hooks";
 import { modelSetupRequired } from "../../state/run.ts";
+import { cancelQueuedSend, sendQueued } from "../../state/send-queue.ts";
 import {
   autoSize,
   composerText,
@@ -34,6 +35,9 @@ const COMPOSING_KEY_CODE = 229;
 /** The placeholder the shell has always carried, which states the two keys. */
 const PLACEHOLDER = "Message pi-sec… (Enter to send, Shift+Enter for newline)";
 
+/** The status a queued message gives a screen reader. */
+const QUEUED_STATUS = "Queued. Sends when the agent is idle.";
+
 /** What the page hands the form. */
 export interface ComposerProps {
   /**
@@ -49,6 +53,7 @@ export interface ComposerProps {
 
 export function Composer({ formClass = "composer" }: ComposerProps) {
   const text = composerText.value;
+  const queued = sendQueued.value;
   const field = useRef<HTMLTextAreaElement | null>(null);
 
   // The field grows to fit what is in it, and this is the one place that measures
@@ -60,6 +65,7 @@ export function Composer({ formClass = "composer" }: ComposerProps) {
 
   const onInput = (event: Event) => {
     const element = event.currentTarget as HTMLTextAreaElement;
+    cancelQueuedSend();
     composerText.value = element.value;
     saveComposerDraft(element.value);
   };
@@ -91,6 +97,8 @@ export function Composer({ formClass = "composer" }: ComposerProps) {
         rows={1}
         placeholder={PLACEHOLDER}
         aria-label="Message"
+        class={queued ? "send-queued" : undefined}
+        aria-describedby={queued ? "send-queued-status" : undefined}
         disabled={modelSetupRequired.value}
         value={text}
         ref={(element) => {
@@ -100,6 +108,11 @@ export function Composer({ formClass = "composer" }: ComposerProps) {
         onInput={onInput}
         onKeyDown={onKeyDown}
       />
+      {queued ? (
+        <span id="send-queued-status" class="sr-only">
+          {QUEUED_STATUS}
+        </span>
+      ) : null}
       <ComposerActions />
     </form>
   );
