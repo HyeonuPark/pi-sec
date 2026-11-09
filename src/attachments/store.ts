@@ -79,6 +79,8 @@ export type AttachmentRecord = {
    * is true, so an HTML file that arrived another way stays a download.
    */
   readonly richPage?: boolean;
+  /** Set only by `share_page`: the title as given, which the shell page shows. */
+  readonly title?: string;
 };
 
 export interface CreateAttachmentInput {
@@ -92,6 +94,8 @@ export interface CreateAttachmentInput {
   readonly conversationId?: string;
   /** Mark the row as a rich page (`share_page` only). */
   readonly richPage?: boolean;
+  /** The title of a rich page as given (`share_page` only). */
+  readonly title?: string;
 }
 
 /** The two storage roots, which a test may point somewhere else. */
@@ -339,6 +343,7 @@ export async function createAttachment(
     ...(input.jobId === undefined ? {} : { jobId: input.jobId }),
     ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
     ...(input.richPage === true ? { richPage: true } : {}),
+    ...(input.title === undefined ? {} : { title: input.title }),
   };
   const token = input.kind === "attachment" ? SecAttachment : SecShare;
   await harness.commit(async (tx) => {
@@ -356,6 +361,7 @@ export async function createAttachment(
     if (record.jobId !== undefined) doc.jobId = record.jobId;
     if (record.conversationId !== undefined) doc.conversationId = record.conversationId;
     if (record.richPage === true) doc.richPage = true;
+    if (record.title !== undefined) doc.title = record.title;
   }, chordContext(ctx));
   return record;
 }

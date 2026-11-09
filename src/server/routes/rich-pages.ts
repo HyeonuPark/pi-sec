@@ -188,8 +188,9 @@ async function serveShell(deps: AppDeps, options: AttachmentRouteOptions, route:
   });
 }
 
-/** The stored name without its extension: the row keeps no separate title. */
+/** The title given to `share_page`, or the stored name without its extension for a row that has none. */
 function pageTitle(record: AttachmentRecord): string {
+  if (record.title !== undefined) return record.title;
   return record.name.replace(/\.html$/i, "");
 }
 

@@ -133,12 +133,20 @@ describe("GET /rich-pages/<id> (the shell)", () => {
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     const body = await response.text();
     expect(body).toContain("Generated page");
-    expect(body).toContain("Quarterly-numbers");
+    expect(body).toContain("Quarterly numbers");
     expect(body).toContain('href="/basic-chat">Back to chat');
     expect(body).toContain(`sandbox="allow-scripts allow-forms"`);
     expect(body).toContain(`src="/rich-pages/${id}/frame"`);
     expect(body).not.toContain("allow-same-origin");
     expect(body).not.toContain("<script");
+  });
+
+  it("shows the title given to share_page, with its spaces, in the bar and in the page title", async () => {
+    f = await bootRichPages();
+    const id = await makePage(f, "Weekly tool calls");
+    const body = await (await fetch(`${f.origin}/rich-pages/${id}`)).text();
+    expect(body).toContain('<span class="rich-page-bar-title">Weekly tool calls</span>');
+    expect(body).toContain("<title>Weekly tool calls</title>");
   });
 
   it("honors a forwarded prefix in the frame address", async () => {
@@ -163,11 +171,22 @@ describe("GET /rich-pages/<id> (the shell)", () => {
     // The store sanitizes a name, so the hostile value is written into the row directly.
     await f.h.runtime.harness.commit(async (tx) => {
       const doc = await tx.doc(SecShare, id, id);
-      doc.name = '<script>alert(1)</script>"x.html';
+      doc.title = '<script>alert(1)</script>"x';
     }, ctx);
     const body = await (await fetch(`${f.origin}/rich-pages/${id}`)).text();
     expect(body).not.toContain("<script>alert");
     expect(body).toContain("&lt;script&gt;alert(1)&lt;/script&gt;&quot;x");
+  });
+
+  it("falls back to the stored name without its extension when the row has no title", async () => {
+    f = await bootRichPages();
+    const id = await makePage(f);
+    await f.h.runtime.harness.commit(async (tx) => {
+      const doc = await tx.doc(SecShare, id, id);
+      delete doc.title;
+    }, ctx);
+    const body = await (await fetch(`${f.origin}/rich-pages/${id}`)).text();
+    expect(body).toContain("<title>Hello-page</title>");
   });
 
   it("serves the stylesheet it links", async () => {

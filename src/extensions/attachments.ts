@@ -283,6 +283,7 @@ export function createAttachmentsExtension(context: ExtensionContext): Extension
         mime: "text/html",
         data,
         richPage: true,
+        title: args.title,
         ...(jobId === undefined ? {} : { jobId }),
         conversationId: String(api.conversationId),
       });
