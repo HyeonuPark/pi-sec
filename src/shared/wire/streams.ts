@@ -26,7 +26,7 @@
  * @see `/basic-chat/events` — the root conversation, plus the pi-sec control events
  * @see `/api/conversations/:id/events` — one conversation, by id
  * @see `/api/jobs/events` — `snapshot`, `job_created`, `job_updated`
- * @see `/api/focused-chats/events` — `snapshot`, `focused_chat_updated`
+ * @see `/api/focused-chats/events` — `snapshot`, `focused_chat_updated`, `preferences_updated`
  * @see `/api/user-queries/events` — `snapshot`, `user_query`, `user_query_resolved`
  */
 export type StreamPath =

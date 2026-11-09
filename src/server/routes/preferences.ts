@@ -1,9 +1,12 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
-  NO_UI_PREFERENCES,
+  FOLD_KEYS,
   PreferencesStore,
+  THEME_MODES,
   UI_PREFERENCE_KEYS,
-  type UiPreferencesPatch,
+  isFoldablePanel,
+  isThemeMode,
+  type UiSettingsPatch,
 } from "../../prefs/store.ts";
 import { apiError, json, type Router } from "../router.ts";
 import type { AppDeps } from "../deps.ts";
@@ -24,6 +27,13 @@ function bodyObject(body: unknown): Record<string, unknown> | undefined {
  * so validation and storage cannot disagree about a key. The two `revertQueue*`
  * keys are the last hides, oldest first, and the store trims them to ten rather
  * than refusing a longer list.
+ *
+ * Beside the lists the document holds the shared `theme`, the two fold lists and
+ * `uiRevision`. A write that changes any of them raises the revision and emits
+ * one `preferences_updated` event that carries the revision and nothing else:
+ * a page reads the state back, as it does for `inbox_item`. A patch may carry
+ * `baseRevision`, and a stale one is refused with `409` and the current state.
+ * `seedOnly` applies the theme and the fold lists only where none is stored.
  */
 export function registerPreferences(router: Router, deps: AppDeps): void {
   const store = (): PreferencesStore => new PreferencesStore(deps.runtime.harness);
@@ -39,7 +49,7 @@ export function registerPreferences(router: Router, deps: AppDeps): void {
       return;
     }
 
-    const patch: UiPreferencesPatch = {};
+    const patch: UiSettingsPatch = {};
     for (const name of UI_PREFERENCE_KEYS) {
       const value = body[name];
       if (value === undefined) continue;
@@ -49,13 +59,51 @@ export function registerPreferences(router: Router, deps: AppDeps): void {
       }
       patch[name] = value as readonly string[];
     }
+    if (body["theme"] !== undefined) {
+      if (!isThemeMode(body["theme"])) {
+        apiError(route.res, 400, "invalid_request", `theme must be one of ${THEME_MODES.join(", ")}`, route.requestId);
+        return;
+      }
+      patch.theme = body["theme"];
+    }
+    for (const name of FOLD_KEYS) {
+      const value = body[name];
+      if (value === undefined) continue;
+      if (!Array.isArray(value) || !value.every(isFoldablePanel)) {
+        apiError(route.res, 400, "invalid_request", `${name} must be an array of panel names`, route.requestId);
+        return;
+      }
+      patch[name] = value as readonly string[];
+    }
+    const baseRevision = body["baseRevision"];
+    if (baseRevision !== undefined && (typeof baseRevision !== "number" || !Number.isInteger(baseRevision) || baseRevision < 0)) {
+      apiError(route.res, 400, "invalid_request", "baseRevision must be a whole number", route.requestId);
+      return;
+    }
+    const seedOnly = body["seedOnly"] === true;
 
     if (Object.keys(patch).length === 0) {
       // Nothing to change is not an error: the client sends whatever it has.
-      json(route.res, 200, (await store().read(BACKGROUND_CONTEXT)) ?? NO_UI_PREFERENCES);
+      json(route.res, 200, await store().read(BACKGROUND_CONTEXT));
       return;
     }
 
-    json(route.res, 200, await store().write(patch, BACKGROUND_CONTEXT));
+    const result = await store().write(patch, BACKGROUND_CONTEXT, {
+      ...(baseRevision === undefined ? {} : { baseRevision: baseRevision as number }),
+      seedOnly,
+    });
+    if (!result.ok) {
+      json(route.res, 409, {
+        error: {
+          code: "preferences_conflict",
+          message: "another window changed the shared state first",
+          requestId: route.requestId,
+        },
+        current: result.state,
+      });
+      return;
+    }
+    if (result.changed) deps.runtime.events.emit("preferences_updated", { revision: result.state.uiRevision });
+    json(route.res, 200, result.state);
   });
 }

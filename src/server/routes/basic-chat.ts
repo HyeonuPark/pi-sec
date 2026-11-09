@@ -8,6 +8,7 @@ import { sendBody } from "../compress.ts";
 import { apiError, json, type RouteContext, type Router } from "../router.ts";
 import { type AppDeps, API_VERSION } from "../deps.ts";
 import { injectName, readIndex, renderPage, serveStatic } from "../static.ts";
+import { pagePreferences } from "../preferences-stamp.ts";
 import { contentSecurityPolicy, fillUiSlots, UI_RENDER_TIMEOUT_MS } from "../ui-page.ts";
 import { resolveMount } from "../proxy.ts";
 import { agentsWorkingRefusal, workingSubagents } from "../streams.ts";
@@ -311,7 +312,7 @@ export function registerBasicChat(router: Router, deps: AppDeps, options: BasicC
     // before it: a card's own text must not be read as one of our placeholders,
     // and a placeholder must not land inside a card.
     const named = injectName(raw, await chatPageName(deps));
-    const page = await fillUiSlots(renderPage(named, prefix, config.timezone), {
+    const page = await fillUiSlots(renderPage(named, prefix, config.timezone, await pagePreferences(deps)), {
       ui: deps.runtime.ui,
       prefix,
       timezone: config.timezone,

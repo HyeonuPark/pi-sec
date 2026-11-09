@@ -18,6 +18,7 @@ import { apiError, json, type RouteContext, type Router } from "../router.ts";
 import { type AppDeps } from "../deps.ts";
 import { resolveMount } from "../proxy.ts";
 import { readPage, renderPage } from "../static.ts";
+import { pagePreferences } from "../preferences-stamp.ts";
 
 /**
  * The focused chats: the page's four routes, the list page's event stream, and
@@ -93,7 +94,7 @@ async function servePage(deps: AppDeps, route: RouteContext): Promise<void> {
     return;
   }
   const config = deps.runtime.getConfig();
-  const html = renderPage(raw, resolveMount(route.req, config).prefix, config.timezone);
+  const html = renderPage(raw, resolveMount(route.req, config).prefix, config.timezone, await pagePreferences(deps));
   sendBody(route.res, {
     status: 200,
     contentType: "text/html; charset=utf-8",

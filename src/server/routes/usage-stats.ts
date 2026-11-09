@@ -9,6 +9,7 @@ import { apiError, json, type RouteContext, type Router } from "../router.ts";
 import type { AppDeps } from "../deps.ts";
 import { resolveMount } from "../proxy.ts";
 import { readPage, renderPage } from "../static.ts";
+import { pagePreferences } from "../preferences-stamp.ts";
 import { contentSecurityPolicy } from "../ui-page.ts";
 import {
   computeCallStats,
@@ -44,7 +45,7 @@ export function registerUsageStats(router: Router, deps: AppDeps, options: Usage
     sendBody(res, {
       status: 200,
       contentType: "text/html; charset=utf-8",
-      body: renderPage(raw, prefix, config.timezone),
+      body: renderPage(raw, prefix, config.timezone, await pagePreferences(deps)),
       headers: {
         "Cache-Control": "no-cache",
         "Content-Security-Policy": contentSecurityPolicy(),

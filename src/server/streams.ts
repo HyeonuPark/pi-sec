@@ -143,6 +143,9 @@ export const CONTROL_EVENTS = new Set([
   // began, a provider recovered, or a resumed conversation was held again. The
   // banner re-reads `/api/admin/status`, which is the only answer it draws from.
   "usage_hold_changed",
+  // The shared UI state (theme, folds, cleared lists) changed. The frame carries
+  // only the revision, and the page reads `GET /api/preferences` back.
+  "preferences_updated",
 ]);
 
 /** One agent that is running on a job right now. */
@@ -667,7 +670,7 @@ export class StreamHub {
       this.#focusedChatChannel ?? (this.#focusedChatChannel = this.deps.sse.channel("focused-chats"));
     if (this.#focusedChatUnsubscribe === undefined) {
       this.#focusedChatUnsubscribe = this.deps.bus.subscribe((event) => {
-        if (event.type === "focused_chat_updated") channel.publish(event.type, event.data);
+        if (event.type === "focused_chat_updated" || event.type === "preferences_updated") channel.publish(event.type, event.data);
       });
     }
     const { writer, needsSnapshot } = channel.attach(route.req, route.res);

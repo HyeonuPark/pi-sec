@@ -222,6 +222,18 @@ export type SecPreferences = {
   readonly hiddenJobs?: string[];
   readonly expandedJobs?: string[];
   readonly clearedInbox?: string[];
+  /**
+   * The UI state shared by every browser, all optional for the same reason as
+   * the lists above: the version stays 1 so a rollback can still read the
+   * document. `theme` is one of `auto`, `light`, `dark`. The two fold lists name
+   * foldable panels for wide and for narrow screens. `uiRevision` rises by one
+   * on every write that changes a UI field.
+   */
+  readonly theme?: string;
+  readonly foldedWide?: string[];
+  readonly foldedNarrow?: string[];
+  readonly collapsedJobs?: string[];
+  readonly uiRevision?: number;
 };
 
 /**

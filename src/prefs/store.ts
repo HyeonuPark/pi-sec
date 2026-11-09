@@ -30,6 +30,7 @@ export const UI_PREFERENCE_KEYS = [
   "clearedInbox",
   "revertQueueJobs",
   "revertQueueInbox",
+  "collapsedJobs",
 ] as const satisfies readonly (keyof StoredPreferences)[];
 
 export type UiPreferenceKey = (typeof UI_PREFERENCE_KEYS)[number];
@@ -46,7 +47,60 @@ export const NO_UI_PREFERENCES: UiPreferences = {
   clearedInbox: [],
   revertQueueJobs: [],
   revertQueueInbox: [],
+  collapsedJobs: [],
 };
+
+/** The theme modes the page can show. A stored `theme` is one of these. */
+export const THEME_MODES = ["auto", "light", "dark"] as const;
+
+/** The sidebar panels that fold. The page's own list of them is `FOLDABLE_PANELS`. */
+export const FOLDABLE_PANEL_NAMES = ["inbox", "jobs", "machines"] as const;
+
+/** The two fold lists: one per screen class. */
+export const FOLD_KEYS = ["foldedWide", "foldedNarrow"] as const;
+export type FoldKey = (typeof FOLD_KEYS)[number];
+
+/**
+ * The shared UI state as the route answers it: the id lists, the optional
+ * `theme` and fold lists (absent until a browser has chosen), and `uiRevision`,
+ * which rises by one on every write that changes any of them.
+ */
+export type UiState = UiPreferences & {
+  readonly theme?: string;
+  readonly foldedWide?: readonly string[];
+  readonly foldedNarrow?: readonly string[];
+  readonly uiRevision: number;
+};
+
+/** The non-list fields a patch may carry. */
+export type UiSettingsPatch = UiPreferencesPatch & {
+  theme?: string;
+  foldedWide?: readonly string[];
+  foldedNarrow?: readonly string[];
+};
+
+/** What a write can be told besides the fields. */
+export interface WriteOptions {
+  /** Refuse the write when the stored `uiRevision` is higher than this. */
+  readonly baseRevision?: number;
+  /** Apply `theme` and the fold lists only where the document holds none yet. */
+  readonly seedOnly?: boolean;
+}
+
+/** The answer of a write: the state, whether it changed, or the state that refused it. */
+export type WriteResult =
+  | { readonly ok: true; readonly state: UiState; readonly changed: boolean }
+  | { readonly ok: false; readonly state: UiState };
+
+/** Whether a value is one of the three theme modes. */
+export function isThemeMode(value: unknown): value is (typeof THEME_MODES)[number] {
+  return typeof value === "string" && (THEME_MODES as readonly string[]).includes(value);
+}
+
+/** Whether a value is a foldable panel name. */
+export function isFoldablePanel(value: unknown): boolean {
+  return typeof value === "string" && (FOLDABLE_PANEL_NAMES as readonly string[]).includes(value);
+}
 
 /**
  * A browser told to keep thousands of ids is either broken or hostile, and the
@@ -129,7 +183,13 @@ const SANITIZERS: Record<UiPreferenceKey, (ids: readonly string[]) => string[]> 
   clearedInbox: sanitize,
   revertQueueJobs: sanitizeQueue,
   revertQueueInbox: sanitizeQueue,
+  collapsedJobs: sanitize,
 };
+
+/** A fold list: known panel names only, once each, in the sidebar's order. */
+function sanitizeFolds(names: readonly string[]): string[] {
+  return FOLDABLE_PANEL_NAMES.filter((panel) => names.includes(panel));
+}
 
 function toPreferences(stored: StoredPreferences): UiPreferences {
   return {
@@ -138,7 +198,23 @@ function toPreferences(stored: StoredPreferences): UiPreferences {
     clearedInbox: [...(stored.clearedInbox ?? [])],
     revertQueueJobs: [...(stored.revertQueueJobs ?? [])],
     revertQueueInbox: [...(stored.revertQueueInbox ?? [])],
+    collapsedJobs: [...(stored.collapsedJobs ?? [])],
   };
+}
+
+function toState(stored: StoredPreferences): UiState {
+  return {
+    ...toPreferences(stored),
+    ...(stored.theme !== undefined && isThemeMode(stored.theme) ? { theme: stored.theme } : {}),
+    ...(stored.foldedWide !== undefined ? { foldedWide: [...stored.foldedWide] } : {}),
+    ...(stored.foldedNarrow !== undefined ? { foldedNarrow: [...stored.foldedNarrow] } : {}),
+    uiRevision: stored.uiRevision ?? 0,
+  };
+}
+
+function sameList(left: readonly string[] | undefined, right: readonly string[]): boolean {
+  const before = left ?? [];
+  return before.length === right.length && before.every((id, index) => id === right[index]);
 }
 
 /** Read and write `sec.settings`' UI lists and revert queues. */
@@ -149,25 +225,54 @@ export class PreferencesStore {
     this.session = session;
   }
 
-  async read(context: Context): Promise<UiPreferences> {
+  async read(context: Context): Promise<UiState> {
     const stored = (await this.session.snapshot(SecSettings, context)) as StoredPreferences | undefined;
-    return stored === undefined ? NO_UI_PREFERENCES : toPreferences(stored);
+    return stored === undefined ? { ...NO_UI_PREFERENCES, uiRevision: 0 } : toState(stored);
   }
 
   /**
-   * Replace the lists that were given, leaving the rest — `notes` included —
+   * Replace the fields that were given, leaving the rest, `notes` included,
    * untouched. One commit, so two clients toggling at once cannot lose each
    * other's field.
+   *
+   * With `baseRevision`, the commit compares it with the stored `uiRevision`
+   * first and refuses a stale writer without touching the document. Only a write
+   * that changes a UI field raises the revision, so a save that repeats the
+   * stored state is not an event.
    */
-  async write(patch: UiPreferencesPatch, context: Context): Promise<UiPreferences> {
-    return await this.session.commit(async (tx) => {
+  async write(patch: UiSettingsPatch, context: Context, options: WriteOptions = {}): Promise<WriteResult> {
+    return await this.session.commit(async (tx): Promise<WriteResult> => {
       const draft = (await tx.doc(SecSettings)) as StoredPreferences;
+      const revision = draft.uiRevision ?? 0;
+      if (options.baseRevision !== undefined && options.baseRevision < revision) {
+        return { ok: false, state: toState(draft) };
+      }
+      let changed = false;
       for (const key of UI_PREFERENCE_KEYS) {
         const value = patch[key];
         if (value === undefined) continue;
-        draft[key] = SANITIZERS[key](value);
+        const next = SANITIZERS[key](value);
+        if (sameList(draft[key], next)) continue;
+        draft[key] = next;
+        changed = true;
       }
-      return toPreferences(draft);
+      if (patch.theme !== undefined && isThemeMode(patch.theme)) {
+        if (draft.theme !== patch.theme && !(options.seedOnly === true && draft.theme !== undefined)) {
+          draft.theme = patch.theme;
+          changed = true;
+        }
+      }
+      for (const key of FOLD_KEYS) {
+        const value = patch[key];
+        if (value === undefined) continue;
+        if (options.seedOnly === true && draft[key] !== undefined) continue;
+        const next = sanitizeFolds(value);
+        if (draft[key] !== undefined && sameList(draft[key], next)) continue;
+        draft[key] = next;
+        changed = true;
+      }
+      if (changed) draft.uiRevision = revision + 1;
+      return { ok: true, state: toState(draft), changed };
     }, context);
   }
 }

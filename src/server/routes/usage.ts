@@ -27,6 +27,7 @@ import { sendBody } from "../compress.ts";
 import { apiError, json, type RouteContext, type Router } from "../router.ts";
 import { type AppDeps } from "../deps.ts";
 import { readPage, renderPage } from "../static.ts";
+import { pagePreferences } from "../preferences-stamp.ts";
 import { contentSecurityPolicy, fillUiSlots, UI_RENDER_TIMEOUT_MS } from "../ui-page.ts";
 import { resolveMount } from "../proxy.ts";
 import { JudgeUsage } from "../usage/judges.ts";
@@ -136,7 +137,7 @@ export function registerUsage(router: Router, deps: AppDeps, options: UsageRoute
     // slot, so a card's own text is never read as one of our placeholders.
     const config = deps.runtime.getConfig();
     const prefix = resolveMount(req, config).prefix;
-    const page = await fillUiSlots(renderPage(raw, prefix, config.timezone), {
+    const page = await fillUiSlots(renderPage(raw, prefix, config.timezone, await pagePreferences(deps)), {
       ui: deps.runtime.ui,
       prefix,
       timezone: config.timezone,

@@ -213,6 +213,39 @@ export function injectName(html: string, name: string): string {
   return html.replace(NAME_META, `<meta name="pi-sec-name" content="${value}" />`);
 }
 
+/** The shared UI state a page is stamped with. Every field is optional. */
+export interface PagePreferences {
+  readonly theme?: string;
+  readonly foldedWide?: readonly string[];
+  readonly foldedNarrow?: readonly string[];
+  readonly uiRevision?: number;
+}
+
+const PREFERENCES_META = /<meta\s+name="pi-sec-preferences"\s+content="[^"]*"\s*\/?>/i;
+const HTML_THEME = /(<html\b[^>]*?\sdata-theme=")[^"]*(")/i;
+
+/**
+ * Stamp the shared theme into `<html data-theme>` and the shared UI state into
+ * `<meta name="pi-sec-preferences">`.
+ *
+ * The page draws its first frame before any script runs, and the CSP forbids an
+ * inline script, so the attribute is the only way to paint the shared theme at
+ * once. The meta holds the theme, the two fold lists and the revision as JSON,
+ * escaped like the other stamps, so the page starts on the shared folds. A page
+ * without the meta is left as it is, and a state without a theme leaves
+ * `data-theme` at what the file says (`auto`).
+ */
+export function injectPreferences(html: string, preferences: PagePreferences | undefined): string {
+  if (preferences === undefined || !PREFERENCES_META.test(html)) return html;
+  let out = html;
+  if (preferences.theme !== undefined) {
+    const theme = escapeAttribute(preferences.theme);
+    out = out.replace(HTML_THEME, (_match, head: string, tail: string) => `${head}${theme}${tail}`);
+  }
+  const value = escapeAttribute(JSON.stringify(preferences));
+  return out.replace(PREFERENCES_META, () => `<meta name="pi-sec-preferences" content="${value}" />`);
+}
+
 const BASE_PLACEHOLDER = /\{\{base\}\}/g;
 
 /**
@@ -232,10 +265,18 @@ export function injectBasePlaceholder(html: string, prefix: string): string {
  *
  * The name is stamped by the route that serves the chat page, because it is the
  * only page that draws it and the value comes from the personality file rather
- * than from the config.
+ * than from the config. The shared UI state is stamped when the caller passes it.
  */
-export function renderPage(html: string, prefix: string, timeZone: string): string {
-  return injectTimezone(injectBasePlaceholder(injectBase(html, prefix), prefix), timeZone);
+export function renderPage(
+  html: string,
+  prefix: string,
+  timeZone: string,
+  preferences?: PagePreferences,
+): string {
+  return injectPreferences(
+    injectTimezone(injectBasePlaceholder(injectBase(html, prefix), prefix), timeZone),
+    preferences,
+  );
 }
 
 function escapeAttribute(value: string): string {

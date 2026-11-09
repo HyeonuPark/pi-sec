@@ -26,6 +26,7 @@ import { apiError, json, type RouteContext, type Router } from "../router.ts";
 import { type AppDeps } from "../deps.ts";
 import { resolveMount } from "../proxy.ts";
 import { readPage, renderPage, serveStatic } from "../static.ts";
+import { pagePreferences } from "../preferences-stamp.ts";
 
 /**
  * Reports, and the page that shows them.
@@ -121,7 +122,7 @@ async function servePage(deps: AppDeps, route: RouteContext): Promise<void> {
     return;
   }
   const config = deps.runtime.getConfig();
-  const html = renderPage(raw, resolveMount(route.req, config).prefix, config.timezone);
+  const html = renderPage(raw, resolveMount(route.req, config).prefix, config.timezone, await pagePreferences(deps));
   sendBody(route.res, {
     status: 200,
     contentType: "text/html; charset=utf-8",
