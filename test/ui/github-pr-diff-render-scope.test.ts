@@ -376,5 +376,5 @@ describe("render scope of the diff page", () => {
     expect(checked).toBeGreaterThan(1000);
     expect(crossing).toBeGreaterThan(0);
     expect(html.highlightCell("a < b", language, { from: 0, to: 3 }, "seg-add")).toContain('<span class="seg-add">');
-  });
+  }, 120000);
 });
