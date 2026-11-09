@@ -54,6 +54,7 @@ import { createAuditLog, readAuditTail } from "./runtime/audit.ts";
 import { createEventBus } from "./runtime/event-bus.ts";
 import { openStorage, readSchemaVersion, writeSchemaVersion } from "./runtime/storage.ts";
 import { RestartLauncher, reportPendingRestart } from "./runtime/restart-helper.ts";
+import { realTimers, runShutdown } from "./runtime/shutdown.ts";
 import { collectWaitingWork, notifyRestartNotice } from "./runtime/restart-notice.ts";
 import { readCodeDrift, rebuildWebAssets, UiAssetError } from "./runtime/ui-assets.ts";
 import { acquireDaemonLock, DaemonLockHeldError, type DaemonLock } from "./runtime/daemon-lock.ts";
@@ -422,17 +423,23 @@ async function commandStart(args: readonly string[]): Promise<number> {
     // Nothing may read the model list after the runtime it registers into has
     // gone; the interval is cleared here, before either close.
     syntheticCatalogOf(models)?.stop();
-    try {
-      await started.close();
-      await runtime.close();
-    } catch (error) {
-      logger.error("shutdown error", { error });
-    }
-    await rm(paths.pidFile, { force: true });
-    // Last, after the pid file is gone: a start that took the lock from here
-    // would otherwise find this process's pid still on disk and write its own
-    // over a file that this process then deletes.
-    lock.release();
+    await runShutdown({
+      code,
+      log: logger,
+      exit: (exitCode) => process.exit(exitCode),
+      timers: realTimers,
+      steps: [
+        { name: "server", run: () => started.close(), done: "server closed" },
+        { name: "runtime", run: () => runtime.close(), done: "runtime closed" },
+      ],
+      release: async () => {
+        await rm(paths.pidFile, { force: true });
+        // Last, after the pid file is gone: a start that took the lock from here
+        // would otherwise find this process's pid still on disk and write its own
+        // over a file that this process then deletes.
+        lock.release();
+      },
+    });
     settleStop?.(code);
   };
   // Set before the signal handlers, so the restart route can reach it from the

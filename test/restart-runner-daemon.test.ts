@@ -9,13 +9,15 @@
  * instance.test.ts` does.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { defaultConfig } from "../src/config/schema.ts";
 import { buildPaths } from "../src/runtime/paths.ts";
+import { SHUTDOWN_DEADLINE_MS } from "../src/runtime/shutdown.ts";
 import { restartMarkerPath, RUNNER_EXIT_CODE, RUNNER_VARIABLE } from "../src/runtime/restart-helper.ts";
 
 // The repository root, so a child runs the sources this test was compiled from.
@@ -91,13 +93,14 @@ async function sandbox(options: { readonly runner?: boolean } = {}): Promise<San
  * workspace tree, so a home without one is refused `script_missing` before any of
  * this is reached.
  */
-async function writeHome(sb: Sandbox): Promise<void> {
+async function writeHome(sb: Sandbox, extra: Record<string, unknown> = {}): Promise<void> {
   const config = {
     server: { port: sb.port },
     vmodels: {
       runner: { provider: "deepseek", modelId: "deepseek-flash", thinkingLevel: "medium", prompt: "runner" },
     },
-    agent: { vmodel: "runner" },
+    agent: { vmodel: "runner", ...(extra["agent"] as object | undefined) },
+    ...Object.fromEntries(Object.entries(extra).filter(([key]) => key !== "agent")),
   };
   await writeFile(join(sb.home, "config.json"), `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
   // A vmodel names a prompt file and a missing one is an error. Running from the
@@ -204,6 +207,19 @@ afterEach(async () => {
     }
   }
   spawned.clear();
+  // A fake `gh` outlives a daemon that was killed: it was written to name its pid.
+  for (const root of roots) {
+    const text = await readFile(join(root, "gh-started"), "utf8").catch(() => "");
+    for (const line of text.split("\n")) {
+      const pid = Number.parseInt(line, 10);
+      if (!Number.isFinite(pid)) continue;
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+  }
   // Removes each home with everything under it, its secrets directory included.
   await Promise.all([...roots].map((root) => rm(root, { recursive: true, force: true })));
   roots.clear();
@@ -294,4 +310,56 @@ describe("a daemon without the runner", () => {
     expect(stopped.signal, `the process was signalled:\n${stopped.output}`).toBeNull();
     expect(stopped.code, `exit code of a SIGTERM stop. output:\n${stopped.output}`).toBe(0);
   }, 180_000);
+});
+
+describe("a daemon stopping while a poll cycle runs and a page opens a stream", () => {
+  it("ends with the runner's code within the shutdown deadline", async () => {
+    const sb = await sandbox({ runner: true });
+    // A `gh` that reports its start and then sleeps for 20 seconds, so a poll
+    // cycle is running when the restart arrives. `exec` leaves one process for
+    // the daemon to wait for, and the `sleep` ends with it.
+    const bin = join(sb.root, "bin");
+    const started = join(sb.root, "gh-started");
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, "gh"), `#!/bin/sh\necho $$ >> "${started}"\nexec sleep 20\n`);
+    await chmod(join(bin, "gh"), 0o755);
+    const env: NodeJS.ProcessEnv = { ...sb.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+    const base = defaultConfig().agent.extensions.enabled;
+    await writeHome(sb, {
+      agent: { extensions: { enabled: [...base, "github-pr"] } },
+      githubPr: { writes: false, repos: ["example/app"] },
+    });
+    const child = start({ ...sb, env });
+    const stream = new AbortController();
+    try {
+      await waitReady(sb, child);
+      // The boot cycle has called `gh`: the cleanup of the dashboard now waits.
+      await waitFor(
+        async () => ((await exists(started)) ? true : undefined),
+        30_000,
+        "the fake gh to report a poll cycle",
+        () => child.output(),
+      );
+      const response = await postRestart(sb);
+      expect(response.status, await response.clone().text()).toBe(202);
+      // What the page does: its stream ended with the shutdown, and the browser
+      // opens it again. Held open, it is what the old shutdown waited for.
+      await new Promise((settleTimer) => setTimeout(settleTimer, 1_000));
+      void fetch(`http://127.0.0.1:${sb.port}/api/github/pr/events`, { signal: stream.signal })
+        .then(async (answer) => {
+          const reader = answer.body?.getReader();
+          while (reader !== undefined && !(await reader.read()).done) {
+            /* hold the stream until it ends */
+          }
+        })
+        .catch(() => undefined);
+
+      const ended = await settle(child, SHUTDOWN_DEADLINE_MS + 10_000);
+      expect(ended.signal, `the process was signalled:\n${ended.output}`).toBeNull();
+      expect(ended.code, `exit code. output:\n${ended.output}`).toBe(RUNNER_EXIT_CODE);
+      expect(await pidOnDisk(sb)).toBeUndefined();
+    } finally {
+      stream.abort();
+    }
+  }, 120_000);
 });
