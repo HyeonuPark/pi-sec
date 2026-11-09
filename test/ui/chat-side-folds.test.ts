@@ -2,10 +2,11 @@
 /**
  * Folding the inbox, the job tree and the machines from their headings.
  *
- * The three headings are buttons, and a press keeps the choice in the browser
- * (`pi-sec-folded-panels`) and writes the folded names on `<body data-folded>`,
- * which is what the stylesheet hides a list by. Three things about that are worth
- * a test without a browser:
+ * The three headings are buttons, and a press saves the choice on the server (one
+ * list for wide screens, one for narrow screens), keeps it in the browser as a
+ * cache (`pi-sec-folded-panels`) and writes the folded names on
+ * `<body data-folded>`, which is what the stylesheet hides a list by. Three things
+ * about that are worth a test without a browser:
  *
  *   - the press, the attribute and the stored value move together, and a second
  *     press puts all three back;
@@ -24,6 +25,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountSideParts, startSidePanels } from "../../src/ui/chat/SideParts.tsx";
 import { FOLDS_KEY } from "../../src/ui/state/folds.ts";
+import { fakePreferences, type FakePreferences } from "./preferences-fake.ts";
 import { applyJobEvent, resetJobsState } from "../../src/ui/state/jobs.ts";
 import { applyInboxFrame, resetInboxState } from "../../src/ui/state/inbox.ts";
 import { resetMachinesState } from "../../src/ui/state/machines.ts";
@@ -67,10 +69,14 @@ function answer(path: string, route: Route): void {
   routes.set(path, route);
 }
 
+/** The server's shared state for this test. */
+let server: FakePreferences = fakePreferences();
+
 /** The routes every panel reads, before a test changes one. */
 function defaults(): void {
+  server = fakePreferences();
   answer("/api/jobs", () => ({ body: { tree: [] } }));
-  answer("/api/preferences", () => ({ body: { hiddenJobs: [], expandedJobs: [], clearedInbox: [] } }));
+  answer("/api/preferences", (call) => server.handle(call));
   answer("/api/inbox", () => ({ body: { items: [] } }));
   answer("/api/user-queries", () => ({ body: { queries: [] } }));
   answer("/api/admin/status", () => ({ body: {} }));
@@ -362,5 +368,134 @@ describe("what a folded heading still says", () => {
 
     expect(stoppedBadge().className).toContain("hidden");
     expect(stoppedBadge().textContent).toBe("");
+  });
+});
+
+/* --------------------------------------------------- the shared folds */
+
+/** The preference writes the page made, as the server read them. */
+const writes = () =>
+  calls
+    .filter((call) => call.url === "/api/preferences" && call.method === "PATCH")
+    .map((call) => JSON.parse(call.body ?? "{}") as Record<string, unknown>);
+
+/** A screen of one class. `matches` is the answer of the narrow query. */
+function screen(narrow: boolean): { cross(next: boolean): void } {
+  let matches = narrow;
+  const listeners = new Set<() => void>();
+  vi.stubGlobal("matchMedia", () => ({
+    get matches() {
+      return matches;
+    },
+    addEventListener: (_name: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_name: string, listener: () => void) => listeners.delete(listener),
+  }));
+  (window as unknown as { matchMedia: unknown }).matchMedia = (globalThis as unknown as { matchMedia: unknown }).matchMedia;
+  return {
+    cross(next) {
+      matches = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+describe("folds shared through the server", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+  });
+
+  it("saves a fold into the wide list on a wide screen, with the revision it last saw", async () => {
+    await startSidePanels();
+    await settle();
+
+    await press("jobs");
+    await settle();
+
+    expect(writes()).toEqual([{ foldedWide: ["jobs"], baseRevision: 0 }]);
+    expect(server.state()["foldedWide"]).toEqual(["jobs"]);
+    expect(server.state()["foldedNarrow"]).toBeUndefined();
+  });
+
+  it("saves a fold into the narrow list on a narrow screen", async () => {
+    screen(true);
+    await mount();
+    await startSidePanels();
+    await settle();
+
+    await press("inbox");
+    await settle();
+
+    expect(writes()).toEqual([{ foldedNarrow: ["inbox"], baseRevision: 0 }]);
+  });
+
+  it("draws the list of the new class when the screen crosses the boundary", async () => {
+    const view = screen(false);
+    await mount();
+    server.external({ foldedWide: ["jobs"], foldedNarrow: ["inbox", "machines"] });
+    await startSidePanels();
+    await settle();
+    expect(bodyFolds()).toEqual(["jobs"]);
+
+    view.cross(true);
+    await settle();
+    expect(bodyFolds()).toEqual(["inbox", "machines"]);
+
+    view.cross(false);
+    await settle();
+    expect(bodyFolds()).toEqual(["jobs"]);
+    // Crossing is not a press: nothing was saved.
+    expect(writes()).toEqual([]);
+  });
+
+  it("starts on the server's list and ignores the browser's cache once the server holds one", async () => {
+    storeFolds(["inbox"]);
+    await mount();
+    server.external({ foldedWide: ["machines"] });
+    await startSidePanels();
+    await settle();
+
+    expect(bodyFolds()).toEqual(["machines"]);
+    // Adopting the server's list is not a press.
+    expect(writes()).toEqual([]);
+  });
+
+  it("follows another browser's fold when the page reads the state again", async () => {
+    await startSidePanels();
+    await settle();
+    expect(bodyFolds()).toEqual([]);
+
+    server.external({ foldedWide: ["jobs", "inbox"] });
+    const { readPreferences } = await import("../../src/ui/state/preferences.ts");
+    await readPreferences();
+    await settle();
+
+    expect(bodyFolds()).toEqual(["inbox", "jobs"]);
+    expect(writes()).toEqual([]);
+  });
+
+  it("carries the browser's old folds into the list of its screen class, when the server has none", async () => {
+    storeFolds(["inbox", "machines"]);
+    await mount();
+    await startSidePanels();
+    await settle();
+
+    expect(writes()).toEqual([{ foldedWide: ["inbox", "machines"], seedOnly: true }]);
+    expect(server.state()["foldedNarrow"]).toBeUndefined();
+    expect(bodyFolds()).toEqual(["inbox", "machines"]);
+  });
+
+  it("carries nothing when the browser kept no folds, and nothing when the server has a list", async () => {
+    await startSidePanels();
+    await settle();
+    expect(writes()).toEqual([]);
+
+    storeFolds(["jobs"]);
+    await mount();
+    server.external({ foldedWide: [] });
+    await startSidePanels();
+    await settle();
+    expect(writes()).toEqual([]);
+    expect(bodyFolds()).toEqual([]);
   });
 });

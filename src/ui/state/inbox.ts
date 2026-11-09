@@ -30,6 +30,9 @@ import {
   removeFromSet,
   revertQueueInbox,
   savePreference,
+  withId,
+  withoutEntry,
+  withoutId,
 } from "./jobs.ts";
 import { reconcileById } from "./keyed.ts";
 
@@ -180,7 +183,13 @@ export function hideInboxItem(id: string): void {
   clearedInbox.value = addToSet(clearedInbox.value, key);
   expandedInbox.value = removeFromSet(expandedInbox.value, key);
   revertQueueInbox.value = rememberHide(revertQueueInbox.value, key);
-  savePreference("clearedInbox", [...clearedInbox.value], "revertQueueInbox", revertQueueInbox.value);
+  savePreference(
+    (current) => ({
+      clearedInbox: withId(current.clearedInbox, key),
+      revertQueueInbox: rememberHide(current.revertQueueInbox ?? [], key),
+    }),
+    "clearedInbox list",
+  );
 }
 
 /**
@@ -200,7 +209,13 @@ export function hideAllInbox(): void {
   clearedInbox.value = cleared;
   expandedInbox.value = expanded;
   revertQueueInbox.value = rememberHideGroup(revertQueueInbox.value, ids);
-  savePreference("clearedInbox", [...clearedInbox.value], "revertQueueInbox", revertQueueInbox.value);
+  savePreference(
+    (current) => ({
+      clearedInbox: ids.reduce<readonly string[]>((list, id) => withId(list, id), current.clearedInbox ?? []),
+      revertQueueInbox: rememberHideGroup(current.revertQueueInbox ?? [], ids),
+    }),
+    "clearedInbox list",
+  );
 }
 
 /** Bring back the newest cell of history: one hide, or one whole group. */
@@ -212,7 +227,14 @@ export function revertInbox(): void {
   let cleared = clearedInbox.value;
   for (const id of queueEntryIds(undone)) cleared = removeFromSet(cleared, id);
   clearedInbox.value = cleared;
-  savePreference("clearedInbox", [...clearedInbox.value], "revertQueueInbox", revertQueueInbox.value);
+  const back = queueEntryIds(undone);
+  savePreference(
+    (current) => ({
+      clearedInbox: back.reduce<readonly string[]>((list, id) => withoutId(list, id), current.clearedInbox ?? []),
+      revertQueueInbox: withoutEntry(current.revertQueueInbox, undone),
+    }),
+    "clearedInbox list",
+  );
 }
 
 /* --------------------------------------------------------------- the clock */

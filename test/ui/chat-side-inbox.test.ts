@@ -10,6 +10,7 @@
  * the reset test: a read must leave the pressed title's focus, the text
  * selected in an opened body and the open state where the operator left them.
  */
+import { fakePreferences, type FakePreferences } from "./preferences-fake.ts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -52,10 +53,14 @@ function answer(path: string, route: (call: Call) => Answer): void {
   routes.set(path, route);
 }
 
+/** The server's shared state for this test: it answers reads and keeps what a press saves. */
+let server: FakePreferences = fakePreferences();
+
 /** The answers every panel gets, before a test changes one. */
 function defaults(): void {
+  server = fakePreferences();
   answer("/api/jobs", () => ({ body: { tree: [] } }));
-  answer("/api/preferences", () => ({ body: { hiddenJobs: [], expandedJobs: [], clearedInbox: [] } }));
+  answer("/api/preferences", (call) => server.handle(call));
   answer("/api/inbox", () => ({ body: { items: [] } }));
   answer("/api/user-queries", () => ({ body: { queries: [] } }));
   answer("/api/admin/status", () => ({ body: {} }));
@@ -209,7 +214,7 @@ describe("the inbox", () => {
 
     expect(inbox().querySelectorAll(".inbox-item")).toHaveLength(0);
     expect(restoreButton().textContent).toBe("↩ revert (2)");
-    expect(patchBodies().at(-1)).toEqual({ clearedInbox: ["i1", "i2"], revertQueueInbox: ["i1", "i2"] });
+    expect(patchBodies().at(-1)).toEqual({ clearedInbox: ["i1", "i2"], revertQueueInbox: ["i1", "i2"], baseRevision: 1 });
 
     restoreButton().click();
     await settle();
@@ -218,14 +223,14 @@ describe("the inbox", () => {
     expect(inbox().querySelectorAll(".inbox-item")).toHaveLength(1);
     expect(inbox().querySelector('.inbox-item[data-id="i2"]')).not.toBeNull();
     expect(inbox().querySelector('.inbox-item[data-id="i1"]')).toBeNull();
-    expect(patchBodies().at(-1)).toEqual({ clearedInbox: ["i1"], revertQueueInbox: ["i1"] });
+    expect(patchBodies().at(-1)).toEqual({ clearedInbox: ["i1"], revertQueueInbox: ["i1"], baseRevision: 2 });
     expect(restoreButton().textContent).toBe("↩ revert (1)");
 
     restoreButton().click();
     await settle();
     expect(inbox().querySelectorAll(".inbox-item")).toHaveLength(2);
     expect(restoreButton().disabled).toBe(true);
-    expect(patchBodies().at(-1)).toEqual({ clearedInbox: [], revertQueueInbox: [] });
+    expect(patchBodies().at(-1)).toEqual({ clearedInbox: [], revertQueueInbox: [], baseRevision: 3 });
   });
 
   it("hides every item in one press, as one cell and one undo", async () => {
@@ -243,6 +248,7 @@ describe("the inbox", () => {
     expect(patchBodies().at(-1)).toEqual({
       clearedInbox: ["i1", "i2", "i3"],
       revertQueueInbox: ["hide-all:i1,i2,i3"],
+      baseRevision: 0,
     });
     // With nothing on screen there is nothing to hide, and the button says so.
     expect(hideAllButton().disabled).toBe(true);
@@ -250,7 +256,7 @@ describe("the inbox", () => {
     restoreButton().click();
     await settle();
     expect(inbox().querySelectorAll(".inbox-item")).toHaveLength(3);
-    expect(patchBodies().at(-1)).toEqual({ clearedInbox: [], revertQueueInbox: [] });
+    expect(patchBodies().at(-1)).toEqual({ clearedInbox: [], revertQueueInbox: [], baseRevision: 1 });
   });
 
   it("declines hide all when nothing is on screen", async () => {

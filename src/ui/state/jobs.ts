@@ -10,25 +10,37 @@
  * looks at pays nothing: an event marks the list dirty instead of reading it,
  * and the return to the tab reads it once.
  *
- * The five id lists beside the tree — the cleared jobs, the opened job titles,
- * the cleared inbox items, and the two revert queues — live on the server
- * (`GET`/`PATCH /api/preferences`). This module owns them because one read fills
- * all five and the job tree is their largest user; `state/inbox.ts` imports the
- * two inbox lists from here rather than keeping a second copy. The old browser
+ * The six id lists beside the tree (the cleared jobs, the opened job titles, the
+ * folded groups, the cleared inbox items, and the two revert queues) live on the
+ * server (`GET`/`PATCH /api/preferences`) and are shared by every open page. This
+ * module owns them because one read fills all six and the job tree is their
+ * largest user; `state/inbox.ts` imports the two inbox lists from here rather
+ * than keeping a second copy. A press is saved as an intent (add this id, remove
+ * that one) that `state/preferences.ts` applies to the newest server record, so a
+ * page that is behind cannot write back a list another page already changed. The old browser
  * keys (`pi-sec-hidden-jobs` and the two beside them) are read once, carried to
  * the server, and then dropped.
  *
  * Screen state the operator makes — which group is folded, what is scrolled,
- * where the focus is — is not in this module: a fold is kept in
- * {@link collapsedJobs} (session only, never saved), and the rest belongs to the
+ * where the focus is — is not in this module, except the folded groups in
+ * {@link collapsedJobs}, which are shared like the lists. The rest belongs to the
  * elements themselves.
  */
 import { signal } from "@preact/signals";
 import type { JobNode, JobTreeResponse } from "../../shared/wire/jobs.ts";
 import { request } from "../api/request.ts";
 import { timezone } from "../mount.ts";
+import { carryStoredFolds, resetFoldsState } from "./folds.ts";
 import { reconcileById } from "./keyed.ts";
-import { showError } from "./toast.ts";
+import {
+  onPreferences,
+  readPreferences,
+  resetPreferencesState,
+  savePreferenceIntent,
+  sendPreferences,
+  type PreferenceIntent,
+  type SharedPreferences,
+} from "./preferences.ts";
 
 /** Statuses a job can be cleared from. A live job stays: hiding work in progress is not tidying. */
 export const CLEARABLE_STATUSES: ReadonlySet<string> = new Set(["done", "cancelled", "failed"]);
@@ -39,6 +51,7 @@ export const CLEARABLE_STATUSES: ReadonlySet<string> = new Set(["done", "cancell
 export interface UiPreferences {
   readonly hiddenJobs?: readonly string[];
   readonly expandedJobs?: readonly string[];
+  readonly collapsedJobs?: readonly string[];
   readonly clearedInbox?: readonly string[];
   readonly revertQueueJobs?: readonly string[];
   readonly revertQueueInbox?: readonly string[];
@@ -66,7 +79,7 @@ export const hiddenJobs = signal<ReadonlySet<string>>(new Set());
 /** Job titles opened into the full-width block under the row. */
 export const expandedJobs = signal<ReadonlySet<string>>(new Set());
 
-/** Groups whose children are folded away. Session only: nothing is saved. */
+/** Groups whose children are folded away. Shared and remembered like the opened titles. */
 export const collapsedJobs = signal<ReadonlySet<string>>(new Set());
 
 /** Inbox items cleared off the list. Read by `state/inbox.ts`. */
@@ -127,26 +140,31 @@ export function rememberHideGroup(queue: readonly string[], ids: readonly string
   return next;
 }
 
+/** The ids of a list with `id` added. The same ids come back when it was there. */
+export function withId(ids: readonly string[] | undefined, id: string): readonly string[] {
+  const list = ids ?? [];
+  return list.includes(id) ? list : [...list, id];
+}
+
+/** The ids of a list without `id`. */
+export function withoutId(ids: readonly string[] | undefined, id: string): readonly string[] {
+  return (ids ?? []).filter((entry) => entry !== id);
+}
+
+/** A revert queue after one undo: the entry leaves, from the end when it is the newest. */
+export function withoutEntry(queue: readonly string[] | undefined, entry: string): readonly string[] {
+  const list = queue ?? [];
+  return list[list.length - 1] === entry ? list.slice(0, -1) : list.filter((item) => item !== entry);
+}
+
 /**
- * Save one list, and the revert queue that goes with it when the list has one.
- *
- * The server holds every list, so only what changed is sent, in one write: a
- * queue that arrived without its list would let the button undo a hide the list
- * does not show. A save that fails says so, because the point of moving this off
- * the browser was that the failure used to be invisible.
+ * Save one press. The state is already drawn, and the server holds the lists:
+ * the intent says what the press means, and it is applied to the newest record
+ * and sent with its revision. A save that fails says so, because the point of
+ * moving this off the browser was that the failure used to be invisible.
  */
-export function savePreference(
-  name: string,
-  ids: readonly string[],
-  queueName: string | null = null,
-  queue: readonly string[] = [],
-): void {
-  const body: Record<string, readonly string[]> =
-    queueName === null ? { [name]: [...ids] } : { [name]: [...ids], [queueName]: [...queue] };
-  void request("/api/preferences", { method: "PATCH", body: JSON.stringify(body) }).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    showError(`Could not save the ${name} list: ${message}`);
-  });
+export function savePreference(intent: PreferenceIntent, label: string): void {
+  void savePreferenceIntent(intent, label);
 }
 
 /** The ids a browser's old key holds, or an empty list. */
@@ -166,12 +184,8 @@ function loadLegacyIds(key: string): readonly string[] {
  * work panel to draw anyway, and the tree and the inbox read again on their own.
  */
 export async function loadPreferences(): Promise<void> {
-  let stored: UiPreferences;
-  try {
-    stored = (await request<UiPreferences>("/api/preferences")) ?? {};
-  } catch {
-    return;
-  }
+  const stored: SharedPreferences | undefined = await readPreferences();
+  if (stored === undefined) return;
 
   const carried: Record<string, readonly string[]> = {};
   for (const [name, key] of Object.entries(LEGACY_KEYS)) {
@@ -180,15 +194,7 @@ export async function loadPreferences(): Promise<void> {
     if (local.length > 0 && already.length === 0) carried[name] = local;
   }
 
-  if (Object.keys(carried).length > 0) {
-    try {
-      stored =
-        (await request<UiPreferences>("/api/preferences", { method: "PATCH", body: JSON.stringify(carried) })) ??
-        stored;
-    } catch {
-      /* keep what the server answered; the browser copy is dropped below */
-    }
-  }
+  if (Object.keys(carried).length > 0) await sendPreferences(carried);
   for (const key of Object.values(LEGACY_KEYS)) {
     try {
       window.localStorage.removeItem(key);
@@ -196,13 +202,18 @@ export async function loadPreferences(): Promise<void> {
       /* nothing to clean up */
     }
   }
-
-  hiddenJobs.value = idSet(stored.hiddenJobs);
-  expandedJobs.value = idSet(stored.expandedJobs);
-  clearedInbox.value = idSet(stored.clearedInbox);
-  revertQueueJobs.value = queueFrom(stored.revertQueueJobs);
-  revertQueueInbox.value = queueFrom(stored.revertQueueInbox);
+  await carryStoredFolds(stored);
 }
+
+// A record from the server sets the lists it carries. It never saves.
+onPreferences((record) => {
+  if (record.hiddenJobs !== undefined) hiddenJobs.value = idSet(record.hiddenJobs);
+  if (record.expandedJobs !== undefined) expandedJobs.value = idSet(record.expandedJobs);
+  if (record.collapsedJobs !== undefined) collapsedJobs.value = idSet(record.collapsedJobs);
+  if (record.clearedInbox !== undefined) clearedInbox.value = idSet(record.clearedInbox);
+  if (record.revertQueueJobs !== undefined) revertQueueJobs.value = queueFrom(record.revertQueueJobs);
+  if (record.revertQueueInbox !== undefined) revertQueueInbox.value = queueFrom(record.revertQueueInbox);
+});
 
 /** A revert queue from the server: oldest first, never longer than the limit. */
 function queueFrom(ids: readonly string[] | undefined): readonly string[] {
@@ -333,20 +344,26 @@ export async function jobsTabVisible(): Promise<void> {
   await refreshJobs();
 }
 
-/** Fold or unfold one group's children. Session only, so nothing is saved. */
+/** Fold or unfold one group's children, and save the fold for every page. */
 export function toggleJobChildren(id: string): void {
   const key = String(id);
-  collapsedJobs.value = collapsedJobs.value.has(key)
-    ? removeFromSet(collapsedJobs.value, key)
-    : addToSet(collapsedJobs.value, key);
+  const folding = !collapsedJobs.value.has(key);
+  collapsedJobs.value = folding ? addToSet(collapsedJobs.value, key) : removeFromSet(collapsedJobs.value, key);
+  savePreference(
+    (current) => ({ collapsedJobs: folding ? withId(current.collapsedJobs, key) : withoutId(current.collapsedJobs, key) }),
+    "folded groups",
+  );
 }
 
 /** Open or close one job's full-width title block, and save the list. */
 export function toggleJobExpanded(id: string): void {
   const key = String(id);
-  const expanded = expandedJobs.value.has(key);
-  expandedJobs.value = expanded ? removeFromSet(expandedJobs.value, key) : addToSet(expandedJobs.value, key);
-  savePreference("expandedJobs", [...expandedJobs.value]);
+  const opening = !expandedJobs.value.has(key);
+  expandedJobs.value = opening ? addToSet(expandedJobs.value, key) : removeFromSet(expandedJobs.value, key);
+  savePreference(
+    (current) => ({ expandedJobs: opening ? withId(current.expandedJobs, key) : withoutId(current.expandedJobs, key) }),
+    "expandedJobs list",
+  );
 }
 
 /** Clear one job off the list, remembering the hide for the revert button. */
@@ -354,7 +371,13 @@ export function clearJob(id: string): void {
   const key = String(id);
   hiddenJobs.value = addToSet(hiddenJobs.value, key);
   revertQueueJobs.value = rememberHide(revertQueueJobs.value, key);
-  savePreference("hiddenJobs", [...hiddenJobs.value], "revertQueueJobs", revertQueueJobs.value);
+  savePreference(
+    (current) => ({
+      hiddenJobs: withId(current.hiddenJobs, key),
+      revertQueueJobs: rememberHide(current.revertQueueJobs ?? [], key),
+    }),
+    "hiddenJobs list",
+  );
 }
 
 /** Bring back the newest hidden job. */
@@ -364,7 +387,13 @@ export function revertJobs(): void {
   if (undone === undefined) return;
   revertQueueJobs.value = queue.slice(0, -1);
   hiddenJobs.value = removeFromSet(hiddenJobs.value, undone);
-  savePreference("hiddenJobs", [...hiddenJobs.value], "revertQueueJobs", revertQueueJobs.value);
+  savePreference(
+    (current) => ({
+      hiddenJobs: withoutId(current.hiddenJobs, undone),
+      revertQueueJobs: withoutEntry(current.revertQueueJobs, undone),
+    }),
+    "hiddenJobs list",
+  );
 }
 
 /* --------------------------------------------------------------- the clock */
@@ -446,6 +475,8 @@ export function zoneRowStamp(at: unknown): string {
 
 /** Put this module back where a freshly loaded page starts. */
 export function resetJobsState(): void {
+  resetPreferencesState();
+  resetFoldsState();
   if (windowTimer !== undefined) clearTimeout(windowTimer);
   ZONE_FIELDS.clear();
   windowTimer = undefined;

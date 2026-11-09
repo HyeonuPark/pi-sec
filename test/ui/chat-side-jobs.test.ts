@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountSideParts, startSidePanels } from "../../src/ui/chat/SideParts.tsx";
 import { resetJobsState } from "../../src/ui/state/jobs.ts";
+import { fakePreferences, type FakePreferences } from "./preferences-fake.ts";
 import { resetInboxState } from "../../src/ui/state/inbox.ts";
 import { resetQueriesState } from "../../src/ui/state/queries.ts";
 import { resetNotesState } from "../../src/ui/state/notes.ts";
@@ -60,10 +61,14 @@ function answer(path: string, route: Route): void {
   routes.set(path, route);
 }
 
+/** The server's shared state for this test: it answers reads and keeps what a press saves. */
+let server: FakePreferences = fakePreferences();
+
 /** The answer to the job tree or the preferences read, unless a test says otherwise. */
 function defaults(): void {
+  server = fakePreferences();
   answer("/api/jobs", () => ({ body: { tree: [] } }));
-  answer("/api/preferences", () => ({ body: { hiddenJobs: [], expandedJobs: [], clearedInbox: [] } }));
+  answer("/api/preferences", (call) => server.handle(call));
   answer("/api/inbox", () => ({ body: { items: [] } }));
   answer("/api/user-queries", () => ({ body: { queries: [] } }));
   answer("/api/admin/status", () => ({ body: {} }));
@@ -215,7 +220,7 @@ describe("the job tree", () => {
 
     expect(jobsPanel().querySelectorAll(".job-row")).toHaveLength(0);
     expect(jobsPanel().querySelector<HTMLElement>("#jobs-restore")!.textContent).toBe("↩ revert (1)");
-    expect(lastBody("/api/preferences")).toEqual({ hiddenJobs: ["job-1"], revertQueueJobs: ["job-1"] });
+    expect(lastBody("/api/preferences")).toEqual({ hiddenJobs: ["job-1"], revertQueueJobs: ["job-1"], baseRevision: 0 });
   });
 
   it("leaves a live job's chip inert, and folds its children from the chip", async () => {
@@ -237,9 +242,9 @@ describe("the job tree", () => {
     expect(jobsPanel().querySelectorAll(".job-row")).toHaveLength(1);
     expect(chip().getAttribute("aria-expanded")).toBe("false");
     expect(chip().textContent).toBe("▸ active");
-    // Folding is a way to read the tree, not a preference: nothing is saved.
+    // A fold is shared state: it is saved, so every page folds the same group.
     await settle();
-    expect(requests("/api/preferences")).toHaveLength(0);
+    expect(lastBody("/api/preferences")).toEqual({ collapsedJobs: ["job-1"], baseRevision: 0 });
 
     // The fold stays a fold: a second press opens it again.
     chip().click();
@@ -267,13 +272,13 @@ describe("the job tree", () => {
     expect(block.parentElement).toBe(jobsPanel());
     expect(block.getAttribute("data-open-job-id")).toBe("job-1");
     expect(block.querySelector(".job-open-title")!.textContent).toBe(long);
-    expect(lastBody("/api/preferences")).toEqual({ expandedJobs: ["job-1"] });
+    expect(lastBody("/api/preferences")).toEqual({ expandedJobs: ["job-1"], baseRevision: 0 });
 
     // Pressing the block folds it again, the same way the caret does.
     block.click();
     await settle();
     expect(jobsPanel().querySelector(".job-open")).toBeNull();
-    expect(lastBody("/api/preferences")).toEqual({ expandedJobs: [] });
+    expect(lastBody("/api/preferences")).toEqual({ expandedJobs: [], baseRevision: 1 });
   });
 
   it("marks a routine job routine and a one-off once, by field and not by label", async () => {
@@ -445,6 +450,7 @@ describe("the job tree", () => {
     expect(lastBody("/api/preferences")).toEqual({
       hiddenJobs: ["job-1", "job-2"],
       revertQueueJobs: ["job-1", "job-2"],
+      baseRevision: 1,
     });
 
     jobsPanel().querySelector<HTMLElement>("#jobs-restore")!.click();
@@ -453,7 +459,7 @@ describe("the job tree", () => {
     // The newest hide came back and the other stayed off the list.
     expect(jobsPanel().querySelector('[data-job-id="job-2"]')).not.toBeNull();
     expect(jobsPanel().querySelector('[data-job-id="job-1"]')).toBeNull();
-    expect(lastBody("/api/preferences")).toEqual({ hiddenJobs: ["job-1"], revertQueueJobs: ["job-1"] });
+    expect(lastBody("/api/preferences")).toEqual({ hiddenJobs: ["job-1"], revertQueueJobs: ["job-1"], baseRevision: 2 });
   });
 });
 
@@ -474,6 +480,7 @@ describe("the revert memory", () => {
     expect(lastBody("/api/preferences")).toEqual({
       hiddenJobs: Array.from({ length: 11 }, (_, index) => `job-${index + 1}`),
       revertQueueJobs: Array.from({ length: 10 }, (_, index) => `job-${index + 2}`),
+      baseRevision: 10,
     });
 
     // Ten reverts undo ten hides; the eleventh has nothing left to undo.
@@ -542,11 +549,7 @@ describe("job events", () => {
 
   it("hides what the server already holds as cleared, and carries a browser's old list once", async () => {
     window.localStorage.setItem("pi-sec-hidden-jobs", JSON.stringify(["job-2"]));
-    answer("/api/preferences", (call) =>
-      call.method === "PATCH"
-        ? { body: { hiddenJobs: ["job-2"], expandedJobs: [], clearedInbox: [] } }
-        : { body: { hiddenJobs: [], expandedJobs: [], clearedInbox: [] } },
-    );
+    answer("/api/preferences", (call) => server.handle(call));
     setTree([node("job-1", "kept", { status: "done" }), node("job-2", "cleared", { status: "done" })]);
     await startSidePanels();
     await settle();

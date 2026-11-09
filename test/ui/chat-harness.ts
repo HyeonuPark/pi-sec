@@ -11,11 +11,15 @@
  * it is about. Every route not named here answers `200 {}`, which is what the
  * harness does with no answer at all.
  */
+import { fakePreferences } from "./preferences-fake.ts";
 import { loadUiPage, settle, type FetchAnswer, type LoadUiPageOptions, type UiPageHandle } from "./harness.ts";
 
 /** What a quiet daemon answers: no jobs, no notices, no questions, nothing to say. */
 export const QUIET: Readonly<Record<string, FetchAnswer>> = {
-  "/api/preferences": { body: { hiddenJobs: [], expandedJobs: [], clearedInbox: [] } },
+  // The shared state, as a server that has none chosen yet answers it. A test that
+  // presses a control gets a fresh stateful one from `loadChatPage`, because the
+  // page applies the answer of every save.
+  "/api/preferences": { body: { hiddenJobs: [], expandedJobs: [], clearedInbox: [], collapsedJobs: [], uiRevision: 0 } },
   "/api/jobs": { body: { jobs: [] } },
   "/api/inbox": { body: { items: [] } },
   "/api/user-queries": { body: { queries: [] } },
@@ -31,7 +35,11 @@ export async function more(count = 4): Promise<void> {
 
 /** Load the chat page with the quiet answers, and answer what to change about them. */
 export async function loadChatPage(options: LoadUiPageOptions = {}): Promise<UiPageHandle> {
-  const ui = await loadUiPage("chat", { ...options, fetch: { ...QUIET, ...(options.fetch ?? {}) } });
+  const server = fakePreferences();
+  const ui = await loadUiPage("chat", {
+    ...options,
+    fetch: { ...QUIET, "/api/preferences": (request) => server.handle(request), ...(options.fetch ?? {}) },
+  });
   await more();
   return ui;
 }

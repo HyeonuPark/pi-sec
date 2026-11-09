@@ -16,9 +16,12 @@
  *
  * The first `snapshot` answers the connection the page just made, and the lists
  * were read a moment before it. Every later one follows a reopen, and it stands
- * for frames the server no longer holds, so both lists are read again.
+ * for frames the server no longer holds, so both lists and the shared UI state
+ * are read again. `preferences_updated` rides the same channel and carries the
+ * revision of the shared state only.
  */
 import { changeOf, refreshFromStream } from "../state/chats.ts";
+import { applyPreferencesEvent, readPreferences, revisionOf } from "../state/preferences.ts";
 import { StreamClient } from "./client.ts";
 
 /** The path the list page's stream is served on. */
@@ -28,8 +31,13 @@ export const CHATS_STREAM_PATH = "/api/focused-chats/events";
 export function startChatsStream(): StreamClient {
   const client = new StreamClient({ path: CHATS_STREAM_PATH });
   client.on("snapshot", (event) => {
-    if (event.snapshotCount > 1) void refreshFromStream();
+    if (event.snapshotCount > 1) {
+      void refreshFromStream();
+      void readPreferences();
+    }
   });
+  // The shared theme changed on some page. The frame carries the revision only.
+  client.on("preferences_updated", (event) => applyPreferencesEvent(revisionOf(event.data)));
   client.on("focused_chat_updated", (event) => {
     void refreshFromStream(changeOf(event.data));
   });

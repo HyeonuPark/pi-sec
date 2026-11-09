@@ -1,13 +1,14 @@
 /**
  * Folding a panel from its heading, in a real browser.
  *
- * The fold is a fact about what the page draws and what the browser remembers:
+ * The fold is a fact about what the page draws and what the server remembers:
  * the list goes away while the heading and its badges stay, the choice survives a
  * reload, `Tab` reaches the heading and `Enter` or `Space` presses it, and the
- * same works on a phone-width screen once the drawer is open. jsdom answers none
- * of that: it applies no stylesheet, so it cannot say that a list really left the
- * screen, and it does not reload a page, so it cannot say that the value in
- * `localStorage` came back.
+ * same works on a phone-width screen once the drawer is open. The choice is shared
+ * state: one list for wide screens and one for narrow screens, kept on the server.
+ * jsdom answers none of that: it applies no stylesheet, so it cannot say that a
+ * list really left the screen, and it does not reload a page, so it cannot say
+ * that the saved choice came back.
  *
  * So this file drives Chromium through Playwright against a real server on port 0.
  * The inbox notice and the job are real records, and the page reads them the way
@@ -100,15 +101,25 @@ function currentContext(): BrowserContext {
   return context;
 }
 
+/** The shared state on the server, as the page reads it. */
+async function serverFolds(): Promise<{ foldedWide?: string[]; foldedNarrow?: string[] }> {
+  return (await (await fetch(`${origin}/api/preferences`)).json()) as { foldedWide?: string[]; foldedNarrow?: string[] };
+}
+
 /**
  * A chat page with nothing remembered, at the width the case asks for.
  *
- * `localStorage` belongs to the browser and not to a page, so a case that folded
- * a panel would decide what the next case finds. It is emptied here, before the
- * reload that the case is judged on, so each case starts the way a first visit
- * does.
+ * The folds belong to the server and the cache to the browser, so a case that
+ * folded a panel would decide what the next case finds. Both are emptied here,
+ * before the reload that the case is judged on, so each case starts the way a
+ * first visit does.
  */
 async function openChat(viewport: { readonly width: number; readonly height: number } = WIDE): Promise<Page> {
+  await fetch(`${origin}/api/preferences`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ foldedWide: [], foldedNarrow: [] }),
+  });
   const page = await currentContext().newPage();
   await page.setViewportSize(viewport);
   await page.goto(`${origin}/basic-chat`, { waitUntil: "load", timeout: 30000 });
@@ -132,9 +143,19 @@ async function shown(page: Page, selector: string): Promise<boolean> {
   }, selector);
 }
 
-/** Whether the browser kept a panel folded, by the attribute the sheet reads. */
+/** The browser's cache of the fold, which the page keeps beside the server's list. */
 async function storedFolds(page: Page): Promise<string> {
   return page.evaluate(() => window.localStorage.getItem("pi-sec-folded-panels") ?? "");
+}
+
+/** Wait until the server holds the lists, which the page saves after it draws the fold. */
+async function expectServerFolds(expected: { foldedWide?: string[]; foldedNarrow?: string[] }): Promise<void> {
+  await expect
+    .poll(async () => {
+      const state = await serverFolds();
+      return Object.fromEntries(Object.keys(expected).map((key) => [key, state[key as keyof typeof state]]));
+    }, { timeout: 15000 })
+    .toEqual(expected);
 }
 
 it("folds the inbox from its heading, and leaves the heading and its count", async () => {
@@ -161,8 +182,9 @@ it("folds the inbox from its heading, and leaves the heading and its count", asy
   );
   // `hide all` goes while the list it hides is out of sight.
   expect(await shown(page, "#inbox-hide-all")).toBe(false);
-  // The choice reached the browser, not the server.
+  // The choice reached the browser's cache and the server's list for wide screens.
   expect(await storedFolds(page)).toBe('["inbox"]');
+  await expectServerFolds({ foldedWide: ["inbox"] });
 
   // One more press puts the row back.
   await page.click("#inbox-fold");
@@ -187,8 +209,11 @@ it("folds the job tree from its heading, and keeps the fold across a reload", as
   expect(await shown(page, `#jobs [data-job-id="${jobId}"]`)).toBe(false);
   expect(await shown(page, "#jobs-fold")).toBe(true);
   expect(await storedFolds(page)).toBe('["jobs"]');
+  await expectServerFolds({ foldedWide: ["jobs"] });
 
-  // A reload is a new page from the same browser: the fold has to come back.
+  // A reload is a new page from the same browser: the fold has to come back. The
+  // cache is emptied first, so what comes back can only have come from the server.
+  await page.evaluate(() => window.localStorage.clear());
   await page.reload({ waitUntil: "load", timeout: 30000 });
   await page.waitForSelector("#jobs-fold", { timeout: 30000 });
   await page.waitForFunction(() => document.getElementById("jobs-fold")?.getAttribute("aria-expanded") === "false", undefined, {
@@ -257,6 +282,8 @@ it("folds and unfolds inside the drawer on a phone-width screen", async () => {
   expect(await shown(page, "#inbox-fold")).toBe(true);
   expect(await shown(page, "#inbox-count")).toBe(true);
   expect(await storedFolds(page)).toBe('["inbox"]');
+  // A phone-width screen saves into the narrow list and leaves the wide one alone.
+  await expectServerFolds({ foldedNarrow: ["inbox"], foldedWide: [] });
 
   await page.click("#inbox-fold");
   await page.waitForFunction(() => document.getElementById("inbox-fold")?.getAttribute("aria-expanded") === "true", undefined, {

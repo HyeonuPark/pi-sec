@@ -17,10 +17,26 @@ import { afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "vite
 import { DRAFT_PREFIX, DRAFT_REFUSED_NOTICE, clearDraft, draftStorageKey, drafts, pruneDrafts, readDraft, writeDraft } from "../../src/ui/state/drafts.ts";
 import { hideToast, toast, TOAST_ERROR_MS, TOAST_INFO_MS, showError, showToast } from "../../src/ui/state/toast.ts";
 import { h, render, Component, type ComponentChildren } from "preact";
-import { THEME_KEY, THEME_ORDER, applyTheme, cycleTheme, documentTheme, initTheme, nextTheme, readStoredTheme, theme, themeLabel } from "../../src/ui/state/theme.ts";
+import { THEME_KEY, THEME_ORDER, applyTheme, carryStoredTheme, cycleTheme, documentTheme, initTheme, nextTheme, readStoredTheme, theme, themeLabel } from "../../src/ui/state/theme.ts";
+import * as preferences from "../../src/ui/state/preferences.ts";
 import { ThemeToggle } from "../../src/ui/components/theme-toggle.tsx";
 import { Toast } from "../../src/ui/components/toast.tsx";
 import { mountAt } from "../../src/ui/mount.ts";
+
+// The theme code saves and reads the shared state through the preferences module.
+// These tests are about the control, and a real save would resolve the mount on
+// first use, which the request tests below set up for themselves. So the calls
+// that reach the network are replaced here, and the tests that need them read what
+// they were asked.
+vi.mock("../../src/ui/state/preferences.ts", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../src/ui/state/preferences.ts")>();
+  return {
+    ...original,
+    savePreferenceIntent: vi.fn(async () => {}),
+    readPreferences: vi.fn(async () => undefined),
+    sendPreferences: vi.fn(async () => undefined),
+  };
+});
 
 describe("common-drafts.test.ts", () => {
   /**
@@ -267,12 +283,81 @@ describe("common-theme.test.ts", () => {
     it("starts at auto when nothing is stored, and at the stored choice when there is one", () => {
       expect(initTheme()).toBe("auto");
       expect(document.documentElement.dataset.theme).toBe("auto");
-      expect(window.localStorage.getItem(THEME_KEY)).toBe("auto");
+      // A browser that never chose a mode must not look like it chose `auto`: the
+      // cache is what a later carry to the server reads.
+      expect(window.localStorage.getItem(THEME_KEY)).toBeNull();
 
       window.localStorage.setItem(THEME_KEY, "dark");
       expect(readStoredTheme()).toBe("dark");
       expect(initTheme()).toBe("dark");
       expect(document.documentElement.dataset.theme).toBe("dark");
+    });
+
+    it("sends a press to the server as the shared mode, with the mode as its whole intent", () => {
+      const save = vi.mocked(preferences.savePreferenceIntent);
+      save.mockClear();
+      applyTheme("auto");
+
+      cycleTheme();
+
+      expect(save).toHaveBeenCalledTimes(1);
+      const intent = save.mock.calls[0]![0];
+      // The intent does not depend on the record it is applied to.
+      expect(intent({ theme: "dark", uiRevision: 7 })).toEqual({ theme: "light" });
+      expect(intent({})).toEqual({ theme: "light" });
+    });
+
+    it("starts on the mode the server stamped, and caches it", () => {
+      const meta = document.createElement("meta");
+      meta.name = "pi-sec-preferences";
+      meta.content = JSON.stringify({ theme: "dark", uiRevision: 4 });
+      document.head.append(meta);
+      preferences.resetPreferencesState();
+      try {
+        window.localStorage.setItem(THEME_KEY, "light");
+        expect(initTheme()).toBe("dark");
+        expect(document.documentElement.dataset.theme).toBe("dark");
+        expect(window.localStorage.getItem(THEME_KEY)).toBe("dark");
+      } finally {
+        meta.remove();
+        preferences.resetPreferencesState();
+      }
+    });
+
+    it("adopts a mode from the server without saving it back", () => {
+      const save = vi.mocked(preferences.savePreferenceIntent);
+      applyTheme("auto");
+      save.mockClear();
+
+      preferences.applyPreferences({ theme: "dark", uiRevision: 2 });
+
+      expect(document.documentElement.dataset.theme).toBe("dark");
+      expect(theme.value).toBe("dark");
+      expect(save).not.toHaveBeenCalled();
+      preferences.resetPreferencesState();
+    });
+
+    it("carries the browser's own mode to a server that has none, and only then", async () => {
+      const send = vi.mocked(preferences.sendPreferences);
+      window.localStorage.setItem(THEME_KEY, "dark");
+      initTheme();
+      send.mockClear();
+
+      await carryStoredTheme("light");
+      expect(send).not.toHaveBeenCalled();
+
+      await carryStoredTheme(undefined);
+      expect(send).toHaveBeenCalledWith({ theme: "dark", seedOnly: true });
+    });
+
+    it("carries nothing when the browser never kept a mode", async () => {
+      const send = vi.mocked(preferences.sendPreferences);
+      window.localStorage.clear();
+      initTheme();
+      send.mockClear();
+
+      await carryStoredTheme(undefined);
+      expect(send).not.toHaveBeenCalled();
     });
 
     it("puts a mode on the document, on the signal and in the store", () => {

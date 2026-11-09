@@ -8,6 +8,13 @@
  * browser's own `prefers-color-scheme`, so nothing else has to know which mode
  * is on.
  *
+ * The mode is shared: the server keeps one, stamps it into `<html data-theme>`
+ * of every page it serves, and tells every open page when it changes. A press
+ * applies the mode at once and saves it as the shared one. `localStorage` stays
+ * as a cache for a page the server cannot reach, and as the one value an older
+ * build left behind, which the first page to see a server without a mode carries
+ * over ({@link carryStoredTheme}).
+ *
  * The code is kept as it was, including what it does with a value nobody wrote:
  * a stored string that is not one of the three is applied as it stands, exactly
  * as the pages applied it, and the next press of the toggle moves on from
@@ -15,6 +22,7 @@
  * mode is a string here rather than a closed union.
  */
 import { signal } from "@preact/signals";
+import { onPreferences, savePreferenceIntent, sendPreferences, stampedPreferences } from "./preferences.ts";
 
 /** The storage key all four pages wrote. A page that reads it must keep the name. */
 export const THEME_KEY = "pi-sec-theme";
@@ -33,14 +41,24 @@ export function themeLabel(mode: string): string {
   return `◐ ${mode}`;
 }
 
+/** The cached choice, `null` when this browser never kept one (or keeps no store). */
+function storedThemeOrNull(): string | null {
+  try {
+    return window.localStorage.getItem(THEME_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /** The stored choice, or `auto` when there is none (or no store at all). */
 export function readStoredTheme(): string {
-  try {
-    return window.localStorage.getItem(THEME_KEY) ?? "auto";
-  } catch {
-    // A browser that keeps no storage still draws the page, in `auto`.
-    return "auto";
-  }
+  // A browser that keeps no storage still draws the page, in `auto`.
+  return storedThemeOrNull() ?? "auto";
+}
+
+/** Whether a value is one of the three modes the server accepts. */
+function isMode(value: unknown): value is ThemeMode {
+  return typeof value === "string" && (THEME_ORDER as readonly string[]).includes(value);
 }
 
 /**
@@ -72,12 +90,47 @@ export function nextTheme(mode: string): string {
   return THEME_ORDER[(index + 1) % THEME_ORDER.length] ?? "auto";
 }
 
-/** One press of the toggle: the next mode, applied and stored. */
+/** One press of the toggle: the next mode, applied, cached and saved as the shared mode. */
 export function cycleTheme(): string {
-  return applyTheme(nextTheme(documentTheme()));
+  const mode = applyTheme(nextTheme(documentTheme()));
+  void savePreferenceIntent(() => ({ theme: mode }), "theme");
+  return mode;
 }
 
-/** Start the page on the stored mode, or on `auto`. */
+/** The cached mode at the page start, or `null`. */
+let cachedAtStart: string | null = null;
+
+/**
+ * Start the page on the shared mode the server stamped, else on the cached mode,
+ * else on `auto`. Only a mode that came from the server is written to the cache:
+ * a browser that never chose one must not look like it chose `auto`.
+ */
 export function initTheme(): string {
-  return applyTheme(readStoredTheme());
+  // What this browser kept before this page drew anything. The carry below sends
+  // this, not a mode the operator pressed while the first read was out.
+  cachedAtStart = storedThemeOrNull();
+  const stamped = stampedPreferences()?.theme;
+  if (isMode(stamped)) return applyTheme(stamped);
+  const mode = cachedAtStart ?? "auto";
+  theme.value = mode;
+  if (typeof document !== "undefined") document.documentElement.dataset.theme = mode;
+  return mode;
 }
+
+/**
+ * Carry this browser's own cached mode to the server, once, when the server has
+ * none. The server takes it only if it still holds none, so the first browser
+ * wins and the others adopt it.
+ */
+export async function carryStoredTheme(serverTheme: string | undefined): Promise<void> {
+  if (serverTheme !== undefined) return;
+  if (!isMode(cachedAtStart)) return;
+  await sendPreferences({ theme: cachedAtStart, seedOnly: true });
+}
+
+// A record from the server sets the mode. It never saves, so a page that adopts
+// another browser's mode does not send it back.
+onPreferences((record) => {
+  if (!isMode(record.theme) || record.theme === documentTheme()) return;
+  applyTheme(record.theme);
+});

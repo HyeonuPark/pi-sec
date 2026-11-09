@@ -650,8 +650,10 @@ describe("the two controls of the usage page", () => {
       toggle.click();
       await settle();
       expect(page.document.documentElement.dataset.theme).toBe("dark");
-      // The page reads once at load and never polls, and it opens no stream.
-      expect(page.fetchCalls).toHaveLength(1);
+      // The page reads the usage once at load and never polls, and it opens no
+      // stream. The two presses are saves of the shared theme, the only other calls.
+      expect(page.fetchCalls.filter((call) => call.path === "/api/usage")).toHaveLength(1);
+      expect(page.fetchCalls.filter((call) => call.method === "PATCH")).toHaveLength(2);
       expect(page.streams()).toEqual([]);
     } finally {
       page.close();

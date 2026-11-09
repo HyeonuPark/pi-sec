@@ -244,5 +244,13 @@ it("leaves a folded job unfilled when nothing under it runs", async () => {
   expect(await filled(page, quietId)).toBe(false);
   expect(await title(page, quietId)).toBe("");
 
+  // The fold is shared state on the server, so it is put back for the next case.
+  await pressChip(page, quietId);
+  await page.waitForFunction(
+    (id) => document.querySelector(`#jobs [data-job-id="${id}"] .status-chip`)?.getAttribute("aria-expanded") === "true",
+    quietId,
+    { timeout: 10000 },
+  );
+
   await page.close();
 });

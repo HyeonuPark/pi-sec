@@ -36,6 +36,7 @@ import { openLoginPanelInSlot } from "../state/login.ts";
 import { openSnippetPanel } from "../state/snippets.ts";
 import { onLoginPress, onSnippetPress, registerReportPane } from "../state/composer.ts";
 import { onCredentialPress } from "./header/Banners.tsx";
+import { applyPreferencesEvent, revisionOf } from "../state/preferences.ts";
 import { applySideSnapshot } from "./SideParts.tsx";
 import { onConversationEvent } from "../streams/conversation.ts";
 
@@ -112,6 +113,9 @@ export function mountChatWiring(doc: Document = document): ChatWiringHandle {
     // frame names the machine and the panel re-reads its list, which is one route
     // for all three.
     onConversationEvent("remote_machine_updated", () => applyMachineEvent()),
+    // The shared UI state changed on some page. The frame carries the revision
+    // only, and the page reads the record back when it is behind.
+    onConversationEvent("preferences_updated", (event) => applyPreferencesEvent(revisionOf(event.data))),
     onConversationEvent("user_query", (event) => applyQueryEvent(event.name)),
     onConversationEvent("user_query_resolved", (event) => applyQueryEvent(event.name)),
     onConversationEvent("snapshot", (event) => {

@@ -14,6 +14,7 @@
  * /api/preferences` with both lists in it, and a reconnect is one read of each
  * list, so the request log is what the assertions use.
  */
+import { fakePreferences } from "./preferences-fake.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UiPageHandle } from "./harness.ts";
 import { JOBS_REFRESH_WINDOW_MS } from "../../src/ui/state/jobs.ts";
@@ -57,6 +58,12 @@ function notice(id: string, over: Record<string, unknown> = {}) {
     severity: "info",
     ...over,
   };
+}
+
+/** A shared state that holds what a test says, and keeps what the page saves. */
+function preferencesFrom(initial: Record<string, unknown>) {
+  const server = fakePreferences(initial);
+  return (request: { method: string; body: string | null }) => server.handle(request);
 }
 
 /** A job tree answered by the next read. */
@@ -142,7 +149,7 @@ describe("chat-side: a reload still holds the server's revert queue", () => {
   it("reverts what the server still remembers after a reload", async () => {
     const ui = await loadChatPage({
       fetch: {
-        "/api/preferences": { body: { hiddenJobs: ["job-1"], revertQueueJobs: ["job-1"], expandedJobs: [], clearedInbox: [] } },
+        "/api/preferences": preferencesFrom({ hiddenJobs: ["job-1"], revertQueueJobs: ["job-1"] }),
         "/api/jobs": treeAnswer([node("job-1", "finished thing", { status: "done" }), node("job-2", "other", { status: "done" })]),
       },
     });
@@ -159,7 +166,7 @@ describe("chat-side: a reload still holds the server's revert queue", () => {
 
     expect(jobRows(ui)).toHaveLength(2);
     expect(byId(ui, "jobs").textContent).toContain("finished thing");
-    expect(lastPreference(ui)).toEqual({ hiddenJobs: [], revertQueueJobs: [] });
+    expect(lastPreference(ui)).toEqual({ hiddenJobs: [], revertQueueJobs: [], baseRevision: 0 });
   });
 });
 
@@ -177,7 +184,7 @@ describe("chat-side: one hide of a parent is one memory", () => {
     // The child left the list with its parent, but the operator pressed once.
     expect(jobRows(ui)).toHaveLength(0);
     expect(restore(ui)!.textContent).toContain("↩ revert (1)");
-    expect(lastPreference(ui)).toEqual({ hiddenJobs: ["job-1"], revertQueueJobs: ["job-1"] });
+    expect(lastPreference(ui)).toEqual({ hiddenJobs: ["job-1"], revertQueueJobs: ["job-1"], baseRevision: 0 });
 
     press(ui, restore(ui)!);
     await more();
@@ -211,7 +218,7 @@ describe("chat-side: a child hidden on its own stays hidden", () => {
     expect(byId(ui, "jobs").querySelector('[data-job-id="job-2"]')).toBeNull();
     // Both lists travel in the one save: the child is still hidden on the server
     // and still remembered, while the parent is neither.
-    expect(lastPreference(ui)).toEqual({ hiddenJobs: ["job-2"], revertQueueJobs: ["job-2"] });
+    expect(lastPreference(ui)).toEqual({ hiddenJobs: ["job-2"], revertQueueJobs: ["job-2"], baseRevision: 2 });
     // Its own memory is still in the queue, so a second revert brings it back.
     expect(restore(ui)!.textContent).toContain("↩ revert (1)");
     press(ui, restore(ui)!);
@@ -236,18 +243,19 @@ describe("chat-side: single hides and one hide-all share one newest-first queue"
     expect(lastPreference(ui)).toEqual({
       clearedInbox: ["i1", "i2", "i3"],
       revertQueueInbox: ["i1", "hide-all:i2,i3"],
+      baseRevision: 1,
     });
 
     // The group is the newer hide, so it comes back first and alone.
     press(ui, inboxRestore(ui)!);
     await more();
     expect(inboxRows(ui)).toHaveLength(2);
-    expect(lastPreference(ui)).toEqual({ clearedInbox: ["i1"], revertQueueInbox: ["i1"] });
+    expect(lastPreference(ui)).toEqual({ clearedInbox: ["i1"], revertQueueInbox: ["i1"], baseRevision: 2 });
 
     press(ui, inboxRestore(ui)!);
     await more();
     expect(inboxRows(ui)).toHaveLength(3);
-    expect(lastPreference(ui)).toEqual({ clearedInbox: [], revertQueueInbox: [] });
+    expect(lastPreference(ui)).toEqual({ clearedInbox: [], revertQueueInbox: [], baseRevision: 3 });
   });
 });
 
@@ -260,7 +268,7 @@ describe("chat-side: a full queue drops one cell, never half a group", () => {
     const ui = await loadChatPage({
       fetch: {
         "/api/inbox": { body: { items: [notice("i1"), notice("i2")] } },
-        "/api/preferences": { body: { hiddenJobs: [], expandedJobs: [], clearedInbox: [], revertQueueInbox: ["hide-all:a1,a2", ...older] } },
+        "/api/preferences": preferencesFrom({ revertQueueInbox: ["hide-all:a1,a2", ...older] }),
       },
     });
     open = ui;
@@ -314,7 +322,7 @@ describe("chat-side: both ways out of an opened title save the same list", () =>
     const fromBlock = await lastBody(".job-open");
     const fromCaret = await lastBody(".job-title.expanded");
 
-    expect(fromBlock).toEqual({ expandedJobs: [] });
+    expect(fromBlock).toEqual({ expandedJobs: [], baseRevision: 1 });
     expect(fromCaret).toEqual(fromBlock);
   });
 });

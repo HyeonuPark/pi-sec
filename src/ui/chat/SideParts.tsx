@@ -20,6 +20,7 @@ import { startFolds, type FoldPanel } from "../state/folds.ts";
 import { applyInboxFrame, readInbox, startInboxAgeTimer, stopInboxAgeTimer, tickInboxAges } from "../state/inbox.ts";
 import { applyJobEvent, jobsTabVisible, loadPreferences, refreshJobs } from "../state/jobs.ts";
 import { applyMachineEvent, machinesTabVisible, refreshMachines } from "../state/machines.ts";
+import { readPreferences } from "../state/preferences.ts";
 import { refreshStatus } from "../state/run.ts";
 import { openReportPane, reportPane, reportPaneIsOpen } from "../state/panels.ts";
 import { applyQueryEvent, queriesClock, refreshQueries } from "../state/queries.ts";
@@ -111,6 +112,8 @@ export async function startSidePanels(
       queriesClock.value = Date.now();
       void jobsTabVisible();
       void machinesTabVisible();
+      // Another browser may have changed the shared state while this tab was away.
+      void readPreferences();
     };
     doc.addEventListener("visibilitychange", onVisibility);
   }
@@ -139,6 +142,8 @@ export function applySideSnapshot(): void {
   applyQueryEvent("snapshot");
   applyJobEvent("snapshot");
   applyMachineEvent();
+  // A frame that named a change of the shared state went to nobody meanwhile.
+  void readPreferences();
   const open = reportPane.value.id;
   if (open !== null && reportPaneIsOpen()) void openReportPane(open);
 }
