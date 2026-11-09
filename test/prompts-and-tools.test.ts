@@ -954,6 +954,17 @@ describe("the root role file", () => {
     expect(text).toContain("Write down each fact that the user states, in the turn where you hear it.");
     expect(text).toContain("The Standing jobs section decides which job takes a request.");
   });
+
+  it("sets a report aside when feedback in the chat or on a question card means a new revision", async () => {
+    // Feedback given in the chat led to a new revision, and the old revision stayed
+    // in front of the user as if it waited for an answer.
+    const text = await readFile(join(import.meta.dirname, "..", "prompts", "role", "root-agent.md"), "utf8");
+
+    expect(text).toContain("If such feedback means that a new revision will follow, set the report aside with `reports_set_pending` and `pending` true.");
+    expect(text).toContain("Do it in the same turn that you hand the feedback over.");
+    expect(text).toContain("If the orchestrator answers with a message instead, bring the report back with `pending` false.");
+    expect(text).toContain("The call refuses to set aside a result report that still waits for the user's Done or Feedback.");
+  });
 });
 
 describe("the worker role file", () => {
