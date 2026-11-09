@@ -115,6 +115,9 @@ export async function chatsPage(server: ChatsServer, options: { readonly base?: 
     ...(options.base === undefined ? {} : { base: options.base }),
     now: PAGE_NOW,
     fetch,
+    // The real server stamps the record, so the page does not read it at startup.
+    // Without this stamp that read lands at a random point and skews the request counts.
+    preferences: { uiRevision: 0 },
   });
   return Object.assign(page, { server });
 }

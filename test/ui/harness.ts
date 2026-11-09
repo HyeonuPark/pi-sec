@@ -100,6 +100,11 @@ export interface LoadUiPageOptions {
   /** The registered name the server would stamp. */
   readonly name?: string;
   /**
+   * The shared preferences record the server would stamp into the page. Absent
+   * leaves the stamp empty, so the page reads `GET /api/preferences` at startup.
+   */
+  readonly preferences?: Readonly<Record<string, unknown>>;
+  /**
    * Answers by route, without the mount: `/api/jobs` answers the request the
    * page made to `/sec/api/jobs`. A path with no answer gets `200 {}`.
    */
@@ -297,8 +302,19 @@ export function expectUntouched(before: CapturedElement): void {
 /* -------------------------------------------------------------- the page */
 
 /** The server's stamps: the mount, the time zone and the registered name. */
-function stamp(html: string, base: string, timezone: string, name: string): string {
+function stamp(
+  html: string,
+  base: string,
+  timezone: string,
+  name: string,
+  preferences?: Readonly<Record<string, unknown>>,
+): string {
+  const content = preferences === undefined ? "" : JSON.stringify(preferences).replaceAll('"', "&quot;");
   return html
+    .replace(
+      /<meta\s+name="pi-sec-preferences"\s+content="[^"]*"\s*\/?>/i,
+      () => `<meta name="pi-sec-preferences" content="${content}" />`,
+    )
     .replaceAll("{{base}}", base)
     .replace(/<meta\s+name="pi-sec-base"\s+content="[^"]*"\s*\/?>/i, `<meta name="pi-sec-base" content="${base}" />`)
     .replace(
@@ -349,6 +365,7 @@ export async function loadUiPage(page: UiPageName, options: LoadUiPageOptions = 
     base,
     options.timezone ?? "Asia/Tokyo",
     options.name ?? "",
+    options.preferences,
   );
   const withBlock =
     options.firstPaint === undefined
