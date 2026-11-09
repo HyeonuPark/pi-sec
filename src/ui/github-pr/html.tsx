@@ -149,6 +149,97 @@ export function highlightLine(text: string, language: string | null | undefined)
   }
 }
 
+/** The most lines the cache of drawn code keeps. */
+const CELL_CACHE_LIMIT = 20000;
+
+const cellCache = new Map<string, string>();
+
+/**
+ * The HTML of `text` with the emphasis spans of `[from, to)` inside it.
+ *
+ * `html` is highlighted markup. The walk counts the characters the reader sees: a
+ * tag has none, an entity (`&lt;`) is one. Every run of text between two tags gets
+ * its own span for the part of the range that falls in it, so a range that
+ * crosses highlight spans is wrapped in as many pieces as it covers, and the
+ * highlight spans stay as the grammar wrote them.
+ */
+export function emphasiseHtml(html: string, from: number, to: number, cls: string): string {
+  const start = Math.max(0, from);
+  let out = "";
+  let position = 0;
+  let open = false;
+  let index = 0;
+  const length = html.length;
+  const close = (): void => {
+    if (open) {
+      out += "</span>";
+      open = false;
+    }
+  };
+  while (index < length) {
+    const ch = html[index] as string;
+    if (ch === "<") {
+      const end = html.indexOf(">", index);
+      const stop = end === -1 ? length : end + 1;
+      close();
+      out += html.slice(index, stop);
+      index = stop;
+      continue;
+    }
+    let stop = index + 1;
+    if (ch === "&") {
+      const semi = html.indexOf(";", index);
+      if (semi !== -1 && semi - index <= 10) stop = semi + 1;
+    }
+    const inside = position >= start && position < to;
+    if (inside && !open) {
+      out += `<span class="${cls}">`;
+      open = true;
+    } else if (!inside) close();
+    out += html.slice(index, stop);
+    position += 1;
+    index = stop;
+  }
+  close();
+  return out;
+}
+
+/**
+ * One cell's code as HTML: highlighted, with the change inside it marked.
+ *
+ * The result is cached by text, language, the changed range and the side, so a cell
+ * that draws again, and the two panes of a context line, cost a lookup and no
+ * highlight and no edit of the page. The cache is bounded and drops its oldest
+ * entries first.
+ */
+export function highlightCell(
+  text: string,
+  language: string | null | undefined,
+  segment: { readonly from: number; readonly to: number } | null,
+  cls: string,
+): string {
+  const key = segment === null ? `${language ?? ""}\u0000${text}` : `${language ?? ""}\u0000${segment.from}:${segment.to}:${cls}\u0000${text}`;
+  const hit = cellCache.get(key);
+  if (hit !== undefined) return hit;
+  let html: string;
+  if (segment === null) html = highlightLine(text, language);
+  else {
+    const plain = highlightCell(text, language, null, cls);
+    // The range is clamped to the drawn text, which is the line's own length.
+    html = emphasiseHtml(plain, segment.from, Math.min(String(text ?? "").length, segment.to), cls);
+  }
+  if (cellCache.size >= CELL_CACHE_LIMIT) {
+    let drop = Math.ceil(CELL_CACHE_LIMIT / 4);
+    for (const old of cellCache.keys()) {
+      cellCache.delete(old);
+      drop -= 1;
+      if (drop <= 0) break;
+    }
+  }
+  cellCache.set(key, html);
+  return html;
+}
+
 /* ------------------------------------------------------------ markdown rules */
 
 /** A GitHub login, from the `@` that starts it. */

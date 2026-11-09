@@ -9,9 +9,9 @@
  *    highlight comes from {@link CodeHtml}, the one component that puts a
  *    highlighted line on a page. The emphasis inside it cannot be a second
  *    highlight: the grammar's own spans may begin and end anywhere, so a changed
- *    stretch cuts across them. It is wrapped instead as a range over the drawn
- *    text nodes, in a layout effect, which is why the tint lands on the exact
- *    characters and the colours underneath survive.
+ *    stretch cuts across them. It is wrapped instead as a span around each piece
+ *    of the changed range inside the highlighted string, so the tint lands on the
+ *    exact characters and the colours underneath survive.
  * 2. **A line number is a handle.** Pressing one starts a comment selection;
  *    moving down the same side of the same file extends it; letting go opens the
  *    comment box under the last line the drag reached. The number is not
@@ -27,7 +27,8 @@
  */
 import { useLayoutEffect, useRef } from "preact/hooks";
 import type { GithubPrThread } from "../api/github-pr.ts";
-import { CodeHtml, highlightLine } from "./html.tsx";
+import { CodeHtml, highlightCell } from "./html.tsx";
+import { memo } from "./memo.ts";
 import { HunkTable } from "./pr-threads.tsx";
 import { REVEAL_STEP, type DiffSide, type ThreadGroup } from "./diff-model.ts";
 
@@ -46,49 +47,6 @@ export function segmentClass(side: DiffSide): string {
   return side === "LEFT" ? "seg-del" : "seg-add";
 }
 
-/**
- * Wrap `[segment.from, segment.to)` of the drawn text in one span.
- *
- * The walk is over text nodes, so a range that starts inside one highlight span and
- * ends inside the next one is wrapped in as many pieces as it covers, and the
- * highlighted markup stays as the grammar wrote it. Every emphasis the previous
- * render made is taken out first, and the text is normalized, so a redraw answers
- * the same page it did before rather than a pile of nested spans.
- */
-function emphasise(host: HTMLElement, segment: Segment, side: DiffSide): void {
-  const owner = host.ownerDocument;
-  const cls = segmentClass(side);
-  for (const stale of [...host.querySelectorAll(`span.${cls}`)]) stale.replaceWith(...stale.childNodes);
-  host.normalize();
-  const start = Math.max(0, segment.from);
-  const end = Math.min(host.textContent?.length ?? 0, segment.to);
-  if (start >= end) return;
-  const walker = owner.createTreeWalker(host, 4 /* NodeFilter.SHOW_TEXT */);
-  const targets: { readonly node: Text; readonly from: number; readonly to: number }[] = [];
-  let position = 0;
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    const text = node as Text;
-    const length = text.data.length;
-    const low = Math.max(start, position);
-    const high = Math.min(end, position + length);
-    if (low < high) targets.push({ node: text, from: low - position, to: high - position });
-    position += length;
-  }
-  for (const target of targets) {
-    const range = owner.createRange();
-    range.setStart(target.node, target.from);
-    range.setEnd(target.node, target.to);
-    const span = owner.createElement("span");
-    span.className = cls;
-    try {
-      range.surroundContents(span);
-    } catch {
-      // A range that cannot be surrounded leaves the text as it is. One missing
-      // tint is not worth a broken page.
-    }
-  }
-}
-
 export interface CodeLineProps {
   /** The line's text, as the file has it. */
   readonly text: string;
@@ -103,26 +61,31 @@ export interface CodeLineProps {
 /**
  * One line of code, highlighted, with the change inside it marked.
  *
- * The HTML comes from {@link highlightLine}, which escapes a line it cannot
- * highlight and refuses one longer than {@link MAX_HIGHLIGHT_LENGTH}. That function
- * is the only way a line of a file becomes markup on this page.
+ * The HTML comes from {@link highlightCell}, which escapes a line it cannot
+ * highlight, refuses one longer than the highlight limit, and puts the change's
+ * spans into the string itself. Nothing edits the page after the draw.
  */
-export function CodeLine({ text, language, segment, side }: CodeLineProps) {
-  const host = useRef<HTMLSpanElement | null>(null);
-  // The emphasis writes to text the page just drew, so it runs after that text is
-  // in the page and before the browser paints: a reader never sees the dark patch
-  // arrive a frame late.
-  useLayoutEffect(() => {
-    const element = host.current;
-    if (element === null || segment === null) return;
-    emphasise(element, segment, side);
-  });
+function CodeLineView({ text, language, segment, side }: CodeLineProps) {
   return (
-    <span class="code-html" ref={host}>
-      <CodeHtml html={highlightLine(text, language)} />
+    <span class="code-html">
+      <CodeHtml html={highlightCell(text, language, segment, segmentClass(side))} />
     </span>
   );
 }
+
+/** True when two lines draw the same: the same text, language, changed range and side. */
+function sameCodeLine(left: CodeLineProps, right: CodeLineProps): boolean {
+  return (
+    left.text === right.text &&
+    left.language === right.language &&
+    left.side === right.side &&
+    left.segment?.from === right.segment?.from &&
+    left.segment?.to === right.segment?.to
+  );
+}
+
+/** One line of code, as {@link CodeLineView} draws it, and drawn again only when it changes. */
+export const CodeLine = memo(CodeLineView, sameCodeLine);
 
 /* -------------------------------------------------------------------- cells */
 

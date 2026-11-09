@@ -29,7 +29,8 @@ import { ErrorBanner } from "./banner.tsx";
 import { TopBar } from "./topbar.tsx";
 import { closeDrawer } from "./sidebar.ts";
 import { DiffFile, type FileActions } from "./diff-file.tsx";
-import { buildTree, layoutFile, placeThreads, type FileLayout, type PendingOnFile } from "./diff-model.ts";
+import { buildTree, layoutFile, placeThreads, type FileLayout, type PendingOnFile, type ThreadPlacement } from "./diff-model.ts";
+import type { GithubPrFile } from "../api/github-pr.ts";
 import { DiffTree } from "./diff-tree.tsx";
 import { ReviewBar } from "./diff-review.tsx";
 import {
@@ -42,7 +43,6 @@ import {
   collectComment,
   discardPending,
   diskLimit,
-  drag,
   error,
   extendSelection,
   folded,
@@ -58,6 +58,7 @@ import {
   revealedOf,
   revealGap,
   reviewEvent,
+  type ReviewEvent,
   reviewNotice,
   reviewOpen,
   reviewSummary,
@@ -239,17 +240,69 @@ function CommitHead({
   );
 }
 
+const EMPTY_LAYOUT: FileLayout = { slots: [], rows: 0 };
+
+/** What every press inside a file does, in the page's own words. */
+const ACTIONS: FileActions = {
+  onPress: beginSelection,
+  onEnter: extendSelection,
+  onReveal: revealGap,
+  onFold: toggleFile,
+  onRemove: removePending,
+  onStale: toggleStale,
+  onCancel: cancelForm,
+  onCollect: collectComment,
+  // The route is not null wherever these are drawn, and a press that arrives without
+  // one is a press on a page that draws nothing.
+  threadHref: (threadId) => (route === null ? "#" : prUrl(route.repo, route.number, threadId)),
+};
+
+/** What one file's layout was built from, so an unchanged file keeps its layout object. */
+interface CachedLayout {
+  readonly file: GithubPrFile;
+  readonly key: string;
+  readonly layout: FileLayout;
+}
+
+/**
+ * The part of the threads' placement that one path draws, as a string.
+ *
+ * The marks, the outdated threads and the file threads of a path are the only
+ * thing of the placement that its file's layout holds, so two placements with the
+ * same string give the same layout.
+ */
+function placementKeys(placement: ThreadPlacement): Map<string, string> {
+  const parts = new Map<string, unknown[]>();
+  const into = (path: string): unknown[] => {
+    let list = parts.get(path);
+    if (list === undefined) {
+      list = [];
+      parts.set(path, list);
+    }
+    return list;
+  };
+  for (const [key, group] of placement.groups) into(group.path).push(["g", key, group.count, group.mark, group.targetId]);
+  for (const stale of placement.stale) into(stale.thread.path ?? "").push(["s", stale.originalLine, stale.thread]);
+  for (const thread of placement.files) into(thread.path ?? "").push(["f", thread]);
+  const keys = new Map<string, string>();
+  for (const [path, list] of parts) keys.set(path, JSON.stringify(list));
+  return keys;
+}
+
 /**
  * One file's layout: its rows, with its marks, the comments collected on it and the
  * box being written on it.
  *
- * Everything it reads is a signal, so a press anywhere on the page redraws exactly
- * the file whose rows changed.
+ * `key` says what the layout depends on. A file whose key did not change keeps its
+ * layout object, so a press redraws the file whose rows changed and no other.
  */
-function layoutOf(index: number): FileLayout {
-  const diff = answer.value;
-  const file = diff?.files[index];
-  if (file === undefined) return { slots: [], rows: 0 };
+function layoutOf(
+  index: number,
+  file: GithubPrFile,
+  placement: ThreadPlacement,
+  placed: ReadonlyMap<string, string>,
+  cache: Map<number, CachedLayout>,
+): FileLayout {
   const path = file.path ?? file.oldPath ?? "";
   const comments: PendingOnFile[] = [];
   // With the write switch off there is no review to collect, so a comment this tab
@@ -267,52 +320,108 @@ function layoutOf(index: number): FileLayout {
       });
     });
   }
-  return layoutFile({
+  const form = writes ? openForm.value : null;
+  const own = form !== null && form.index === index ? form : null;
+  const open = staleOpen.value;
+  const opened = placement.stale
+    .filter((stale) => (stale.thread.path ?? "") === path && open.has(stale.thread.id))
+    .map((stale) => stale.thread.id);
+  const gaps = revealedOf(index);
+  const key = JSON.stringify([gaps, comments, own, opened, placed.get(path) ?? ""]);
+  const hit = cache.get(index);
+  if (hit !== undefined && hit.file === file && hit.key === key) return hit.layout;
+  const layout = layoutFile({
     file,
     index,
-    gaps: revealedOf(index),
+    gaps,
     pending: comments,
-    threads: placeThreads(threads.value),
-    form: writes ? openForm.value : null,
-    staleOpen: staleOpen.value,
+    threads: placement,
+    form: own,
+    staleOpen: open,
     // With the write switch off there is no comment to start, so a line number is
     // not a handle; the mark of a thread still is, because reading is on.
     commentable: writes,
   });
+  cache.set(index, { file, key, layout });
+  return layout;
 }
 
-/** What every press inside a file does, in the page's own words. */
-function actionsOf(): FileActions {
-  // The route is not null wherever these are drawn, and a press that arrives without
-  // one is a press on a page that draws nothing.
-  const here = route;
-  return {
-    onPress: beginSelection,
-    onEnter: extendSelection,
-    onReveal: revealGap,
-    onFold: toggleFile,
-    onRemove: removePending,
-    onStale: toggleStale,
-    onCancel: cancelForm,
-    onCollect: collectComment,
-    threadHref: (threadId) => (here === null ? "#" : prUrl(here.repo, here.number, threadId)),
-  };
+/** The file tree, which reads the marked file and the folded directories itself. */
+function TreeView({ repo, number, files }: { readonly repo: string; readonly number: number; readonly files: readonly GithubPrFile[] }) {
+  const tree = useMemo(() => buildTree(files), [files]);
+  const active = activeFile.value;
+  const marked = files.length === 0 ? 0 : Math.min(Math.max(active, 0), files.length - 1);
+  return (
+    <DiffTree
+      repo={repo}
+      number={number}
+      files={files}
+      tree={tree}
+      active={marked}
+      folded={treeFolded.value}
+      onSelect={selectFile}
+      onFold={toggleTreeDirectory}
+    />
+  );
 }
 
-/** The panes: every changed file, drawn from the answer and from what the reader did. */
+/** A press on a file of the tree: mark it, bring it to the top, and fold the drawer. */
+function selectFile(index: number): void {
+  setActiveFile(index);
+  const target = document.getElementById(`file-${index}`);
+  const scroll = (target as HTMLElement | null)?.scrollIntoView;
+  if (target !== null && typeof scroll === "function") scroll.call(target, { block: "start" });
+  closeDrawer();
+}
+
+/** The review bar, which reads the review's own signals itself. */
+function ReviewPanel() {
+  return (
+    <ReviewBar
+      count={pending.value.length}
+      open={reviewOpen.value}
+      summary={reviewSummary.value}
+      event={reviewEvent.value}
+      sending={submitting.value}
+      notice={reviewNotice.value}
+      onToggle={toggleReview}
+      onSummary={setSummary}
+      onEvent={setEvent}
+      onDiscard={discardPending}
+      onSubmit={submitReviewPress}
+    />
+  );
+}
+
+function setSummary(text: string): void {
+  reviewSummary.value = text;
+}
+
+function setEvent(choice: ReviewEvent): void {
+  reviewEvent.value = choice;
+}
+
+function submitReviewPress(): void {
+  void submit();
+}
+
+/**
+ * The panes: every changed file, drawn from the answer and from what the reader did to it.
+ *
+ * This component reads the answer and what the layouts are built from, and nothing
+ * else. The mark of the current file, the folded files, the drag and the review
+ * panel are read by the components they belong to, so a press on one of them draws
+ * that component and not the diff.
+ */
 function DiffBody({ repo, number }: { readonly repo: string; readonly number: number }) {
   const diff = answer.value;
-  const selection = drag.value;
-  const active = activeFile.value;
-  const actions = actionsOf();
   const panes = useRef<HTMLDivElement | null>(null);
-  // The rows of every file, built once per change rather than once per file per
-  // render: a diff of two thousand lines is walked by every file's rows, and a press
-  // on one line number must not cost that walk twice.
-  const layouts = useMemo(
-    () => (diff === null ? [] : diff.files.map((_file, index) => layoutOf(index))),
-    [diff, revealed.value, pending.value, openForm.value, staleOpen.value, threads.value, writes],
-  );
+  const cache = useRef(new Map<number, CachedLayout>());
+  const placement = useMemo(() => placeThreads(threads.value), [threads.value]);
+  const placed = useMemo(() => placementKeys(placement), [placement]);
+  // Every file's rows are built from its own inputs, and an unchanged file keeps the
+  // object it had: a diff of two thousand lines is walked by the file that changed.
+  const layouts = diff === null ? [] : diff.files.map((file, index) => layoutOf(index, file, placement, placed, cache.current));
   /**
    * Mark the file the reader is looking at.
    *
@@ -342,47 +451,11 @@ function DiffBody({ repo, number }: { readonly repo: string; readonly number: nu
   }, [diff]);
   if (diff === null) return null;
   const files = diff.files;
-  const marked = files.length === 0 ? 0 : Math.min(Math.max(active, 0), files.length - 1);
   return (
     <div class="diff-layout">
-      <DiffTree
-        repo={repo}
-        number={number}
-        files={files}
-        tree={buildTree(files)}
-        active={marked}
-        folded={treeFolded.value}
-        onSelect={(index) => {
-          setActiveFile(index);
-          const target = document.getElementById(`file-${index}`);
-          const scroll = (target as HTMLElement | null)?.scrollIntoView;
-          if (target !== null && typeof scroll === "function") scroll.call(target, { block: "start" });
-          closeDrawer();
-        }}
-        onFold={toggleTreeDirectory}
-      />
+      <TreeView repo={repo} number={number} files={files} />
       <div class="diff-content" ref={panes}>
-        {writes ? (
-          <ReviewBar
-            count={pending.value.length}
-            open={reviewOpen.value}
-            summary={reviewSummary.value}
-            event={reviewEvent.value}
-            sending={submitting.value}
-            notice={reviewNotice.value}
-            onToggle={toggleReview}
-            onSummary={(text) => {
-              reviewSummary.value = text;
-            }}
-            onEvent={(choice) => {
-              reviewEvent.value = choice;
-            }}
-            onDiscard={discardPending}
-            onSubmit={() => {
-              void submit();
-            }}
-          />
-        ) : null}
+        {writes ? <ReviewPanel /> : null}
         {"commit" in diff ? (
           <CommitHead repo={repo} number={number} commit={diff.commit} count={files.length} />
         ) : (
@@ -402,18 +475,8 @@ function DiffBody({ repo, number }: { readonly repo: string; readonly number: nu
             key={`${file.path ?? file.oldPath ?? ""}-${index}`}
             file={file}
             index={index}
-            layout={layouts[index] ?? { slots: [], rows: 0 }}
-            folded={folded.value.has(index)}
-            selection={
-              selection === null || selection.index !== index
-                ? null
-                : {
-                    side: selection.side,
-                    from: Math.min(selection.anchor, selection.end),
-                    to: Math.max(selection.anchor, selection.end),
-                  }
-            }
-            actions={actions}
+            layout={layouts[index] ?? EMPTY_LAYOUT}
+            actions={ACTIONS}
           />
         ))}
       </div>

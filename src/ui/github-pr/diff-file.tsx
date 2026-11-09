@@ -26,8 +26,12 @@
  * themselves. The two lists are built from one list of rows, so they cannot get out
  * of step.
  */
+import { computed } from "@preact/signals";
+import { useMemo } from "preact/hooks";
 import type { GithubPrFile } from "../api/github-pr.ts";
 import { languageForPath } from "./html.tsx";
+import { memo, shallowEqual } from "./memo.ts";
+import { drag, folded as foldedFiles } from "./diff-state.ts";
 import {
   CodeLine,
   ExpandRow,
@@ -82,10 +86,6 @@ export interface DiffFileProps {
   readonly file: GithubPrFile;
   readonly index: number;
   readonly layout: FileLayout;
-  /** True when the reader folded this file down to its header. */
-  readonly folded: boolean;
-  /** The numbers this drag has covered, or `null` when nothing is being dragged. */
-  readonly selection: Selection | null;
   readonly actions: FileActions;
 }
 
@@ -95,7 +95,7 @@ function rowStyle(row: number): Record<string, string> {
 }
 
 /** One of the two cells of an empty side, which is greyed so a block reads as a block. */
-function EmptyCell({ side, row }: { readonly side: DiffSide; readonly row: number }) {
+function EmptyCellView({ side, row }: { readonly side: DiffSide; readonly row: number }) {
   return (
     <>
       <div class="num num-empty" style={rowStyle(row)} />
@@ -104,22 +104,19 @@ function EmptyCell({ side, row }: { readonly side: DiffSide; readonly row: numbe
   );
 }
 
+const EmptyCell = memo(EmptyCellView);
+
 /** One cell of one pane: a line number and the code beside it. */
-function PaneCell({
-  cell,
-  row,
-  language,
-  selected,
-  actions,
-  index,
-}: {
+interface PaneCellProps {
   readonly cell: PlacedCell;
   readonly row: number;
   readonly language: string | null;
   readonly selected: boolean;
   readonly actions: FileActions;
   readonly index: number;
-}) {
+}
+
+function PaneCellView({ cell, row, language, selected, actions, index }: PaneCellProps) {
   const segment: Segment | null = cell.segment;
   const style = rowStyle(row);
   return (
@@ -143,16 +140,46 @@ function PaneCell({
   );
 }
 
+/**
+ * True when two cells draw the same. The comparison lists every value the cell
+ * draws, so a layout that was built again with the same content draws nothing.
+ */
+function samePaneCell(left: PaneCellProps, right: PaneCellProps): boolean {
+  const a = left.cell;
+  const b = right.cell;
+  return (
+    left.row === right.row &&
+    left.language === right.language &&
+    left.selected === right.selected &&
+    left.actions === right.actions &&
+    left.index === right.index &&
+    (a === b ||
+      (a.side === b.side &&
+        a.line.n === b.line.n &&
+        a.line.kind === b.line.kind &&
+        a.line.text === b.line.text &&
+        a.selectable === b.selectable &&
+        a.segment?.from === b.segment?.from &&
+        a.segment?.to === b.segment?.to &&
+        (a.bubble === b.bubble ||
+          (a.bubble !== null &&
+            b.bubble !== null &&
+            a.bubble.count === b.bubble.count &&
+            a.bubble.mark === b.bubble.mark &&
+            a.bubble.targetId === b.bubble.targetId))))
+  );
+}
+
+const PaneCell = memo(PaneCellView, samePaneCell);
+
 /** One full-width row: a folded stretch, a pending comment, an outdated thread, or the box. */
-function Wide({
-  wide,
-  row,
-  actions,
-}: {
+interface WideProps {
   readonly wide: WideRow;
   readonly row: number;
   readonly actions: FileActions;
-}) {
+}
+
+function WideView({ wide, row, actions }: WideProps) {
   const style = rowStyle(row);
   switch (wide.kind) {
     case "expand":
@@ -203,20 +230,41 @@ function Wide({
   }
 }
 
-/** The two panes and the full-width rows of one file, in one grid. */
-function SplitGrid({
-  file,
-  index,
-  layout,
-  selection,
-  actions,
-}: {
+/** True when two full-width rows draw the same: the same kind and the same values. */
+function sameWide(left: WideProps, right: WideProps): boolean {
+  return left.row === right.row && left.actions === right.actions && shallowEqual(left.wide, right.wide);
+}
+
+const Wide = memo(WideView, sameWide);
+
+interface SplitGridProps {
   readonly file: GithubPrFile;
   readonly index: number;
   readonly layout: FileLayout;
-  readonly selection: Selection | null;
   readonly actions: FileActions;
-}) {
+}
+
+/**
+ * The two panes and the full-width rows of one file, in one grid.
+ *
+ * The grid reads the drag for its own file: a computed value that is `null` for
+ * every other file, so a drag in one file draws that file's grid and no other.
+ */
+function SplitGridView({ file, index, layout, actions }: SplitGridProps) {
+  const own = useMemo(
+    () =>
+      computed((): Selection | null => {
+        const current = drag.value;
+        if (current === null || current.index !== index) return null;
+        return {
+          side: current.side,
+          from: Math.min(current.anchor, current.end),
+          to: Math.max(current.anchor, current.end),
+        };
+      }),
+    [index],
+  );
+  const selection = own.value;
   const language = languageForPath(file.path ?? file.oldPath);
   const covered = (side: DiffSide, line: number): boolean =>
     selection !== null && selection.side === side && line >= selection.from && line <= selection.to;
@@ -265,6 +313,8 @@ function SplitGrid({
   );
 }
 
+const SplitGrid = memo(SplitGridView);
+
 /**
  * One changed file.
  *
@@ -272,7 +322,11 @@ function SplitGrid({
  * for a rename), and how many lines it gained and lost. The arrow folds the file
  * down to that header, which is how a reader walks a diff of twenty files.
  */
-export function DiffFile({ file, index, layout, folded, selection, actions }: DiffFileProps) {
+function DiffFileView({ file, index, layout, actions }: DiffFileProps) {
+  // The fold of this file is read here and not by the page, so a fold draws this
+  // header and no cell, and no other file.
+  const own = useMemo(() => computed(() => foldedFiles.value.has(index)), [index]);
+  const folded = own.value;
   const note = fileNote(file);
   const classes = folded ? "file-diff collapsed" : "file-diff";
   return (
@@ -301,8 +355,11 @@ export function DiffFile({ file, index, layout, folded, selection, actions }: Di
       ) : layout.slots.length === 0 ? (
         <div class="binary-note">No changes in this file</div>
       ) : (
-        <SplitGrid file={file} index={index} layout={layout} selection={selection} actions={actions} />
+        <SplitGrid file={file} index={index} layout={layout} actions={actions} />
       )}
     </div>
   );
 }
+
+/** One changed file, drawn again only when its file, its layout or its actions change. */
+export const DiffFile = memo(DiffFileView);

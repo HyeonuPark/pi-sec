@@ -382,6 +382,9 @@ export function beginSelection(index: number, side: DiffSide, line: number): voi
 export function extendSelection(index: number, side: DiffSide, line: number): void {
   const current = drag.value;
   if (current === null || current.index !== index || current.side !== side) return;
+  // The pointer entering the same line again (for example a thread mark inside the
+  // number) changes nothing the reader sees, so it writes nothing.
+  if (current.end === line) return;
   drag.value = { ...current, end: line };
 }
 

@@ -1355,6 +1355,30 @@ names another line. A review belongs to the whole pull request diff, so a commen
 on one commit's line would be a write that this dashboard does not make. The page
 draws no write control in this mode even while `writes` is on.
 
+**An action on the diff page draws only what it changes.** The page component
+that holds the diff (`DiffBody`) reads the answer and what the file layouts are
+built from (the opened stretches, the collected comments, the open comment box,
+the opened outdated threads and the threads), and nothing else. The marked file
+and the folded directories are read by the file tree, the review fields are read by
+the review bar, the fold of a file is read by that file, and the drag is read by
+the grid of the file it is in. So a drag step draws the cells whose selection
+changed in one file, a key in the overall comment draws the review bar, a scroll
+past a file header draws the tree, and folding a file draws its header. Each file
+keeps its layout object until its own inputs change, and a cell, a wide row, a
+grid and a file draw again only when the values they draw change (the small helper
+in `src/ui/github-pr/memo.ts`; the page does not use `preact/compat`). A drag that
+enters the line it is already on writes nothing. The highlight of a line, with the
+darker marks on the changed characters of a paired line already in its HTML, is
+computed once per line text and cached, so no step edits the code after it is
+drawn. Two tests keep this: `test/ui/github-pr-diff-render-scope.test.ts` counts
+the components that draw for each action, and the timing script
+`test/browser/pr-diff-perf.bench.ts` measures the actions on a large diff in
+Chromium. The script is in neither suite. Run it after `npm run build` with
+`BENCH_OUT=<directory> npx vitest --run --config test/browser/pr-diff-perf.vitest.config.ts`
+under the heavy-work lock. `BENCH_NO_PROFILE=1`, `BENCH_DRAG_LINES`,
+`BENCH_KEYS` and `BENCH_STEP_CAP_MS` shorten it, and the head of the script lists
+every knob.
+
 A file thread is a review comment on a whole file (`subjectType` `FILE`). The
 pull request page draws its card with the path alone, a "File comment" flag and a
 note in the place of the code table. The diff page draws no mark for it and no
