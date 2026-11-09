@@ -1675,6 +1675,64 @@ directory of a registered runtime extension. It sits under the mount prefix
 A file in `ui/` is readable by anyone who can reach the server. That is why
 [extensions.md](./extensions.md#ui-cards) says what does not belong there.
 
+### 9.3 Extension pages <a id="extension-pages"></a>
+
+A runtime extension can also export `pages` (see
+[extensions.md](./extensions.md#ext-pages)). The core serves its pages and its own
+api under `/ext/<extension>/`. The extension registers no path: the routes below
+are fixed, and each request looks up the live registration, so a reload reaches the
+next request and a removed extension answers `404`. `ui/` and `api/` are the only
+reserved sub-paths.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/ext/<extension>/ui/<file>` | The file route of 9.2. It also answers for an extension that holds pages and no cards. |
+| `GET`, `POST`, `PUT`, `PATCH`, `DELETE` | `/ext/<extension>/api/<path>` | The extension's `api` function. |
+| `GET` | `/ext/<extension>/` and `/ext/<extension>/<page>` | One page, as an HTML document. |
+| `GET` | `/api/ui/page-links` | The current Pages menu list, as a JSON array of `{ label, path }`. |
+
+**The page.** `GET /ext/<extension>/` is the index page, and
+`GET /ext/<extension>/<page>` is a page named by one segment that matches
+`^[a-z0-9][a-z0-9-]{0,63}$`. The body is an HTML document the core builds, with the
+extension's markup inside. The response carries the core page policy,
+`Cache-Control: no-cache`, `X-Content-Type-Options: nosniff` and
+`Referrer-Policy: no-referrer`. The policy names a style nonce only when the page
+rendered css.
+
+| Status | When |
+|--------|------|
+| `200` | The page rendered. |
+| `404` | `not_found`: the extension, the page or the route is unknown, `render` returned `null`, or the path has more than one segment. All of these answer the same body. |
+| `500` | `render` threw, returned a value of the wrong shape, or returned more than 2 MiB of html and css. The answer is a short core error page, and the reason goes to the log. |
+| `504` | `render` did not answer within 5 seconds. |
+
+**The api.** The route passes `method`, the path after `api/`, the query string
+(first value of each key) and the parsed JSON body to the extension. A request with
+a body must send `Content-Type: application/json`. The global `Host` and `Origin`
+checks run first for every method except `GET` and `HEAD` (§3.1).
+
+| Status | Code | When |
+|--------|------|------|
+| the extension's | none | The `api` answered. The status defaults to `200`, and `204` and `205` carry no body. |
+| `403` | `origin_forbidden` | The `Origin` check refused the request (§3.1). |
+| `404` | `not_found` | The extension is unknown or exports no `api`. |
+| `413` | `payload_too_large` | The body is over `server.maxBodyBytes`. |
+| `415` | `json_required` | A body was sent with another `Content-Type`. |
+| `500` | `page_api_failed` | The `api` threw, returned a value of the wrong shape, returned JSON that cannot be written, or returned more than 4 MiB. The reason is logged. |
+| `504` | `page_api_timeout` | The `api` did not answer within 10 seconds. |
+
+An api answer carries `Cache-Control: no-store`. An `api` GET must not change
+state.
+
+**`GET /api/ui/page-links`** answers the Pages menu list: the bundled links read
+at boot, then the runtime extension links (pages with `menu: true`) sorted by
+extension name and then by declared order. The chat page's data block carries the
+same list, and the menu reads this route each time it opens. The answer is a read
+and carries `Cache-Control: no-store`.
+
+`GET /api/admin/status` lists `pages: { pages, errors }` next to `ui` for each
+runtime extension that exports `pages`.
+
 ---
 
 ## 10. Pull request dashboard <a id="github-pr"></a>

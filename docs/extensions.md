@@ -925,6 +925,285 @@ window.piSecUi.define("demo-cards/switch", function (root, api) {
 });
 ```
 
+### Pages: the `pages` export <a id="ext-pages"></a>
+
+A runtime extension can show its own web pages under `/ext/<name>/`, where
+`<name>` is the extension's directory name. The `ext` prefix is a namespace: the
+core never serves a page of its own there, so an extension page cannot collide
+with a core path. A page needs no restart. It answers as soon as the extension
+loads, as a card does.
+
+```js
+export const pages = {
+  // Required. One entry per page.
+  entries: [
+    { page: "", label: "Host status", menu: true, script: "app.js", style: "app.css" },
+    { page: "history", label: "History" },
+  ],
+  // Required. Draws the body of one page. Returns { title?, html, css? }, or null for a 404.
+  render({ page, query, config, timezone }) { /* ... */ },
+  // Optional. Answers /ext/<name>/api/<path>. Returns { status?, json? }.
+  api({ method, path, query, body, config, timezone }) { /* ... */ },
+};
+```
+
+An extension that exports `pages` still exports an extension for the loader, as
+every runtime extension does: a `create` function, or a default export. `pages`
+is separate from `ui` on purpose. `ui` needs a `render` and `cards` with card
+rules, and a page-only extension would fail that shape check.
+
+#### Registration rules
+
+- `page` is the page name. The empty string is the index page at `/ext/<name>/`.
+  Any other name matches `^[a-z0-9][a-z0-9-]{0,63}$` and answers at
+  `/ext/<name>/<page>`. A page has one path segment.
+- The names `ui` and `api` are reserved, because the core serves those two
+  sub-paths under every `/ext/<name>/`. The core serves no other path there.
+- `label` is the menu text and the fallback for the page title. It is required.
+- `menu: true` puts the page in the chat page's Pages menu.
+- `script` and `style` name files under the extension's `ui/` directory. The rules
+  are the card script rules (see "Card scripts"): plain path segments, no `.` or
+  `..`, and a regular file whose real path stays inside the real `ui/` directory.
+  `script` ends in `.js` or `.mjs`. `style` ends in `.css`.
+- A bad entry is dropped alone with one diagnostic line. A `pages` value of the
+  wrong shape keeps no page and reports one error. The registry keeps the newest
+  20 lines.
+- An extension name outside `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` cannot be a URL
+  segment, so it registers no page and gets one error.
+- `GET /api/admin/status` shows `pages: { pages, errors }` for each runtime
+  extension that exports `pages`. The index page appears as `/`.
+
+#### What the callbacks get
+
+`render` receives `page`, `query` (the query string as an object of strings, the
+first value of a repeated key), `config` (the extension's validated config
+value) and `timezone`. `api` receives `method` (`GET`, `POST`, `PUT`, `PATCH` or
+`DELETE`), `path` (the rest after `api/`), `query`, `body` (the parsed JSON body,
+or `undefined`), `config` and `timezone`. Neither gets a request object or a core
+context, as card callbacks get none. This keeps the interface small and easy to
+test. It is not a security measure.
+
+`render` returns `{ title?, html, css? }`. `title` sets the document title, and
+the page title is `<title or label> · pi-sec`. `css` is optional style text, which
+the core puts into a `<style>` element with a nonce, as it does for a card.
+`api` returns `{ status?, json? }`. The status defaults to 200 and must be an
+integer from 200 to 599. A thrown error answers 500 with no detail, and the
+reason goes to the log.
+
+#### The page document
+
+The core builds the document and the extension supplies the body. The core writes
+the head: the mount prefix, the time zone and the shared theme stamps, the core
+theme, a small base style for the body font and colors, and the core policy. The
+page then holds the extension's html, the declared stylesheet link (after the
+core styles), the `render` css, and the declared script as a module, with
+`?v=<mtime>` on each file URL. The extension needs to know neither the mount
+prefix nor the theme. The core `styles.css` is not loaded, so no core selector
+reaches the extension's markup.
+
+The core adds `window.piSecPage` before the extension's script runs:
+`extension`, `page`, `base`, `apiUrl(path)`, and `fetch(path, init)`. `fetch`
+builds `<base>/ext/<name>/api/<path>`, sets `Content-Type: application/json` when
+a body is given (an object body is sent as JSON), and calls the ordinary
+`fetch`. A script can call `fetch` itself with the same URL.
+
+The response carries `Cache-Control: no-cache`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer` and the core policy. The policy has a style nonce
+only when `render` returned css. The card markup check does not run on page html:
+a page is its own document and the policy already stops inline scripts.
+
+#### The api
+
+`/ext/<name>/api/<path>` accepts `GET`, `POST`, `PUT`, `PATCH` and `DELETE`. A
+request with a body must send `Content-Type: application/json`, or the route
+answers 415. The global `Origin` check runs first for every method except `GET`
+and `HEAD`, so a page on another site cannot write.
+
+An `api` GET must not change state, because the `Origin` check does not apply to
+`GET`. The code cannot enforce this rule. A page on another site can send a GET
+to the api, but it cannot read the answer.
+
+#### Limits
+
+| What | Limit | Answer over the limit |
+|------|-------|-----------------------|
+| `render` time | 5 seconds | 504, a core error page |
+| `api` time | 10 seconds | 504 |
+| Page body (html plus css) | 2 MiB | 500, a core error page, one log line |
+| `api` answer | 4 MiB | 500, one log line |
+
+A `render` that throws answers a core error page with 500. A `render` that
+returns `null`, an unknown page, an unknown extension and a path with more than
+one segment answer the same 404. A callback that has started finishes on the
+module it started on, even when a reload replaces the module meanwhile.
+
+#### Limits for page authors
+
+The core policy forbids inline code, so an extension page has these limits:
+
+- No inline `<script>` element, no event handler attribute such as `onclick`, and
+  no `javascript:` URL. Put code in the declared script file and attach handlers
+  with `addEventListener`.
+- No `eval`, no `new Function`, and no string argument to `setTimeout`.
+- No `style` attribute and no `<style>` element in the html. Put style in the
+  declared style file or in the `css` field of `render`.
+- Server data reaches the script through `data-` attributes, a
+  `<script type="application/json">` data block (the browser parses it and never
+  runs it), or a call to the extension's api.
+- No image, script, style or font from another site, and no `fetch` to another
+  site. Copy a library into `ui/` and import it from there. The extension's
+  server code can fetch a remote image and serve it through the api, or embed it
+  as `data:`.
+- The file route serves only `.js`, `.mjs`, `.css`, `.svg` and `.png` (see
+  "Files under `ui/`"). Other file types, such as fonts and JSON files, go
+  through the api.
+
+#### Load, reload and unload
+
+- Load: a module with a valid `pages` export answers at once. Its menu links
+  appear the next time the menu opens.
+- Reload: a changed file reloads the extension after 250 ms. The new registration
+  replaces the old one, and the next request renders with the new module.
+- Failed reload: when the module does not import or `create` throws, the previous
+  pages keep answering and the diagnostics record the error.
+- Removed export: the pages answer 404 after the next load pass. The file route
+  keeps answering only if the extension still holds cards.
+- Removed directory: the pages, the api, the files and the menu links answer 404
+  or disappear after the next load pass.
+
+#### Safety: a page runs with the user's rights
+
+The extension is inside the security boundary. Its server code runs in the daemon
+process with the daemon's rights, and its page script runs in a same-origin page
+with the user's rights. It can read conversations, send messages, send approvals
+and call admin routes, as a card script can. The protection is the rule that no
+extension is installed or changed without the user's approval. The code does not
+enforce that rule.
+
+The core policy keeps scripts hidden in outside text, such as a Slack message or a
+Notion page that a page shows, from running. It does not limit the extension's own
+script, which is a file on this origin. It does not stop a deceptive link or a
+formatted passage either. Escape outside text on the server, or set it with
+`textContent` in the script. See [security.md](./security.md#extension-pages).
+
+#### Example: `host-status`
+
+The example is read-only and uses no secrets. It reads `node:os` and `process`
+only. The index page shows the host's uptime, the load averages, the free and total
+memory, and the daemon's uptime. `GET /ext/host-status/api/status` answers the same
+values as JSON, and a Refresh button calls it through `piSecPage.fetch`. The files
+live in `test/fixtures/extensions/host-status/`, and the loader, route and browser
+tests load them from there, so the example cannot drift from the code. To try it,
+copy the directory to `~/.pi/sec/extensions/host-status/`.
+
+`index.js`:
+
+```js
+// An example runtime extension that draws a web page: the host's uptime, load and
+// memory. It is read-only, uses no secrets, and reads `node:os` and `process` only.
+//
+// Copy this directory to `~/.pi/sec/extensions/host-status/`. The page answers at
+// `/ext/host-status/` as soon as the daemon loads it.
+import os from "node:os";
+
+export const name = "host-status";
+
+export function create() {
+  return { name: "host-status" };
+}
+
+/** The values the page and its api show. */
+function status() {
+  return {
+    hostUptimeSeconds: Math.round(os.uptime()),
+    load: os.loadavg().map((value) => Math.round(value * 100) / 100),
+    freeMemoryBytes: os.freemem(),
+    totalMemoryBytes: os.totalmem(),
+    daemonUptimeSeconds: Math.round(process.uptime()),
+  };
+}
+
+const escapeHtml = (value) =>
+  String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+
+/** One table row. The script updates the cell with the same `data-field`. */
+const row = (label, field, value) =>
+  `<tr><th scope="row">${escapeHtml(label)}</th><td data-field="${field}">${escapeHtml(value)}</td></tr>`;
+
+const gib = (bytes) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+
+export const pages = {
+  entries: [{ page: "", label: "Host status", menu: true, script: "app.js", style: "app.css" }],
+
+  render() {
+    const now = status();
+    return {
+      title: "Host status",
+      html:
+        `<main class="host-status">` +
+        `<h1>Host status</h1>` +
+        `<table>` +
+        row("Host uptime (s)", "hostUptimeSeconds", now.hostUptimeSeconds) +
+        row("Load (1, 5, 15 min)", "load", now.load.join(", ")) +
+        row("Free memory", "freeMemoryBytes", gib(now.freeMemoryBytes)) +
+        row("Total memory", "totalMemoryBytes", gib(now.totalMemoryBytes)) +
+        row("Daemon uptime (s)", "daemonUptimeSeconds", now.daemonUptimeSeconds) +
+        `</table>` +
+        `<button id="refresh" type="button">Refresh</button>` +
+        `</main>`,
+    };
+  },
+
+  api({ method, path }) {
+    if (method === "GET" && path === "status") return { json: status() };
+    return { status: 404, json: { error: "not found" } };
+  },
+};
+```
+
+`ui/app.js`:
+
+```js
+// The page script: a Refresh button that reads the extension's api and updates
+// the table. It is a file on this origin, so the page policy lets it run.
+const gib = (bytes) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+
+function show(values) {
+  const text = {
+    hostUptimeSeconds: String(values.hostUptimeSeconds),
+    load: values.load.join(", "),
+    freeMemoryBytes: gib(values.freeMemoryBytes),
+    totalMemoryBytes: gib(values.totalMemoryBytes),
+    daemonUptimeSeconds: String(values.daemonUptimeSeconds),
+  };
+  for (const [field, value] of Object.entries(text)) {
+    const cell = document.querySelector(`[data-field="${field}"]`);
+    if (cell !== null) cell.textContent = value;
+  }
+}
+
+document.getElementById("refresh")?.addEventListener("click", async () => {
+  const response = await window.piSecPage.fetch("status");
+  if (response.ok) show(await response.json());
+});
+```
+
+`ui/app.css`:
+
+```css
+.host-status table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.host-status th,
+.host-status td {
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+```
+
 ---
 
 ## 5. Bundled extension catalog <a id="bundled-extension-catalog"></a>
@@ -1050,6 +1329,17 @@ whose path does not start with `/`, is dropped and written as one `warn` line,
 `extension page link dropped`, naming the extension, the label and the path. The
 line is written once per boot, when the list is read. A dropped entry never
 reaches the page, so the page has no rule of its own.
+
+Runtime extensions add links too, and they follow a different rule. An extension
+that exports `pages` (see [Pages: the `pages` export](#ext-pages)) can set
+`menu: true` on a page. The server builds the list on every page load: the bundled
+links first, then the runtime links sorted by extension name and then by declared
+order, each as `/ext/<name>/<page>`. One function, `pageLinks` in
+`src/server/routes/basic-chat.ts`, builds the list for the data block and for
+`GET /api/ui/page-links`. The menu reads that route each time it opens and keeps
+the list from the block when the read fails, so a page added after the chat page
+loaded appears the next time the menu opens, without a reload. Bundled links keep
+the boot rule above.
 
 A page with no block, or with one it cannot read, draws the three links it always
 had. `test/pages-links.test.ts` holds the server side of the device, and
@@ -2538,6 +2828,7 @@ for each changed runtime extension (by mtime/hash):
   import with cache-busting URL
   call create(config)
   registry.install(extension)      # replaces by name
+  register cards (`ui`) and pages (`pages`)
   record diagnostics
 for each changed runtime prompt: reload and re-render sections
 emit `extension_reloaded` SSE event
@@ -2552,6 +2843,9 @@ Guarantees:
   `pi.system` entry and takes effect from that point forward; it never rewrites
   prior entries. New sessions start clean. See
   [architecture.md](./architecture.md#prefix-cache).
+- **Pages**: a reload replaces an extension's pages, a failed reload keeps the
+  previous ones, and a removed directory takes them away on the next load pass
+  (see [Pages: the `pages` export](#ext-pages)).
 - **Config rollback**: on a failed reload the previously installed instance is
   retained, so the last-working behavior continues.
 

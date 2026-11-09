@@ -573,6 +573,46 @@ changed without the user's approval. The code does not enforce that rule: the
 daemon cannot tell an approved extension from one that was written without
 approval.
 
+### Extension pages <a id="extension-pages"></a>
+
+A runtime extension can export `pages`, and the core then serves its pages under
+`/ext/<name>/` (see [extensions.md](./extensions.md#ext-pages)). The extension is
+inside the security boundary. Its server code runs in the daemon process with the
+daemon's rights. Its page is an ordinary same-origin page: the script runs with the
+user's rights and can read conversations, send messages, send approvals and call
+admin routes, exactly as a card script can. The protection is the rule that an
+extension is not installed or changed without the user's approval. The code does
+not enforce that rule.
+
+The core builds the document frame (the head, the core theme and the core policy)
+and puts the extension's rendered body into it. The core policy forbids inline
+scripts, and it applies to an extension page as it applies to a core page.
+
+- **It runs only scripts from files on this origin.** A `<script>` element or an
+  `onclick` attribute inside outside text that a page shows, such as a Slack
+  message or a Notion page, does not run. Without the policy, such a script would
+  run with the user's rights.
+- **It loads images only from this origin or `data:`,** and connects only to this
+  origin.
+- **It does not limit the extension's own script.** That script is a file on this
+  origin, so it runs and can call every core API with the user's rights.
+- **It does not stop deceptive markup,** such as a misleading link or a formatted
+  passage, in outside text. Escaping outside text stays the extension's job: on
+  the server, or with `textContent` in the script.
+- **The extension registers no path.** The server fixes the routes under
+  `/ext/<name>/`, so an extension cannot answer outside its own prefix. The reserved
+  sub-paths are `ui/` and `api/`.
+- **Cross-site requests.** A page on another site can send a GET to
+  `/ext/<name>/api/`, and it cannot read the answer. Its writes carry a foreign
+  `Origin`, which the server refuses (§8). The JSON rule (415) also stops a
+  cross-site form. An `api` GET must not change state, because the `Origin` check
+  skips GET. The code cannot enforce that rule.
+- **Isolation was considered and not used.** A sandboxed frame would give the page
+  an opaque origin, so its scripts could not send the login cookies or read core
+  answers. That stops scripts hidden in outside text. It does not stop the
+  extension, whose server code already has the daemon's rights, so the core policy
+  takes over the defense against outside text.
+
 ### The pull request dashboard <a id="github-pr-writes"></a>
 
 The `github-pr` extension reads GitHub and, when the operator allows it, writes

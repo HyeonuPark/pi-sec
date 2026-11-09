@@ -781,6 +781,25 @@ fills it, and the browser script runs its controls.
 - **A card draws in its own shadow root.** The core's theme variables reach it,
   and the core's styles do not.
 
+### Extension pages <a id="extension-pages"></a>
+
+A runtime extension that exports `pages` draws whole pages under `/ext/<name>/`
+(see [extensions.md](./extensions.md#ext-pages)). The core builds the document from
+`src/web/ext-page.html`: the mount prefix, time zone and theme stamps, the core
+`theme.css`, a small base style (`ext-page.css`: the body font and colors) and the
+helper `ext-page.js`, which adds `window.piSecPage`. The core `styles.css` is not
+loaded, so no core selector reaches the extension's markup. The extension's html
+becomes the body, and its declared stylesheet and module script load from the
+extension's `ui/` directory. The page follows the core theme and carries the core
+policy: no inline script, no inline handler and no `style` attribute.
+
+The Pages menu in the sidebar draws the three core links, the bundled links the
+server planted in the page, and the runtime extension links that declare
+`menu: true`. When the menu opens, it reads `GET /api/ui/page-links` and redraws
+the list. If the read fails, the menu keeps the list from the page's data block, so
+a page an extension added after the chat page loaded appears the next time the
+menu opens, without a reload.
+
 ---
 
 ## 9. Non-goals
