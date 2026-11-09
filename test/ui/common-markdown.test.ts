@@ -218,3 +218,60 @@ describe("markdown without a reset", () => {
     expect(paragraph?.textContent).toBe("first");
   });
 });
+
+describe("markdown: rich page tags", () => {
+  const ID = "01TEST0000000000000000000A";
+
+  it("draws a page tag as a sandboxed frame with a caption and a new-tab link, under the mount", () => {
+    const message = drawn(draw(`![Weekly calls](/rich-pages/${ID})`));
+    const frame = message.querySelector("iframe");
+    expect(frame?.getAttribute("src")).toBe(`/sec/rich-pages/${ID}/frame`);
+    expect(frame?.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
+    expect(frame?.getAttribute("sandbox")).not.toContain("allow-same-origin");
+    expect(frame?.getAttribute("title")).toBe("Weekly calls");
+    expect(message.querySelector(".rich-page-label")?.textContent).toBe("Generated page");
+    const link = message.querySelector(".rich-page-caption a");
+    expect(link?.getAttribute("href")).toBe(`/sec/rich-pages/${ID}`);
+    expect(link?.getAttribute("target")).toBe("_blank");
+    expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(message.querySelector("img")).toBeNull();
+    // The block sits inside the paragraph, so the wrappers are spans.
+    expect(message.querySelector("p > .rich-page")).not.toBeNull();
+  });
+
+  it("rebuilds an address that already carries a prefix under the page's own mount", () => {
+    const message = drawn(draw(`![t](/other/prefix/rich-pages/${ID}/)`));
+    expect(message.querySelector("iframe")?.getAttribute("src")).toBe(`/sec/rich-pages/${ID}/frame`);
+  });
+
+  it("keeps a non-ULID id, an absolute address and a normal image as images", () => {
+    const message = drawn(
+      draw(
+        [
+          "![a](/rich-pages/not-a-ulid)",
+          `![b](https://example.com/rich-pages/${ID})`,
+          `![c](//example.com/rich-pages/${ID})`,
+          "![d](/api/share/shot.png)",
+        ].join("\n\n"),
+      ),
+    );
+    expect(message.querySelectorAll("iframe").length).toBe(0);
+    expect(message.querySelectorAll("img").length).toBe(4);
+    expect(message.querySelectorAll("img")[3]?.getAttribute("src")).toBe("/api/share/shot.png");
+  });
+
+  it("escapes a title with a quote and an angle bracket", () => {
+    const message = drawn(draw(`![a "q" <b>x</b>](/rich-pages/${ID})`));
+    const frame = message.querySelector("iframe");
+    expect(frame?.getAttribute("title")).toBe('a "q" <b>x</b>');
+    expect(message.querySelector("b")).toBeNull();
+    expect(message.querySelectorAll("iframe").length).toBe(1);
+  });
+
+  it("keeps a raw iframe in the text as text", () => {
+    const message = drawn(draw('<iframe src="/rich-pages/x"></iframe>'));
+    expect(message.querySelector("iframe")).toBeNull();
+    expect(message.textContent).toContain("<iframe");
+  });
+});
+

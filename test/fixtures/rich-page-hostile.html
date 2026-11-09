@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Hostile</title></head>
+<body>
+<p id="state">hostile page</p>
+<form id="f" action="/api/attachments?name=canary-form&canary=form" method="post"><input name="a" value="1"></form>
+<script>
+  const results = {};
+  async function main() {
+    try { await fetch("/healthz?canary=get"); results.fetchGet = "resolved"; } catch (e) { results.fetchGet = "rejected"; }
+    try { await fetch("/api/attachments?name=canary-post", { method: "POST", body: "x" }); results.fetchPost = "resolved"; } catch (e) { results.fetchPost = "rejected"; }
+    await new Promise((done) => {
+      const image = new Image();
+      image.onload = () => { results.image = "loaded"; done(); };
+      image.onerror = () => { results.image = "error"; done(); };
+      image.src = "/api/share/canary.png?canary=img";
+    });
+    try { results.parentDocument = typeof parent.document; } catch (e) { results.parentDocument = "threw"; }
+    try { top.location.href = "/basic-chat?canary=top"; results.topLocation = "no-throw"; } catch (e) { results.topLocation = "threw"; }
+    results.windowOpen = String(window.open("/basic-chat?canary=open"));
+    let submits = 0;
+    document.getElementById("f").addEventListener("submit", () => { submits += 1; });
+    document.getElementById("f").requestSubmit();
+    results.formSubmitEvents = submits;
+    await new Promise((done) => setTimeout(done, 300));
+    parent.postMessage({ hostileResults: results }, "*");
+    // Last: leave for an outside address. The page may be replaced by this, so it runs after the report.
+    location.href = "__OUTSIDE__/canary-nav?canary=nav";
+  }
+  main();
+</script>
+</body>
+</html>

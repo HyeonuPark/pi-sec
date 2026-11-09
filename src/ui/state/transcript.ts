@@ -22,6 +22,7 @@
 import { computed, signal } from "@preact/signals";
 import { ApiError, request } from "../api/request.ts";
 import { reconcileById } from "./keyed.ts";
+import { startDeferredMedia, stopDeferredMedia } from "../chat/transcript/deferred-media.ts";
 import {
   compacting,
   drawSnapshotTools,
@@ -888,6 +889,7 @@ export function watchPane(): void {
   const pane = transcriptPane();
   if (pane === null) return;
   paneWatched = true;
+  startDeferredMedia(pane);
   pane.addEventListener(
     "scroll",
     () => {
@@ -905,6 +907,7 @@ export function watchPane(): void {
 
 /** Stop watching the pane: a page that goes away leaves no observer behind. */
 export function unwatchPane(): void {
+  stopDeferredMedia();
   paneResizeObserver?.disconnect();
   paneResizeObserver = null;
   paneWatched = false;

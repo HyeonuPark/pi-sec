@@ -193,6 +193,8 @@ export const FOCUSED_CHAT_TOOLS: readonly string[] = [
   FOCUSED_CHAT_CREATED_MARKER,
   // A picture in an answer. It copies a file and changes no behavior.
   "share_image",
+  // An HTML page in an answer. It copies a file and changes no behavior.
+  "share_page",
   // Shell and files. The role file restricts the shell to reading commands and
   // the file tools to the chat's own state file; that is a prompt rule, not a gate.
   "bash",

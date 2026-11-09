@@ -10,9 +10,15 @@
  * The markdown of a bubble goes through the shared `Markdown` component, which
  * draws only when its text changes.
  */
-import { useLayoutEffect } from "preact/hooks";
+import { useLayoutEffect, useRef } from "preact/hooks";
 import { Markdown } from "../../components/markdown.tsx";
 import { mount } from "../../mount.ts";
+import {
+  DEFER_ATTRIBUTE,
+  DEFER_PENDING_CLASS,
+  registerDeferredMedia,
+  unregisterDeferredMedia,
+} from "./deferred-media.ts";
 import {
   attachmentInfo,
   followingTail,
@@ -68,11 +74,24 @@ function formatBytes(bytes: number | undefined): string {
  */
 function AttachmentReference({ id, info }: { readonly id: string; readonly info: AttachmentDescriptor | undefined }) {
   const mime = info?.mime ?? "";
-  if (mime.startsWith("image/")) {
+  const picture = useRef<HTMLImageElement>(null);
+  const isImage = mime.startsWith("image/");
+  const sized = info?.w !== undefined && info?.h !== undefined;
+  // The address goes in `data-defer-src` and the chat's observers set `src` near
+  // the visible part. `loading="lazy"` stays as a second guard.
+  useLayoutEffect(() => {
+    const element = picture.current;
+    if (!isImage || element === null) return undefined;
+    registerDeferredMedia(element);
+    return () => unregisterDeferredMedia(element);
+  }, [isImage, id]);
+  if (isImage) {
     return (
       <a class="message-image" href={attachmentUrl(id)} target="_blank" rel="noopener noreferrer">
         <img
-          src={attachmentUrl(id)}
+          ref={picture}
+          {...{ [DEFER_ATTRIBUTE]: attachmentUrl(id) }}
+          class={sized ? undefined : DEFER_PENDING_CLASS}
           alt={info?.name ?? id}
           width={info?.w === undefined ? undefined : Number(info.w)}
           height={info?.h === undefined ? undefined : Number(info.h)}
@@ -214,14 +233,14 @@ export function TranscriptRow({ row }: { readonly row: TranscriptRow }) {
     case "user":
       return (
         <div class="message user" data-row-key={row.key} {...live}>
-          <Markdown text={row.text} />
+          <Markdown deferMedia text={row.text} />
           <MessageAttachments ids={row.attachments} />
         </div>
       );
     case "assistant":
       return (
         <div class="message assistant" data-row-key={row.key} {...live}>
-          <Markdown text={row.text} />
+          <Markdown deferMedia text={row.text} />
         </div>
       );
     case "review":
@@ -231,7 +250,7 @@ export function TranscriptRow({ row }: { readonly row: TranscriptRow }) {
             feedback · <a href={reportHref(row.review.report)} target="_blank" rel="noopener noreferrer">{row.review.report}</a>
             {row.review.version === "" ? null : ` · v${row.review.version}`}
           </div>
-          <Markdown class="review-body" text={row.review.body} />
+          <Markdown deferMedia class="review-body" text={row.review.body} />
         </div>
       );
     case "approval": {
@@ -250,7 +269,7 @@ export function TranscriptRow({ row }: { readonly row: TranscriptRow }) {
             {verb} · <a href={reportHref(row.approval.report)} target="_blank" rel="noopener noreferrer">{named}</a>
             {row.approval.version === "" ? null : ` · v${row.approval.version}`}
           </div>
-          {row.approval.text === "" ? null : <Markdown class="approval-body" text={row.approval.text} />}
+          {row.approval.text === "" ? null : <Markdown deferMedia class="approval-body" text={row.approval.text} />}
         </div>
       );
     }
@@ -278,7 +297,7 @@ export function TranscriptRow({ row }: { readonly row: TranscriptRow }) {
           onToggle={(event) => setGroupOpen(row.groupKey, (event.currentTarget as HTMLDetailsElement).open)}
         >
           <summary>system prompt section changed: show the new value</summary>
-          <Markdown class="section-note-body" text={row.text} />
+          <Markdown deferMedia class="section-note-body" text={row.text} />
         </details>
       );
     case "run":

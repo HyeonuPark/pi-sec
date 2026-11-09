@@ -23,6 +23,13 @@
  *   Markdown-it's own link validation still refuses `javascript:` and the other
  *   dangerous schemes.
  *
+ * - An image whose address is a rich page route (`<mount>/rich-pages/<ULID>`) is
+ *   drawn as a sandboxed frame with a caption and a link that opens the page in a
+ *   new tab. Any other image stays an `<img>`. `html: false` stays: a raw
+ *   `<iframe>` in a message is text, and only that image tag makes a frame.
+ * - With `deferMedia`, an image and a page frame carry `data-defer-src` and no
+ *   `src`, and the chat's observers load them near the view (`deferred-media.ts`).
+ *
  * If the parser cannot be built, or throws on one text, the text is escaped into
  * a `<p>`: a page that cannot draw markdown still shows what was said, which is
  * what the hand-written pages did before it (both removed in this commit).
@@ -34,8 +41,27 @@
  * elements, the selection inside them, and the scroll position alone.
  */
 import MarkdownIt from "markdown-it";
-import { useMemo } from "preact/hooks";
+import { useLayoutEffect, useMemo, useRef } from "preact/hooks";
 import { at, mount } from "../mount.ts";
+import {
+  DEFER_ATTRIBUTE,
+  DEFER_PENDING_CLASS,
+  deferredElementsIn,
+  registerDeferredMedia,
+  unregisterDeferredMedia,
+} from "../chat/transcript/deferred-media.ts";
+import { installRichPageFrameListener, RICH_PAGE_FRAME_CLASS } from "./rich-page-frames.ts";
+
+/** What a render call carries through the markdown-it `env` argument. */
+type RenderEnv = {
+  readonly deferMedia?: boolean;
+};
+
+/** The address of a rich page: a path that ends in `/rich-pages/<ULID>`, with any mount before it. */
+const RICH_PAGE_ADDRESS = /^(?:\/[^?#\s]*)?\/rich-pages\/([0-9A-HJKMNP-TV-Z]{26})\/?$/;
+
+/** The flags of a page frame. Same text as the server's shell. */
+const RICH_PAGE_SANDBOX = "allow-scripts allow-forms";
 
 /** One markdown-it instance, made once; `null` when it could not be made. */
 let renderer: InstanceType<typeof MarkdownIt> | null | undefined;
@@ -45,6 +71,22 @@ function mountedHref(href: string): string {
   const base = mount().base;
   if (base === "" || href === base || href.startsWith(`${base}/`)) return href;
   return at(href);
+}
+
+/** One rich page as markup: the frame and its caption. Every inserted value is escaped. */
+function richPageHtml(id: string, title: string, env: RenderEnv | undefined): string {
+  installRichPageFrameListener();
+  const frame = escapeMarkdownText(at(`/rich-pages/${id}/frame`));
+  const page = escapeMarkdownText(at(`/rich-pages/${id}`));
+  const text = escapeMarkdownText(title);
+  const source = env?.deferMedia === true ? DEFER_ATTRIBUTE : "src";
+  return (
+    `<span class="rich-page">` +
+    `<iframe class="${RICH_PAGE_FRAME_CLASS}" ${source}="${frame}" sandbox="${RICH_PAGE_SANDBOX}" referrerpolicy="no-referrer" loading="lazy" title="${text}"></iframe>` +
+    `<span class="rich-page-caption"><span class="rich-page-label">Generated page</span> ${text} ` +
+    `<a href="${page}" target="_blank" rel="noopener noreferrer">Open in new tab ↗</a></span>` +
+    `</span>`
+  );
 }
 
 /** The renderer, with the link rule both pages applied. */
@@ -64,6 +106,24 @@ function markdownRenderer(): InstanceType<typeof MarkdownIt> | null {
       }
       return previous !== undefined
         ? previous(tokens, index, options, env, self)
+        : self.renderToken(tokens, index, options);
+    };
+    const previousImage = created.renderer.rules.image;
+    created.renderer.rules.image = (tokens, index, options, env, self) => {
+      const flags = env as RenderEnv | undefined;
+      const token = tokens[index];
+      const src = token?.attrGet("src");
+      if (token !== undefined && typeof src === "string") {
+        const page = src.startsWith("//") ? null : RICH_PAGE_ADDRESS.exec(src);
+        if (page !== null) return richPageHtml(page[1]!, self.renderInlineAsText(token.children ?? [], options, env), flags);
+        if (flags?.deferMedia === true) {
+          token.attrs = (token.attrs ?? []).filter((attribute) => attribute[0] !== "src");
+          token.attrSet(DEFER_ATTRIBUTE, src);
+          token.attrSet("class", DEFER_PENDING_CLASS);
+        }
+      }
+      return previousImage !== undefined
+        ? previousImage(tokens, index, options, env, self)
         : self.renderToken(tokens, index, options);
     };
     renderer = created;
@@ -90,12 +150,13 @@ export function escapeMarkdownText(text: string): string {
  * never as an exception: a row that cannot be parsed must not take the page with
  * it.
  */
-export function renderMarkdownHtml(text: string): string {
+export function renderMarkdownHtml(text: string, options: { readonly deferMedia?: boolean } = {}): string {
   const source = String(text ?? "");
   const markdown = markdownRenderer();
   if (markdown === null) return `<p>${escapeMarkdownText(source)}</p>`;
   try {
-    return markdown.render(source);
+    const env: RenderEnv = { deferMedia: options.deferMedia === true };
+    return markdown.render(source, env);
   } catch {
     return `<p>${escapeMarkdownText(source)}</p>`;
   }
@@ -111,6 +172,8 @@ export interface MarkdownProps {
   readonly tag?: MarkdownTag;
   readonly class?: string;
   readonly id?: string;
+  /** The chat sets this: images and page frames load near the visible part only. */
+  readonly deferMedia?: boolean;
 }
 
 /**
@@ -121,8 +184,19 @@ export interface MarkdownProps {
  * component is that element rather than a child of it, so the markup the pages
  * draw is the markup they drew before.
  */
-export function Markdown({ text, tag = "div", class: className, id }: MarkdownProps) {
-  const html = useMemo(() => renderMarkdownHtml(text), [text]);
+export function Markdown({ text, tag = "div", class: className, id, deferMedia }: MarkdownProps) {
+  const html = useMemo(() => renderMarkdownHtml(text, { deferMedia: deferMedia === true }), [text, deferMedia]);
+  const host = useRef<HTMLElement>(null);
+  // After each change of the HTML, hand the deferred elements to the observers,
+  // and forget the old ones when the HTML is replaced or the row goes away.
+  useLayoutEffect(() => {
+    if (deferMedia !== true || host.current === null) return undefined;
+    const found = deferredElementsIn(host.current);
+    for (const element of found) registerDeferredMedia(element);
+    return () => {
+      for (const element of found) unregisterDeferredMedia(element);
+    };
+  }, [html, deferMedia]);
   const Tag = tag as "div";
-  return <Tag class={className} id={id} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <Tag ref={host as never} class={className} id={id} dangerouslySetInnerHTML={{ __html: html }} />;
 }

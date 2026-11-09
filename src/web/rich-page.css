@@ -1,0 +1,63 @@
+/* The shell at /rich-pages/<id>: a label bar and the generated page below it.
+   The page sits in a sandboxed frame; nothing here reaches into it. */
+html,
+body.rich-page-shell {
+  height: 100%;
+  margin: 0;
+}
+
+body.rich-page-shell {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-ui, system-ui, sans-serif);
+  background: var(--bg, #fff);
+  color: var(--text, #222);
+}
+
+.rich-page-bar {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #ccc);
+  font-size: 14px;
+}
+
+.rich-page-bar-label {
+  padding: 1px 6px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rich-page-bar-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rich-page-bar-meta {
+  color: var(--text-muted, #666);
+}
+
+.rich-page-bar-back {
+  color: var(--accent, #2b5bb0);
+}
+
+.rich-page-shell-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+  color-scheme: light;
+}
+
+.rich-page-gone {
+  padding: 24px 12px;
+}

@@ -21,6 +21,7 @@ import {
   type AttachmentRouteRoots,
 } from "./routes/attachments.ts";
 import { registerShareFiles } from "./routes/share-files.ts";
+import { registerRichPages } from "./routes/rich-pages.ts";
 import { registerInbox } from "./routes/inbox.ts";
 import { registerUserQueries } from "./routes/user-queries.ts";
 import { registerAdmin, registerSecretWrite } from "./routes/admin.ts";
@@ -301,6 +302,7 @@ export function createServer(deps: AppDeps, options: ServerOptions = {}): Server
   registerUsageStats(router, deps, options.usageStats);
   registerAttachments(router, deps, { roots: options.attachmentRoots });
   registerShareFiles(router, deps, { roots: options.attachmentRoots });
+  registerRichPages(router, deps, { roots: options.attachmentRoots });
   registerInbox(router, deps);
   registerUserQueries(router, deps);
   registerRemoteMachines(router, deps);

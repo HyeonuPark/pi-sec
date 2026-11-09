@@ -2409,6 +2409,49 @@ button.status-chip.job-working:hover {
   height: auto;
 }
 
+/* A generated page (rich page): a sandboxed frame with a caption drawn by the
+   core, outside the frame. The spans are blocks because a markdown image sits
+   inside a paragraph. The white background and light scheme keep a page that
+   sets no colors readable in dark mode. */
+.rich-page {
+  display: block;
+  margin: var(--space-2) 0;
+}
+
+.rich-page-frame {
+  display: block;
+  width: 100%;
+  height: 360px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color-scheme: light;
+}
+
+.rich-page-caption {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: 0.85em;
+  color: var(--text-muted, inherit);
+}
+
+.rich-page-label {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  font-size: 0.8em;
+  letter-spacing: 0.04em;
+}
+
+/* A picture in the chat whose size is not known before it loads keeps a 160
+   pixel box until it has loaded, so the rows below it do not jump. */
+img.defer-media-pending {
+  display: block;
+  min-height: 160px;
+  min-width: 160px;
+}
+
 .report-body th,
 .report-body td {
   border: 1px solid var(--border);

@@ -16,7 +16,7 @@ import type { ExtensionContext } from "./context.ts";
 import { withLocal } from "../time-format.ts";
 
 /**
- * The attachment tools: publish an image into a reply, open a stored one again,
+ * The attachment tools: publish an image or an HTML page into a reply, open a stored one again,
  * list what exists, and give files to a job.
  *
  * The three that read or write files go through `src/attachments/store.ts`, so
@@ -128,12 +128,25 @@ function describe(record: AttachmentRecord, prefix: string): Record<string, unkn
     ...(record.h === undefined ? {} : { h: record.h }),
     ...(record.jobId === undefined ? {} : { jobId: record.jobId }),
     ...(record.conversationId === undefined ? {} : { conversationId: record.conversationId }),
+    ...(record.richPage === true ? { richPage: true } : {}),
     collectedAt: record.collectedAt,
   };
 }
 
 function textResult(text: string, isError = false): { output: { type: "text"; text: string }[]; isError?: boolean } {
   return isError ? { output: [{ type: "text" as const, text }], isError: true } : { output: [{ type: "text" as const, text }] };
+}
+
+/** The largest page `share_page` stores, in bytes. */
+export const RICH_PAGE_MAX_BYTES = 1024 * 1024;
+
+/** The tool text of `share_page`. It is prompt text: an agent reads it to decide when to publish a page. */
+const SHARE_PAGE_DESCRIPTION =
+  "Publish an HTML page that the user can open and use: a chart, an interactive demo, or a small app. Returns the id, the URL, and a markdown tag. Paste the markdown into a chat answer or a report body: the page shows there in a frame, with a link that opens it in a new tab. The page runs isolated. Its scripts run, but it cannot reach pi-sec, the network, or the page around it, so put every script, style, and image inline (images as data: URLs or inline SVG). A file the page loads from any address does not load. Size the page by its content and do not use 100vh. A link inside the page does not open. Pass jobId when the page belongs to a job's work, such as a report, so the page goes with that job. A page that never gets a job is deleted at the first daemon start after 24 hours. The user and anyone who opens the address can read the page, so write no secret value into it.";
+
+/** A page title as the alt text of a markdown image tag: no bracket and no line break. */
+function altOf(title: string): string {
+  return title.replace(/[\[\]]/g, "").replace(/\s*[\r\n]+\s*/g, " ").trim();
 }
 
 /**
@@ -194,6 +207,93 @@ export function createAttachmentsExtension(context: ExtensionContext): Extension
           mime: record.mime,
           ...(record.w === undefined ? {} : { w: record.w }),
           ...(record.h === undefined ? {} : { h: record.h }),
+        }),
+      );
+    },
+  });
+
+  const sharePage = defineTool({
+    name: "share_page",
+    description: SHARE_PAGE_DESCRIPTION,
+    parameters: obj(
+      {
+        title: str({
+          description:
+            "A short title. It labels the frame and the new-tab page, and it is the alt text of the markdown tag.",
+        }),
+        html: opt(str({ description: "The page as one HTML document. Give this or source, not both." })),
+        source: opt(
+          str({
+            description: "Path to an HTML file, absolute or relative to the workspace. Give this or html, not both.",
+          }),
+        ),
+        name: opt(
+          str({
+            description:
+              "File name to store the page under. .html is added when it is missing. Defaults to the title.",
+          }),
+        ),
+        jobId: opt(
+          str({
+            description:
+              "Job that owns the page. Give it for a page in a report. Omit to leave it unowned. An unowned page is deleted at the first daemon start after 24 hours.",
+          }),
+        ),
+      },
+    ),
+    replay: "unsafe",
+    execute: async (args, api, ctx) => {
+      if ((args.html === undefined) === (args.source === undefined)) {
+        return textResult("Give exactly one of html and source.", true);
+      }
+      let data: Buffer;
+      if (args.html !== undefined) {
+        data = Buffer.from(args.html, "utf8");
+      } else {
+        const path = isAbsolute(args.source!) ? args.source! : join(context.paths.workspaceTree, args.source!);
+        try {
+          data = await readFile(path);
+        } catch (error) {
+          return textResult(`Cannot read ${args.source}: ${String(error)}`, true);
+        }
+      }
+      if (data.byteLength === 0) return textResult("The page is empty. Give a document of at least 1 byte.", true);
+      if (data.byteLength > RICH_PAGE_MAX_BYTES) {
+        return textResult(
+          `The page is ${data.byteLength} bytes. The limit is ${RICH_PAGE_MAX_BYTES} bytes (1 MiB).`,
+          true,
+        );
+      }
+      try {
+        new TextDecoder("utf-8", { fatal: true }).decode(data);
+      } catch {
+        return textResult("The page is not valid UTF-8. Save it as UTF-8 text.", true);
+      }
+      const jobId = args.jobId;
+      if (jobId !== undefined) {
+        const job = await context.jobs?.get(ctx, jobId);
+        if (context.jobs !== undefined && job === undefined) {
+          return textResult(`Job not found: ${jobId}. A page must belong to a live job or to none.`, true);
+        }
+      }
+      const wanted = args.name ?? args.title;
+      const record = await createAttachment(context, {
+        kind: "share",
+        name: /\.html$/i.test(wanted.trim()) ? wanted : `${wanted.trim()}.html`,
+        mime: "text/html",
+        data,
+        richPage: true,
+        ...(jobId === undefined ? {} : { jobId }),
+        conversationId: String(api.conversationId),
+      });
+      const url = `${mountPrefixOf(context).replace(/\/+$/, "")}/rich-pages/${record.id}`;
+      return textResult(
+        JSON.stringify({
+          id: record.id,
+          url,
+          markdown: `![${altOf(args.title)}](${url})`,
+          bytes: record.bytes,
+          ownedBy: jobId ?? null,
         }),
       );
     },
@@ -280,6 +380,6 @@ export function createAttachmentsExtension(context: ExtensionContext): Extension
 
   return defineExtension({
     name: "attachments",
-    tools: [shareImage, open, list, assign],
+    tools: [shareImage, sharePage, open, list, assign],
   });
 }

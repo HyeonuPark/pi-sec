@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weekly tool calls</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 12px; color: #222; }
+  .bar { fill: #4a7bd0; }
+  .bar:hover { fill: #2b5bb0; }
+  #readout { min-height: 1.4em; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h3>Tool calls per day</h3>
+<svg id="chart" width="100%" height="180" viewBox="0 0 350 180" role="img" aria-label="Bar chart of tool calls per day"></svg>
+<div id="readout">Point at a bar.</div>
+<script>
+  const data = [["Mon", 12], ["Tue", 30], ["Wed", 22], ["Thu", 41], ["Fri", 18], ["Sat", 7], ["Sun", 9]];
+  const svg = document.getElementById("chart");
+  const readout = document.getElementById("readout");
+  const max = Math.max(...data.map((d) => d[1]));
+  const ns = "http://www.w3.org/2000/svg";
+  data.forEach(([day, value], i) => {
+    const h = (value / max) * 140;
+    const bar = document.createElementNS(ns, "rect");
+    bar.setAttribute("class", "bar");
+    bar.setAttribute("x", String(10 + i * 48));
+    bar.setAttribute("y", String(150 - h));
+    bar.setAttribute("width", "36");
+    bar.setAttribute("height", String(h));
+    bar.addEventListener("mouseenter", () => { readout.textContent = day + ": " + value + " calls"; });
+    svg.appendChild(bar);
+    const label = document.createElementNS(ns, "text");
+    label.setAttribute("x", String(28 + i * 48));
+    label.setAttribute("y", "170");
+    label.setAttribute("text-anchor", "middle");
+    label.textContent = day;
+    svg.appendChild(label);
+  });
+</script>
+</body>
+</html>
