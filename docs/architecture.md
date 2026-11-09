@@ -617,7 +617,7 @@ values: `enabled`, `tickMs`, and `timezone`.
   applies whatever `overlap` says. The setting is read in one place: a job whose
   dispatch is still running inside the same pass returns at once under `skip` and
   is let through under `queue` or `allow`, and `tick` already refuses to run
-  twice at once. So the three values behave the same today. The wait is also not
+  twice at once. So the three values behave the same way. The wait is also not
   a queue: it holds one occurrence, and an occurrence that cannot start within
   five minutes of its due minute is dropped by `catchUp: "skip"` when the round
   ends.

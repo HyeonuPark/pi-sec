@@ -3160,8 +3160,10 @@ latest), one per candidate:
   candidates, reviews and consolidates entries, and **defers adding new ones when
   the queue is deep**. There is no dedicated UI or API; queue depth may appear in
   `/api/admin/status` as a diagnostic.
-- Applying = the user runs `user-tools/update-and-restart`; the candidate is
-  marked `applied` once `pi-sec` boots from the advanced snapshot.
+- Applying = the user runs `user-tools/update-and-restart`. Nothing writes a
+  candidate's `status` after the entry is recorded: `self-edit` sets it to
+  `proposed` when the gate lets the change through, and no path changes it
+  after that. The record shows what the gate checked, not what booted.
 - A runtime extension may only be promoted into core after the user confirms.
 - `sec.selfEdit` remains the per-conversation operation log (proposals,
   validation, commits, restart notices); `sec.candidate` is the

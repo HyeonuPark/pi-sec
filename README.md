@@ -16,18 +16,6 @@ This is an early release. The code follows the design in `docs/`, and where the
 two disagree, the code is the current behavior. The agent engine is a pinned,
 experimental version, so expect breaking changes before a stable release.
 
-## Not yet implemented
-
-- A `sec.candidate` entry is not marked `applied` after a restart: nothing in the
-  code writes that status. The validation gate's typecheck also covers `src/`
-  only, because `tsconfig.json` includes `src/**` and vitest strips types without
-  checking them.
-- Scheduler `catchUp: all` does not run one round per missed occurrence. A tick
-  looks at one occurrence, the most recent one after `lastRun`, so `once` and
-  `all` both run a single catch-up round. `overlap: allow` does not start a
-  second round beside an open one either: an occurrence waits while the previous
-  round still has an unfinished task, so `queue` and `allow` give the same result.
-
 ## Requirements
 
 | Requirement | Why |
