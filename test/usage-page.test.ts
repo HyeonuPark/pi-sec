@@ -275,7 +275,8 @@ describe("the answer the page carries", () => {
       catalog: {
         providers: [
           { id: "anthropic", name: "Anthropic" },
-          { id: "fixture-meter", name: "Fixture Meter" },
+          // The name holds an element end, which only the escape keeps inside the block.
+          { id: "fixture-meter", name: "Fixture <Meter> & Co </script>" },
         ],
         configured: new Set(["anthropic", "fixture-meter"]),
         subscription: new Set(["anthropic"]),
@@ -295,6 +296,7 @@ describe("the answer the page carries", () => {
     expect(first.cards[0]?.fields["fiveHour"]).toEqual({ state: "reading" });
     // A provider with no reader keeps `wip`: no value is coming for it.
     expect(first.cards[1]?.fields["balance"]).toEqual({ state: "wip" });
+    expect(first.cards[1]?.name).toBe("Fixture <Meter> & Co </script>");
     // pi-sec's own numbers are in the block, so the card draws them at once.
     expect(first.cards[1]?.fields["day"]).toMatchObject({ state: "value", value: { calls: 1, tokens: 500 } });
     expect(first.timezone).toBe("Asia/Tokyo");
@@ -314,25 +316,6 @@ describe("the answer the page carries", () => {
     } as unknown as UsageAnswer;
     const page = withFirstPaint("<p>x</p><!--usage-first--><p>y</p>", answer);
     expect(firstPaintOf(page)).toEqual(answer);
-  });
-
-  it("writes every angle bracket in the block as an escape, so no value can end the element", async () => {
-    const origin = await boot({
-      catalog: {
-        providers: [{ id: "fixture-meter", name: "Fixture <Meter> & Co" }],
-        configured: new Set(["fixture-meter"]),
-        subscription: new Set(),
-      },
-      usage: { prefetch: false },
-    });
-
-    const page = await (await fetch(`${origin}/usage`)).text();
-    const block = /<script type="application\/json" id="usage-first">([\s\S]*?)<\/script>/.exec(page)?.[1] ?? "";
-
-    expect(block).toContain("\\u003c");
-    expect(block).not.toContain("<Meter>");
-    // The escape is the JSON escape, so the page reads the name back unchanged.
-    expect(firstPaintOf(page).cards[0]?.name).toBe("Fixture <Meter> & Co");
   });
 
   it("asks no provider while the page is built, however often the page is read", async () => {

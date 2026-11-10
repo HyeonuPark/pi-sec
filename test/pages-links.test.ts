@@ -88,12 +88,14 @@ function linksOf(page: string): unknown {
 
 describe("the page links the enabled extensions declare", () => {
   it("writes the link of an enabled extension into the page data block", async () => {
-    const { origin } = await boot(["pr-fixture"], pageCatalog("pr-fixture", [{ label: "PRs", path: "/github/pr/" }]));
+    // The label holds an element end, which only the escape keeps inside the block.
+    const link = { label: "Pull <requests> </script>", path: "/github/pr/" };
+    const { origin } = await boot(["pr-fixture"], pageCatalog("pr-fixture", [link]));
     const response = await fetch(`${origin}/basic-chat`);
     expect(response.status).toBe(200);
     const page = await response.text();
 
-    expect(linksOf(page)).toEqual([{ label: "PRs", path: "/github/pr/" }]);
+    expect(linksOf(page)).toEqual([link]);
     // The block is data, so the policy names no script nonce for it.
     expect(response.headers.get("content-security-policy")).not.toContain("script-src 'self' 'nonce");
     // It takes the place the shell left for it, after the page's own module.
@@ -111,19 +113,6 @@ describe("the page links the enabled extensions declare", () => {
     const page = await (await fetch(`${origin}/basic-chat`)).text();
     // The block is there and empty: the menu reads a list and draws none of it.
     expect(linksOf(page)).toEqual([]);
-  });
-
-  it("writes every angle bracket as an escape, so no label can end the element", async () => {
-    const { origin } = await boot(
-      ["pr-fixture"],
-      pageCatalog("pr-fixture", [{ label: "Pull <requests>", path: "/github/pr/" }]),
-    );
-    const page = await (await fetch(`${origin}/basic-chat`)).text();
-    const block = /<script type="application\/json" id="pages-links">([\s\S]*?)<\/script>/.exec(page)?.[1] ?? "";
-    expect(block).toContain("\\u003c");
-    expect(block).not.toContain("<requests>");
-    // The escape is the JSON escape, so the menu reads the label back unchanged.
-    expect(linksOf(page)).toEqual([{ label: "Pull <requests>", path: "/github/pr/" }]);
   });
 
   it("drops an entry with no label or a relative path, and warns once for each", async () => {

@@ -7,7 +7,7 @@ import { attachmentContext } from "./attachments.ts";
 import { sendBody } from "../compress.ts";
 import { apiError, json, type RouteContext, type Router } from "../router.ts";
 import { type AppDeps, API_VERSION } from "../deps.ts";
-import { injectName, readIndex, renderPage, serveStatic } from "../static.ts";
+import { injectName, jsonDataBlock, readIndex, renderPage, serveStatic } from "../static.ts";
 import { pagePreferences } from "../preferences-stamp.ts";
 import { contentSecurityPolicy, fillUiSlots, UI_RENDER_TIMEOUT_MS } from "../ui-page.ts";
 import { resolveMount } from "../proxy.ts";
@@ -267,8 +267,7 @@ const PAGE_LINKS_MARKER = "<!--pages-links-->";
  * page with no block keeps the three links it always had.
  */
 export function withPageLinks(html: string, links: readonly ExtensionPageLink[]): string {
-  const json = JSON.stringify(links).replaceAll("<", "\\u003c");
-  return html.replace(PAGE_LINKS_MARKER, () => `<script type="application/json" id="pages-links">${json}</script>`);
+  return html.replace(PAGE_LINKS_MARKER, () => jsonDataBlock("pages-links", links));
 }
 
 /**

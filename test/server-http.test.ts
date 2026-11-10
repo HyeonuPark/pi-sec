@@ -23,7 +23,7 @@ import { StreamHub } from "../src/server/streams.ts";
 import { startServer, type StartedServer } from "../src/server/server.ts";
 import type { AppDeps } from "../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
-import { injectName } from "../src/server/static.ts";
+import { injectName, jsonDataBlock } from "../src/server/static.ts";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
@@ -868,6 +868,29 @@ describe("proxy.test.ts", () => {
       expect(problems).toHaveLength(count);
       if (text !== undefined) expect(problems[0]).toContain(text);
     });
+  });
+});
+
+describe("json-data-block.test.ts", () => {
+  // The fourth column is the whole element as text, for the rows where it is short
+  // enough to spell out, so the table is not a copy of the code it checks.
+  const BLOCKS: ReadonlyArray<readonly [string, string, unknown, string?]> = [
+    ["a plain list", "pages-links", [{ label: "PRs", path: "/github/pr/" }]],
+    ["an empty list", "pages-links", [], '<script type="application/json" id="pages-links">[]</script>'],
+    ["an angle bracket in a label", "pages-links", [{ label: "Pull <requests>", path: "/github/pr/" }]],
+    ["an element end in a value", "usage-first", { name: "Fixture <Meter> & Co </script><img>" }],
+    ["a dollar pattern", "usage-first", { name: "$& $' $1" }],
+  ];
+
+  it.each(BLOCKS)("writes %s as one data block that no value can end", (_label, id, value, literal) => {
+    const block = jsonDataBlock(id, value);
+    if (literal !== undefined) expect(block).toBe(literal);
+    const inner = new RegExp(`^<script type="application/json" id="${id}">([\\s\\S]*)</script>$`).exec(block)?.[1] ?? "";
+    // Every "<" in the block is the escape.
+    expect(inner).not.toContain("<");
+    expect(inner).toBe(JSON.stringify(value).replaceAll("<", "\\u003c"));
+    // The escape is JSON's own, so the page reads the value back.
+    expect(JSON.parse(inner)).toEqual(value);
   });
 });
 

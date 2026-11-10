@@ -213,6 +213,17 @@ export function injectName(html: string, name: string): string {
   return html.replace(NAME_META, () => `<meta name="pi-sec-name" content="${value}" />`);
 }
 
+/**
+ * One JSON data block as a `<script>` element.
+ *
+ * The type is `application/json`, so the browser parses the block and never runs
+ * it. Every `<` is written as `\u003c`, so no value can close the element early;
+ * the rest of the JSON needs no escaping inside a `script`.
+ */
+export function jsonDataBlock(id: string, value: unknown): string {
+  return `<script type="application/json" id="${id}">${JSON.stringify(value).replaceAll("<", "\\u003c")}</script>`;
+}
+
 /** The shared UI state a page is stamped with. Every field is optional. */
 export interface PagePreferences {
   readonly theme?: string;

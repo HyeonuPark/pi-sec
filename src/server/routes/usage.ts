@@ -26,7 +26,7 @@
 import { sendBody } from "../compress.ts";
 import { apiError, json, type RouteContext, type Router } from "../router.ts";
 import { type AppDeps } from "../deps.ts";
-import { readPage, renderPage } from "../static.ts";
+import { jsonDataBlock, readPage, renderPage } from "../static.ts";
 import { pagePreferences } from "../preferences-stamp.ts";
 import { contentSecurityPolicy, fillUiSlots, UI_RENDER_TIMEOUT_MS } from "../ui-page.ts";
 import { resolveMount } from "../proxy.ts";
@@ -50,8 +50,7 @@ const FIRST_PAINT_MARKER = "<!--usage-first-->";
  * element early; the rest of the JSON needs no escaping inside a `script`.
  */
 export function withFirstPaint(html: string, answer: UsageAnswer): string {
-  const json = JSON.stringify(answer).replaceAll("<", "\\u003c");
-  return html.replace(FIRST_PAINT_MARKER, () => `<script type="application/json" id="usage-first">${json}</script>`);
+  return html.replace(FIRST_PAINT_MARKER, () => jsonDataBlock("usage-first", answer));
 }
 
 export interface UsageRouteOptions {
