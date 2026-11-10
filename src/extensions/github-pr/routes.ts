@@ -219,7 +219,7 @@ function dataBlock(id: string, value: unknown): string {
  * string replacement as a pattern (`$&`, `$'`, `$1`), and a JSON block can carry
  * a `$` in any text it holds, such as a pull request's title.
  */
-function fillMarker(html: string, marker: string, replacement: string): string {
+export function fillMarker(html: string, marker: string, replacement: string): string {
   return html.includes(marker) ? html.replace(marker, () => replacement) : html;
 }
 

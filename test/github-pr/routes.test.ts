@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultConfig, type Config } from "../../src/config/schema.ts";
+import { fillMarker } from "../../src/extensions/github-pr/routes.ts";
 import { AdminNotes } from "../../src/runtime/notes.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { defaultWebDir, startServer, type ServerOptions, type StartedServer } from "../../src/server/server.ts";
@@ -296,51 +297,14 @@ describe("github-pr routes", () => {
     expect(otherCase.status).toBe(200);
   }, 40_000);
 
-  it("writes a value that carries a dollar sign into the page unchanged", async () => {
+  it("writes a value that carries a dollar sign into the page unchanged", () => {
     // `String.replace` reads `$` in a string replacement as a pattern, so a
     // title such as `$&` would otherwise pull the marker itself into the block.
-    const responses = await mkdtemp(join(tmpdir(), "fake-gh-responses-"));
-    await cp(SHARED_RESPONSES, responses, { recursive: true });
-    const title = "Fix $& and $' and $1 in the shell";
-    await writeFile(
-      join(responses, "search-opened.json"),
-      JSON.stringify({
-        json: {
-          data: {
-            search: {
-              nodes: [
-                {
-                  number: 20,
-                  title,
-                  url: "https://github.example.com/acme/widgets/pull/20",
-                  isDraft: false,
-                  state: "OPEN",
-                  updatedAt: "2026-10-30T01:00:00Z",
-                  author: { login: "example-user" },
-                  headRefName: "feature/own",
-                  baseRefName: "main",
-                  reviewDecision: null,
-                  labels: { nodes: [] },
-                  commits: { nodes: [] },
-                },
-              ],
-            },
-          },
-        },
-      }),
-      "utf8",
-    );
-    const gh = await fakeGhFixture({ responsesDir: responses });
-    const { origin } = await boot({ githubPr: { writes: false, repos: ["acme/widgets"] }, gh });
-    expect((await get(origin, "/api/github/pr/list")).status).toBe(200);
-
-    const list = await get(origin, "/github/pr/");
-    const first = block(list.text, "github-pr-list-first") as {
-      sections: { key: string; prs: { number: number; title: string }[] }[];
-    };
-    const opened = first.sections.find((section) => section.key === "opened");
-    expect(opened?.prs[0]?.title).toBe(title);
-  }, 40_000);
+    const shell = "<head><!--MARK--></head>";
+    const block = `<script>{"title":"Fix $& and $' and $1 in the shell"}</script>`;
+    expect(fillMarker(shell, "<!--MARK-->", block)).toBe(`<head>${block}</head>`);
+    expect(fillMarker("<head></head>", "<!--MARK-->", block)).toBe("<head></head>");
+  });
 
   /* ---------------------------------------------------------------- reads */
 

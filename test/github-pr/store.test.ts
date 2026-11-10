@@ -474,25 +474,39 @@ describe("lock", () => {
     mkdirSync(second, { recursive: true });
 
     const events: string[] = [];
-    const work = (label: string, delay: number): Promise<void> =>
-      new Promise((resolve) => setTimeout(resolve, delay)).then(() => {
-        events.push(label);
+    // Each task ends when the test says so, so the order does not depend on wall time.
+    const gate = (): { open: () => void; opened: Promise<void> } => {
+      let open = (): void => {};
+      const opened = new Promise<void>((resolve) => {
+        open = resolve;
       });
+      return { open, opened };
+    };
+    const task = (label: string, hold: Promise<void>, started: () => void, ended: () => void) => async (): Promise<void> => {
+      events.push(`${label}:start`);
+      started();
+      await hold;
+      events.push(`${label}:end`);
+      ended();
+    };
+    const holdA = gate();
+    const holdC = gate();
+    const startedA = gate();
+    const startedC = gate();
+    const endedC = gate();
 
-    await Promise.all([
-      store.withLock(first, async () => {
-        events.push("a:start");
-        await work("a:end", 30);
-      }),
-      store.withLock(first, async () => {
-        events.push("b:start");
-        await work("b:end", 1);
-      }),
-      store.withLock(second, async () => {
-        events.push("c:start");
-        await work("c:end", 1);
-      }),
+    const all = Promise.all([
+      store.withLock(first, task("a", holdA.opened, startedA.open, () => {})),
+      store.withLock(first, task("b", Promise.resolve(), () => {}, () => {})),
+      store.withLock(second, task("c", holdC.opened, startedC.open, endedC.open)),
     ]);
+    await Promise.all([startedA.opened, startedC.opened]);
+    // The other repository's task finishes while the first task still holds its lock.
+    holdC.open();
+    await endedC.opened;
+    expect(events).not.toContain("b:start");
+    holdA.open();
+    await all;
 
     // The second task in the first repository waits for the first to finish; the
     // task in the other repository does not.
