@@ -234,45 +234,47 @@ describe("archive sweep", () => {
 describe("the report archive", () => {
   const ctx = BACKGROUND_CONTEXT;
 
-  it("carries the kind of a result report into the archive, with its Done and its text", async () => {
+  it("moves every field of a report into the archive, by either path", async () => {
     const harness = await createTestHarness();
     try {
       const { jobs, reports, archive } = harness.runtime;
       const job = await jobs.create(ctx, { title: "finished work" });
-      const report = await reports.create(ctx, {
-        jobId: job.id,
-        title: "Run log",
-        content: "# Run log\n",
-        kind: "result",
-      });
-      const done = await reports.approve(ctx, report.id, 1, { via: "panel", button: "done", text: "run it again" });
-      expect(done.ok).toBe(true);
-      await jobs.update(ctx, job.id, { status: "done" });
-
-      await archive.sweep(ctx, 0);
-
-      const archived = await reports.getArchived(ctx, report.id);
-      // The kind travels with the report, as the flag does: an archived result
-      // report read back is the same report, with the approval its revision took.
-      expect(archived?.kind).toBe("result");
-      expect(archived?.versions[0]?.approval).toMatchObject({ button: "done", text: "run it again" });
-    } finally {
-      await harness.close();
-    }
-  });
-
-  it("leaves a plan's kind absent, so it reads as a plan after the move", async () => {
-    const harness = await createTestHarness();
-    try {
-      const { jobs, reports, archive } = harness.runtime;
-      const job = await jobs.create(ctx, { title: "finished work" });
+      const result = await reports.create(ctx, { jobId: job.id, title: "Run log", content: "# Run log\n", kind: "result", note: "first" });
       const plan = await reports.create(ctx, { jobId: job.id, title: "Plan", content: "# Plan\n" });
+      expect((await reports.approve(ctx, result.id, 1, { via: "panel", button: "done", text: "run it again" })).ok).toBe(true);
+      await reports.addFeedback(ctx, result.id, { body: "the count is off", version: 1 });
+      expect((await reports.setPending(ctx, result.id, false, { answer: "fixed" })).ok).toBe(true);
+      expect((await reports.setPending(ctx, result.id, true)).ok).toBe(true);
+      const before = (await reports.get(ctx, result.id))!;
+      const planBefore = (await reports.get(ctx, plan.id))!;
+      // Every optional field is set on the result report, so a missing copy shows.
+      expect(before.kind).toBe("result");
+      expect(before.pendingAt).toBeTypeOf("number");
+      expect(before.answeredAt).toBeTypeOf("number");
+      expect(before.versions[0]?.approval).toMatchObject({ button: "done", text: "run it again" });
+      expect(planBefore.kind).toBeUndefined();
       await jobs.update(ctx, job.id, { status: "done" });
 
       await archive.sweep(ctx, 0);
 
-      expect((await reports.getArchived(ctx, plan.id))?.kind).toBeUndefined();
+      expect(await reports.getArchived(ctx, result.id)).toStrictEqual(before);
+      expect(await reports.getArchived(ctx, plan.id)).toStrictEqual(planBefore);
       expect(reportKind((await reports.getArchived(ctx, plan.id))!)).toBe("plan");
+
+      // The briefing path copies the same record and adds the time it left.
+      const briefingJob = await jobs.create(ctx, { title: "briefings" });
+      const old = await reports.create(ctx, { jobId: briefingJob.id, title: "Briefing one", content: "one\n", kind: "briefing" });
+      await reports.addFeedback(ctx, old.id, { body: "thanks", version: 1 });
+      expect((await reports.setPending(ctx, old.id, false, { answer: "noted" })).ok).toBe(true);
+      const oldBefore = (await reports.get(ctx, old.id))!;
+      expect(oldBefore.answeredAt).toBeTypeOf("number");
+      await reports.create(ctx, { jobId: briefingJob.id, title: "Briefing two", content: "two\n", kind: "briefing" });
+
+      const archivedBriefing = (await reports.getArchived(ctx, old.id))!;
+      expect(archivedBriefing.archivedAt).toBeTypeOf("number");
+      const { archivedAt, ...rest } = archivedBriefing;
+      expect(archivedAt).toBeGreaterThan(0);
+      expect(rest).toStrictEqual(oldBefore);
     } finally {
       await harness.close();
     }

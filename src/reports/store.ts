@@ -343,6 +343,18 @@ function plain<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+/**
+ * The one copier of a live report record into an archived one, used by both
+ * archive paths. It copies every field the live record holds, so a field that a
+ * later change adds travels into the archive with no edit here. The records
+ * carry the kind, the revisions with their approvals, the feedback, the
+ * set-aside time and the answer time, and an archived report read back is the
+ * same report it was.
+ */
+function copyReportToArchive(draft: ReportRecord, report: ReportRecord): void {
+  Object.assign(draft, plain(report));
+}
+
 function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -998,20 +1010,10 @@ export class ReportStore {
     await this.archiveSession.commit(async (tx) => {
       for (const report of earlier) {
         const draft = await tx.doc(SecReport, report.id, report.id);
-        draft.id = report.id;
-        draft.jobId = report.jobId;
-        draft.name = report.name;
-        draft.title = report.title;
-        if (report.kind !== undefined) draft.kind = report.kind;
-        draft.versions = report.versions.map((version) => ({ ...version }));
-        draft.feedback = report.feedback.map((entry) => ({ ...entry }));
-        if (report.pendingAt !== undefined) draft.pendingAt = report.pendingAt;
-        if (report.answeredAt !== undefined) draft.answeredAt = report.answeredAt;
+        copyReportToArchive(draft, report);
         // The one field this path adds: the record itself says it left the live
         // store, because no job change says it.
         draft.archivedAt = at;
-        draft.createdAt = report.createdAt;
-        draft.updatedAt = report.updatedAt;
       }
       for (const item of notices) {
         const draft = await tx.doc(SecInbox, item.id, item.id);
@@ -1068,21 +1070,7 @@ export class ReportStore {
     await this.archiveSession.commit(async (tx) => {
       for (const report of reports) {
         const draft = await tx.doc(SecReport, report.id, report.id);
-        draft.id = report.id;
-        draft.jobId = report.jobId;
-        draft.name = report.name;
-        draft.title = report.title;
-        // The kind travels with the report, as its flag does: an archived report
-        // read back is the same report it was, with the buttons it had.
-        if (report.kind !== undefined) draft.kind = report.kind;
-        draft.versions = report.versions.map((version) => ({ ...version }));
-        draft.feedback = report.feedback.map((entry) => ({ ...entry }));
-        // The set-aside flag travels with the report. It stops being shown once
-        // the job it belongs to is retired, but the record keeps it: an archived
-        // report that is read back is the same report it was.
-        if (report.pendingAt !== undefined) draft.pendingAt = report.pendingAt;
-        draft.createdAt = report.createdAt;
-        draft.updatedAt = report.updatedAt;
+        copyReportToArchive(draft, report);
       }
     }, context);
 

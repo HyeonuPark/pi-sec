@@ -713,20 +713,16 @@ describe("report store", () => {
     expect(await h.runtime.reports.list(ctx)).toEqual([]);
   });
 
-  it("carries an approval into the archive with the report", async () => {
+  it("answers not_found to an approve on an archived report", async () => {
     const h = await boot();
     const { jobs, reports, archive } = h.runtime;
     const job = await jobs.create(ctx, { title: "finished work" });
     const report = await reports.create(ctx, { jobId: job.id, title: "Handover", content: "# Handover\n" });
-    const approval = approved(await reports.approve(ctx, report.id, 1, { via: "panel" })).approval;
+    approved(await reports.approve(ctx, report.id, 1, { via: "panel" }));
     await jobs.update(ctx, job.id, { status: "done" });
 
     await archive.sweep(ctx, 0);
 
-    expect((await reports.getArchived(ctx, report.id))?.versions[0]?.approval).toMatchObject({
-      via: "panel",
-      sha256: approval.sha256,
-    });
     // An archived report is the record of finished work, not a surface to confirm
     // anything on, so it is not found here.
     expect(await reports.approve(ctx, report.id, 1, { via: "viewer" })).toEqual({ ok: false, reason: "not_found" });
@@ -884,7 +880,6 @@ describe("report pending", () => {
     await archive.sweep(ctx, 0);
 
     const archived = await reports.getArchived(ctx, report.id);
-    expect(archived?.pendingAt).toBeGreaterThan(0);
     expect(reportStanding(archived!, undefined)).toBe("archived");
   });
 
