@@ -24,6 +24,7 @@ import { defaultConfig, type Config } from "../src/config/schema.ts";
 import { SecAsyncCall } from "../src/documents.ts";
 import { NEVER_MOVED, backgroundCheckText, createAsyncToolsExtension, movedCallText } from "../src/extensions/async-tools.ts";
 import type { ExtensionContext } from "../src/extensions/context.ts";
+import { scanDocumentKeys } from "../src/runtime/storage.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 
 /**
@@ -391,11 +392,43 @@ describe("what is never moved", () => {
     expect(JSON.stringify(result)).toContain("plain result");
   });
 
-  it("does not wrap the calls a script makes, because the script is one unit", () => {
-    const config = defaultConfig();
-    const context = { getConfig: () => config, toolNames: () => ["bash"] } as unknown as ExtensionContext;
-    const extension = createAsyncToolsExtension(context);
-    expect(extension.wraps?.length).toBe(1);
+  it("does not move a call that a script or a background call makes", { timeout: 30_000 }, async () => {
+    open = await boot({
+      tools: { backgroundAfterMs: 100, backgroundCheckMs: 0 },
+      responses: [
+        fauxAssistantMessage(
+          [fauxToolCall("js", { code: 'return await tools.bash({ command: "sleep 0.5; echo NESTED-OK" });' })],
+          { stopReason: "toolUse" },
+        ),
+        fauxAssistantMessage(
+          [fauxToolCall("async_call", { title: "bgdemo", tool: "bash", args: { command: "sleep 0.5; echo BACKGROUND-OK" } })],
+          { stopReason: "toolUse" },
+        ),
+        fauxAssistantMessage([fauxText("noted")]),
+      ],
+    });
+    await submit(open);
+    // The shell inside the script runs past the limit. If the wrapper moved it, the
+    // script's result would hold a placeholder and not the shell output.
+    const scriptResult = await until(async () => {
+      const found = (await entries(open!)).find((row) => row.kind === "pi.tool-result" && row.text.includes("NESTED-OK"));
+      return found;
+    }, "the script's result");
+    expect(scriptResult.text).not.toContain("moved to the background");
+    // The async_call shell runs past the limit too, and its result is the shell's.
+    const delivered = await until(async () => {
+      const found = (await entries(open!)).find((row) => row.kind === "pi.user" && row.text.includes("BACKGROUND-OK"));
+      return found;
+    }, "the background result");
+    expect(delivered.text).not.toContain("moved to the background");
+
+    // The async_call is the only record: neither shell was moved on its own.
+    const conversation = await conversationOf(open);
+    const keys = await scanDocumentKeys(open.runtime.storage, "sec.asyncCall", BACKGROUND_CONTEXT, {
+      kind: "conversation",
+      conversationId: conversation.id,
+    });
+    expect(keys).toEqual(["bgdemo"]);
   });
 });
 
