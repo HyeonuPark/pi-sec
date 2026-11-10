@@ -185,7 +185,9 @@ calls themselves.
   6. copies a model provider in: a compatible endpoint into `models.json`, or a
      provider extension into `~/.pi/sec/extensions/`. It signs nothing in, and
      points to the web UI's "Model login" panel instead;
-  7. runs `pi-sec models` and `pi-sec setup-model` to write the first vmodels;
+  7. writes the first vmodels with `pi-sec setup-model` only when the run names
+     `--provider` and `--model`, and otherwise leaves them to the web UI, which
+     writes them after the daemon starts;
   8. takes `--run systemd` or `--run manual`: a systemd **user** unit rendered
      from `user-tools/pi-sec.service`, or the command that runs
      `user-tools/run`.
