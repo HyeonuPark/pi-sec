@@ -34,28 +34,19 @@ function tokyo(iso: string): number {
 }
 
 describe("nextSweepAt", () => {
-  it("finds today's time when the clock is behind it", () => {
-    const at = nextSweepAt(tokyo("2026-10-31T04:59:00+09:00"), "05:00", TOKYO);
-    expect(at).toBe(tokyo("2026-10-31T05:00:00+09:00"));
-  });
-
-  it("answers the next day when the clock stands exactly on the time", () => {
+  it.each([
+    // [rule, now, time of day, answer, minutes away (only where the case checks it)]
+    ["finds today's time when the clock is behind it", "2026-10-31T04:59:00+09:00", "05:00", "2026-10-31T05:00:00+09:00", undefined],
     // Strictly after `now`: a timer re-armed at the instant it fired must not fire
     // again at once, and a restart inside the same second must not sweep twice.
-    const at = nextSweepAt(tokyo("2026-10-31T05:00:00+09:00"), "05:00", TOKYO);
-    expect(at).toBe(tokyo("2026-11-01T05:00:00+09:00"));
-  });
-
-  it("moves to tomorrow when today's time has passed", () => {
-    const at = nextSweepAt(tokyo("2026-10-31T05:00:01+09:00"), "05:00", TOKYO);
-    expect(at).toBe(tokyo("2026-11-01T05:00:00+09:00"));
-  });
-
-  it("crosses midnight for a time of day that is still before the clock", () => {
+    ["answers the next day when the clock stands exactly on the time", "2026-10-31T05:00:00+09:00", "05:00", "2026-11-01T05:00:00+09:00", undefined],
+    ["moves to tomorrow when today's time has passed", "2026-10-31T05:00:01+09:00", "05:00", "2026-11-01T05:00:00+09:00", undefined],
     // 23:30 now, 00:15 wanted: the answer is 45 minutes away, on the next date.
-    const at = nextSweepAt(tokyo("2026-10-31T23:30:00+09:00"), "00:15", TOKYO);
-    expect(at).toBe(tokyo("2026-11-01T00:15:00+09:00"));
-    expect(at - tokyo("2026-10-31T23:30:00+09:00")).toBe(45 * 60 * 1000);
+    ["crosses midnight for a time of day that is still before the clock", "2026-10-31T23:30:00+09:00", "00:15", "2026-11-01T00:15:00+09:00", 45],
+  ])("%s", (_rule, now, time, expected, minutesAway) => {
+    const at = nextSweepAt(tokyo(now), time, TOKYO);
+    expect(at).toBe(tokyo(expected));
+    if (minutesAway !== undefined) expect(at - tokyo(now)).toBe(minutesAway * 60 * 1000);
   });
 
   it("reads the time of day in the zone it is given, not in UTC", () => {

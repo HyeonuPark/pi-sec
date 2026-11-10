@@ -770,38 +770,24 @@ describe("routine-model.test.ts", () => {
       expect(validateScheduleFields(null, undefined, now)).toEqual({});
     });
 
-    it("refuses a time in the past, and allows one when the write edits a run that already fired", () => {
-      expect(() => validateScheduleFields(undefined, { at: now - 1, prompt: "run" }, now)).toThrow(
-        /must be in the future/,
-      );
+    const REFUSED: [string, unknown, unknown, RegExp][] = [
+      ["a time in the past", undefined, { at: now - 1, prompt: "run" }, /must be in the future/],
+      ["a cron with too few fields", { cron: "0 8 * *", prompt: "run" }, undefined, /routine\.cron cron must have 5 fields/],
+      ["a cron field out of range", { cron: "0 99 * * *", prompt: "run" }, undefined, /invalid cron field/],
+      ["a zone name that does not exist", { cron: "0 6 * * *", timezone: "Mars/Olympus", prompt: "run" }, undefined, /is not a time zone/],
+      ["an enum value", { cron: "0 6 * * *", prompt: "run", catchUp: "maybe" }, undefined, /catchUp must be one of skip, once, all/],
+      ["a non-boolean enabled", { cron: "0 6 * * *", prompt: "run", enabled: "yes" }, undefined, /enabled must be a boolean/],
+      ["a once state outside the four", undefined, { at: now + 1000, prompt: "run", state: "waiting" }, /state must be one of pending, done, cancelled, missed/],
+      ["a routine without a prompt", { cron: "0 6 * * *" }, undefined, /prompt must be a non-empty string/],
+    ];
+    it.each(REFUSED)("refuses %s", (_what, routine, once, message) => {
+      expect(() => validateScheduleFields(routine as never, once as never, now)).toThrow(message);
+    });
+
+    it("allows a time in the past when the write edits a run that already fired", () => {
       expect(
         validateScheduleFields(undefined, { at: now - 1, prompt: "run" }, now, { requireFutureOnce: false }),
       ).toEqual({ once: { at: now - 1, prompt: "run" } });
-    });
-
-    it("parses the cron with the reconciler's own parser, so a stored value is one it can act on", () => {
-      expect(() => validateScheduleFields({ cron: "0 8 * *", prompt: "run" }, undefined, now)).toThrow(
-        /routine\.cron cron must have 5 fields/,
-      );
-      expect(() => validateScheduleFields({ cron: "0 99 * * *", prompt: "run" }, undefined, now)).toThrow(
-        /invalid cron field/,
-      );
-    });
-
-    it("refuses a zone name and an enum value the reconciler could not use", () => {
-      expect(() =>
-        validateScheduleFields({ cron: "0 6 * * *", timezone: "Mars/Olympus", prompt: "run" }, undefined, now),
-      ).toThrow(/is not a time zone/);
-      expect(() =>
-        validateScheduleFields({ cron: "0 6 * * *", prompt: "run", catchUp: "maybe" }, undefined, now),
-      ).toThrow(/catchUp must be one of skip, once, all/);
-      expect(() => validateScheduleFields({ cron: "0 6 * * *", prompt: "run", enabled: "yes" }, undefined, now)).toThrow(
-        /enabled must be a boolean/,
-      );
-      expect(() => validateScheduleFields(undefined, { at: now + 1000, prompt: "run", state: "waiting" }, now)).toThrow(
-        /state must be one of pending, done, cancelled, missed/,
-      );
-      expect(() => validateScheduleFields({ cron: "0 6 * * *" }, undefined, now)).toThrow(/prompt must be a non-empty string/);
     });
   });
 
