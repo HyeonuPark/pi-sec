@@ -118,37 +118,26 @@ describe("POST /api/remote-machines/:id/level", () => {
     expect(events.seen.length).toBeGreaterThan(0);
   });
 
-  it("refuses a body that is not JSON with 415", async () => {
-    const { origin } = await boot();
-    const answer = await post(origin, "/api/remote-machines/box-a/level", '{"level":"on"}', "text/plain");
-    expect(answer.status).toBe(415);
-    const body = (await answer.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("json_required");
-  });
-
-  it("refuses a level that is not one of the three words with 400", async () => {
-    const { origin } = await boot();
-    for (const level of ["maybe", "", 3, null, undefined]) {
-      const answer = await post(origin, "/api/remote-machines/box-a/level", { level });
-      expect(answer.status).toBe(400);
-      const body = (await answer.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("invalid_level");
-    }
+  // Each row is one old input: the case it came from, the boot options, the path, the body, the content type,
+  // the status, and the error code (null: the old case did not read the code).
+  const LEVEL = "/api/remote-machines/box-a/level";
+  const THREE_WORDS = "refuses a level that is not one of the three words with 400";
+  const REFUSALS: [string, Parameters<typeof boot>[0], string, unknown, string | undefined, number, string | null][] = [
+    ["refuses a body that is not JSON with 415", {}, LEVEL, '{"level":"on"}', "text/plain", 415, "json_required"],
+    ...["maybe", "", 3, null, undefined].map(
+      (level) => [THREE_WORDS, {}, LEVEL, { level }, undefined, 400, "invalid_level"] as const,
+    ),
     // A body that is not an object at all is the same refusal.
-    expect((await post(origin, "/api/remote-machines/box-a/level", "[]")).status).toBe(400);
-  });
+    [THREE_WORDS, {}, LEVEL, "[]", undefined, 400, null],
+    ["refuses a machine the config does not name with 404", {}, "/api/remote-machines/box-z/level", { level: "on" }, undefined, 404, "not_found"],
+    ["refuses the same path with 404 while the feature is off", { noFeature: true }, LEVEL, { level: "on" }, undefined, 404, null],
+  ];
 
-  it("refuses a machine the config does not name with 404", async () => {
-    const { origin } = await boot();
-    const answer = await post(origin, "/api/remote-machines/box-z/level", { level: "on" });
-    expect(answer.status).toBe(404);
-    const body = (await answer.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("not_found");
-  });
-
-  it("refuses the same path with 404 while the feature is off", async () => {
-    const { origin } = await boot({ noFeature: true });
-    expect((await post(origin, "/api/remote-machines/box-a/level", { level: "on" })).status).toBe(404);
+  it.each(REFUSALS)("%s (row %#)", async (_oldCase, options, path, body, contentType, status, code) => {
+    const { origin } = await boot(options);
+    const answer = await post(origin, path, body, contentType);
+    expect(answer.status).toBe(status);
+    if (code !== null) expect(((await answer.json()) as { error: { code: string } }).error.code).toBe(code);
   });
 
   it("keeps the level when the same one is chosen again, and sends no second event", async () => {

@@ -192,54 +192,52 @@ describe("registry paths", () => {
   });
 });
 
+type BuildRules = Parameters<typeof resolveBuildDirs>[2];
+const NPM = { dir: "node_modules", lockfile: "package-lock.json", install: ["npm", "ci"] };
+const GO_RULE = { dir: "vendor", lockfile: "go.sum", install: ["go", "mod", "download"] };
+const SHARED_RULES: BuildRules = [GO_RULE, { repo: "acme/widget", dir: "dist", install: ["./build.sh"] }];
+const CASE_RULES: BuildRules = [{ repo: "Acme/Widget", dir: "out", install: ["make"] }];
+const PNPM_RULES: BuildRules = [
+  { dir: "node_modules", lockfile: "pnpm-lock.yaml", install: ["pnpm", "install", "--frozen-lockfile"] },
+];
+
+// Each row is one old case input: its name, the repository, the lockfiles present, the rules, and the whole result.
+const BUILD_DIR_ROWS: [string, string, string[], BuildRules, unknown[]][] = [
+  ["takes one directory for each lockfile that is present", "local/app", ["package-lock.json"], [], [NPM]],
+  [
+    "takes one directory for each lockfile that is present",
+    "local/app",
+    ["package-lock.json", "Cargo.lock"],
+    [],
+    [NPM, { dir: "target", lockfile: "Cargo.lock" }],
+  ],
+  ["takes one directory for each lockfile that is present", "local/app", [], [], []],
+  [
+    "applies a rule to one repository or to all of them",
+    "acme/widget",
+    ["go.sum", "package-lock.json"],
+    SHARED_RULES,
+    [NPM, GO_RULE, { dir: "dist", install: ["./build.sh"] }],
+  ],
+  ["applies a rule to one repository or to all of them", "local/app", ["go.sum"], SHARED_RULES, [GO_RULE]],
+  ["compares the repository of a rule without regard to case", "acme/widget", [], CASE_RULES, [{ dir: "out", install: ["make"] }]],
+  ["compares the repository of a rule without regard to case", "local/app", [], CASE_RULES, []],
+  ["lets a rule replace a built-in directory", "local/app", ["pnpm-lock.yaml"], PNPM_RULES, PNPM_RULES],
+  // The replacement decides. Without its own lockfile it does not apply, and
+  // the npm rule it replaced does not come back.
+  ["lets a rule replace a built-in directory", "local/app", ["package-lock.json"], PNPM_RULES, []],
+  [
+    "keeps a rule whose lockfile is absent out of the result",
+    "local/app",
+    ["uv.lock"],
+    [{ dir: "vendor", lockfile: "go.sum" }],
+    [{ dir: ".venv", lockfile: "uv.lock", install: ["uv", "sync"] }],
+  ],
+];
+
 describe("build directories a worktree needs", () => {
-  it("takes one directory for each lockfile that is present", () => {
-    expect(resolveBuildDirs("local/app", ["package-lock.json"], [])).toEqual([
-      { dir: "node_modules", lockfile: "package-lock.json", install: ["npm", "ci"] },
-    ]);
-    expect(resolveBuildDirs("local/app", ["package-lock.json", "Cargo.lock"], [])).toEqual([
-      { dir: "node_modules", lockfile: "package-lock.json", install: ["npm", "ci"] },
-      { dir: "target", lockfile: "Cargo.lock" },
-    ]);
-    expect(resolveBuildDirs("local/app", [], [])).toEqual([]);
-  });
-
-  it("applies a rule to one repository or to all of them", () => {
-    const rules = [
-      { dir: "vendor", lockfile: "go.sum", install: ["go", "mod", "download"] },
-      { repo: "acme/widget", dir: "dist", install: ["./build.sh"] },
-    ];
-    expect(resolveBuildDirs("acme/widget", ["go.sum", "package-lock.json"], rules).map((e) => e.dir)).toEqual([
-      "node_modules",
-      "vendor",
-      "dist",
-    ]);
-    expect(resolveBuildDirs("local/app", ["go.sum"], rules).map((e) => e.dir)).toEqual(["vendor"]);
-  });
-
-  it("compares the repository of a rule without regard to case", () => {
-    const rules = [{ repo: "Acme/Widget", dir: "out", install: ["make"] }];
-    expect(resolveBuildDirs("acme/widget", [], rules).map((e) => e.dir)).toEqual(["out"]);
-    expect(resolveBuildDirs("local/app", [], rules)).toEqual([]);
-  });
-
-  it("lets a rule replace a built-in directory", () => {
-    const rules = [
-      { dir: "node_modules", lockfile: "pnpm-lock.yaml", install: ["pnpm", "install", "--frozen-lockfile"] },
-    ];
-    expect(resolveBuildDirs("local/app", ["pnpm-lock.yaml"], rules)).toEqual([
-      { dir: "node_modules", lockfile: "pnpm-lock.yaml", install: ["pnpm", "install", "--frozen-lockfile"] },
-    ]);
-    // The replacement decides. Without its own lockfile it does not apply, and
-    // the npm rule it replaced does not come back.
-    expect(resolveBuildDirs("local/app", ["package-lock.json"], rules)).toEqual([]);
-  });
-
-  it("keeps a rule whose lockfile is absent out of the result", () => {
-    const rules = [{ dir: "vendor", lockfile: "go.sum" }];
-    expect(resolveBuildDirs("local/app", ["uv.lock"], rules)).toEqual([
-      { dir: ".venv", lockfile: "uv.lock", install: ["uv", "sync"] },
-    ]);
+  it.each(BUILD_DIR_ROWS)("%s (row %#)", (_oldCase, repo, lockfiles, rules, expected) => {
+    expect(resolveBuildDirs(repo, lockfiles, rules)).toEqual(expected);
   });
 });
 
@@ -314,32 +312,15 @@ describe("the registry settings key", () => {
     });
   });
 
-  it("refuses a mode that is not one of the four", async () => {
-    const error = await refusal({ version: 1, timezone: "UTC", registry: { mode: "hardlink" } });
-    expect(error.issues.join("\n")).toContain("/registry/mode");
-  });
-
-  it("refuses a keep count below one and a refresh period of zero", async () => {
-    expect((await refusal({ version: 1, timezone: "UTC", registry: { cacheKeep: 0 } })).issues.join("\n")).toContain(
-      "/registry/cacheKeep",
-    );
-    expect(
-      (await refusal({ version: 1, timezone: "UTC", registry: { refreshHours: 0 } })).issues.join("\n"),
-    ).toContain("/registry/refreshHours");
-  });
-
-  it("refuses a build directory that leaves the cache folder", async () => {
-    const error = await refusal({
-      version: 1,
-      timezone: "UTC",
-      registry: { buildDirs: [{ dir: "../outside" }] },
-    });
-    expect(error.issues.join("\n")).toContain("/registry/buildDirs/0/dir");
-  });
-
-  it("refuses a registry key it does not know", async () => {
-    const error = await refusal({ version: 1, timezone: "UTC", registry: { mode: "copy", extra: true } });
-    expect(error.issues.join("\n")).toContain("/registry");
+  it.each([
+    ["a mode that is not one of the four", { mode: "hardlink" }, "/registry/mode"],
+    ["a keep count below one", { cacheKeep: 0 }, "/registry/cacheKeep"],
+    ["a refresh period of zero", { refreshHours: 0 }, "/registry/refreshHours"],
+    ["a build directory that leaves the cache folder", { buildDirs: [{ dir: "../outside" }] }, "/registry/buildDirs/0/dir"],
+    ["a registry key it does not know", { mode: "copy", extra: true }, "/registry"],
+  ])("refuses %s (row %#)", async (_what, registry, path) => {
+    const error = await refusal({ version: 1, timezone: "UTC", registry });
+    expect(error.issues.join("\n")).toContain(path);
   });
 });
 
