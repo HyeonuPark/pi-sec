@@ -707,6 +707,48 @@ describe("a folded stretch", () => {
   });
 });
 
+describe("a review link into a file with no content", () => {
+  it("a review link does not open a stretch of a file with no content", async () => {
+    const answer = diffAnswer({
+      files: [
+        {
+          path: "src/huge.ts",
+          oldPath: "src/huge.ts",
+          status: "M",
+          binary: false,
+          hunks: [
+            { oldStart: 50010, oldLines: 2, newStart: 50010, newLines: 2, section: "", lines: [line("del", "old"), line("add", "new")] },
+          ],
+          additions: 1,
+          deletions: 1,
+          oldContent: null,
+          newContent: null,
+        },
+      ],
+    });
+    // A comment from an older head, on a line inside the stretch above the hunk.
+    const server = draftServer({
+      comments: [saved("deep", { path: "src/huge.ts", line: 100, headSha: OLD_HEAD, anchor: { first: "gone", last: "gone" } })],
+    });
+    const page = await openDiff({
+      replies: { [PR_PATH]: { body: prAnswer() }, [DIFF_PATH]: { body: answer }, [DRAFT_PATH]: server.reply },
+    });
+    try {
+      const before = numbersIn(page.document, 0, "right").length;
+      await click(page, ".review-bar-btn");
+      await click(page, '[data-link-id="deep"]');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      // The page has no lines for the stretch, so it draws none: no blank numbered rows.
+      expect(numbersIn(page.document, 0, "right")).toHaveLength(before);
+      const row = page.document.querySelector('[data-pending-id="deep"]') as HTMLElement | null;
+      // The comment sits at the top of its file, where a comment with no drawn line goes.
+      expect(row?.style.getPropertyValue("--row")).toBe("1");
+    } finally {
+      page.close();
+    }
+  });
+});
+
 describe("the tab's own copy of a diff", () => {
   it("is drawn before the server answers, and the read still runs", async () => {
     const page = await openDiff({
@@ -1499,6 +1541,99 @@ describe("one commit's diff", () => {
       expect(page.calls.map((call) => call.path).sort()).toEqual([DIFF_PATH, DRAFT_PATH, PR_PATH].sort());
       expect(page.document.querySelector(".diff-head-title")?.textContent).toBe("Fix the flux capacitor");
       expect(page.document.querySelector(".commit-head")).toBeNull();
+    } finally {
+      page.close();
+    }
+  });
+});
+
+/** The review route answers when the test says so; `release` ends the wait. */
+function heldReview(page: Page, answer: Answer): { release: () => void } {
+  const held = { release: (): void => {} };
+  page.respond(REVIEW_PATH, () => new Promise<Answer>((resolve) => {
+    held.release = () => resolve(answer);
+  }));
+  return held;
+}
+
+describe("a review that is being sent", () => {
+  it("keeps a comment that the reader writes while the review is being sent", async () => {
+    const server = draftServer();
+    const page = await pagewith(server);
+    try {
+      await collectOn(page, 11, "in the review");
+      // A box is open with text in it when the reader presses Submit review.
+      await dragLines(page, 1, "RIGHT", 13, 13);
+      const field = page.document.querySelector('.split-grid[data-idx="1"] .review-form textarea');
+      if (!(field instanceof page.window.HTMLTextAreaElement)) throw new Error("no comment field");
+      await type(page, field, "written during the send");
+      const held = heldReview(page, { body: { ok: true } });
+      await click(page, ".review-bar-btn");
+      await click(page, ".review-panel .review-submit");
+      await page.settle();
+
+      // During the wait, Add to review and a new selection do nothing.
+      await click(page, '.split-grid[data-idx="1"] .review-form .submit-btn');
+      await dragLines(page, 1, "RIGHT", 12, 12);
+      expect(page.document.querySelectorAll(".pending-row")).toHaveLength(1);
+      expect((page.document.querySelector('.split-grid[data-idx="1"] .review-form textarea') as HTMLTextAreaElement | null)?.value).toBe("written during the send");
+
+      held.release();
+      await page.settle();
+      expect(page.document.querySelectorAll(".pending-row")).toHaveLength(0);
+      // The box kept its text, so the reader can add it now.
+      await click(page, '.split-grid[data-idx="1"] .review-form .submit-btn');
+      expect([...page.document.querySelectorAll(".pending-body")].map((node) => node.textContent)).toContain("written during the send");
+    } finally {
+      page.close();
+    }
+  });
+
+  it("does not let the review change while it is being sent", async () => {
+    const server = draftServer();
+    const page = await pagewith(server);
+    try {
+      await collectOn(page, 11, "one");
+      const held = heldReview(page, { status: 502, body: { error: "gh: review could not be created" } });
+      await click(page, ".review-bar-btn");
+      await click(page, ".review-panel .review-submit");
+      await page.settle();
+
+      const locked = (): boolean[] => [
+        ".review-panel .review-summary",
+        '.review-panel input[name="review-event"]',
+        ".review-panel .review-discard",
+      ].map((selector) => (page.document.querySelector(selector) as HTMLButtonElement | null)?.disabled ?? false);
+      expect(locked()).toEqual([true, true, true]);
+      await click(page, ".review-panel .review-discard");
+      expect(page.document.querySelectorAll(".pending-row")).toHaveLength(1);
+
+      held.release();
+      await page.settle();
+      expect(locked()).toEqual([false, false, false]);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("keeps a comment that the server's list brought in during the submit", async () => {
+    const server = draftServer();
+    const page = await pagewith(server);
+    try {
+      await collectOn(page, 11, "mine");
+      // Another tab saved one more comment, and an overall comment waits in the queue.
+      server.draft.comments.push(saved("other", { line: 12, anchor: { first: "  return a;", last: "  return a;" } }));
+      await click(page, ".review-bar-btn");
+      const summary = page.document.querySelector(".review-panel .review-summary");
+      if (!(summary instanceof page.window.HTMLTextAreaElement)) throw new Error("no summary field");
+      await type(page, summary, "overall");
+      page.respond(REVIEW_PATH, { body: { ok: true } });
+      await click(page, ".review-panel .review-submit");
+
+      const sent = JSON.parse(page.calls.find((call) => call.path === REVIEW_PATH)?.body ?? "null");
+      expect(sent.comments.map((comment: { body: string }) => comment.body)).toEqual(["mine"]);
+      // The other comment was not in the review, so it stays on the page.
+      expect([...page.document.querySelectorAll(".pending-body")].map((node) => node.textContent)).toEqual(["body of other"]);
     } finally {
       page.close();
     }

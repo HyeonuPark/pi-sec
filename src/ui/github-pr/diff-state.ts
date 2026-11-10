@@ -380,7 +380,8 @@ export function revealGap(index: number, gap: number, action: RevealAction): voi
   const row = revealRows(file, {}).find(
     (entry): entry is GapRow => entry.kind === "gap" && entry.gap === gap,
   );
-  if (row === undefined) return;
+  // A stretch of a file whose content the server did not send has no lines to draw.
+  if (row === undefined || !row.expandable) return;
   const key = `${index}:${gap}`;
   const current = revealed.value[key] ?? { down: 0, up: 0 };
   const next = nextReveal(row, current, action);
@@ -400,7 +401,7 @@ export function revealedOf(index: number): Readonly<Record<string, RevealedGap>>
 
 /** Begin a drag on one line number, and drop the comment box that was open. */
 export function beginSelection(index: number, side: DiffSide, line: number): void {
-  if (!writes) return;
+  if (!writes || submitting.value) return;
   openForm.value = null;
   drag.value = { index, side, anchor: line, end: line };
 }
@@ -439,7 +440,9 @@ export function cancelForm(): void {
 /** Collect the comment that was written, and close the box. */
 export function collectComment(body: string): boolean {
   const form = openForm.value;
-  if (form === null || body.trim() === "") return false;
+  // While a review is being sent the collection stays as the review took it. The
+  // box keeps its text, and the reader adds it after the send.
+  if (form === null || submitting.value || body.trim() === "") return false;
   const diff = answer.value;
   const file = diff?.files[form.index];
   if (file === undefined) return false;
@@ -464,12 +467,14 @@ export function collectComment(body: string): boolean {
 
 /** Drop one collected comment, by its place in the collection. */
 export function removePending(index: number): void {
+  if (submitting.value) return;
   const id = pending.value[index]?.id;
   if (removePendingComment(index) && id !== undefined) saveRemove(id);
 }
 
 /** Throw the whole collection away. */
 export function discardPending(): void {
+  if (submitting.value) return;
   setPendingComments([]);
   reviewOpen.value = false;
   saveDiscard();
@@ -480,6 +485,7 @@ export function discardPending(): void {
 
 /** The overall comment changed: keep it on the page, and send it when typing stops. */
 export function setSummary(text: string): void {
+  if (submitting.value) return;
   reviewSummary.value = text;
   saveSummary(text);
 }
@@ -491,6 +497,7 @@ export function commitSummary(): void {
 
 /** The verdict changed. */
 export function setEvent(choice: ReviewEvent): void {
+  if (submitting.value) return;
   reviewEvent.value = choice;
   saveEvent(choice);
 }
@@ -598,7 +605,11 @@ export async function submit(): Promise<boolean> {
       draftCommentIds: comments.map((comment) => comment.id),
     });
     dropDraftQueue();
-    setPendingComments([]);
+    // Only the comments that were sent leave the page. The list can have changed
+    // since: `settleDraft` brings in the server's list, and those comments were not
+    // part of this review.
+    const sent = new Set(comments.map((comment) => comment.id));
+    setPendingComments(pending.value.filter((comment) => !sent.has(comment.id)));
     reviewSummary.value = "";
     // The panel stays open, because the page does not navigate away and a note
     // inside a panel that just closed is a note nobody reads.

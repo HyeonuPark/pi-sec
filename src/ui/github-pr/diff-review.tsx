@@ -171,6 +171,7 @@ export function ReviewBar({
                   <button
                     class="btn review-missing-remove"
                     type="button"
+                    disabled={sending}
                     onClick={() => {
                       onRemove(link.index);
                     }}
@@ -188,6 +189,7 @@ export function ReviewBar({
           placeholder="Leave an overall comment (optional)…"
           aria-label="Overall comment"
           value={summary}
+          disabled={sending}
           onInput={(input) => {
             onSummary((input.target as HTMLTextAreaElement).value);
           }}
@@ -200,6 +202,7 @@ export function ReviewBar({
               name="review-event"
               value={choice.value}
               checked={event === choice.value}
+              disabled={sending}
               onChange={() => {
                 onEvent(choice.value);
               }}
@@ -209,7 +212,7 @@ export function ReviewBar({
         ))}
         {movedCount > 0 ? <div class="review-moved-count">{movedLabel(movedCount)}</div> : null}
         <div class="reply-actions">
-          <button class="btn review-discard" type="button" disabled={count === 0} onClick={onDiscard}>
+          <button class="btn review-discard" type="button" disabled={count === 0 || sending} onClick={onDiscard}>
             {count === 0 ? "Discard all" : `Discard all (${count})`}
           </button>
           <button class="btn btn-primary review-submit" type="button" disabled={sending} onClick={onSubmit}>

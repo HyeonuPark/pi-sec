@@ -1351,6 +1351,8 @@ in the review panel under `Comments on files not in this diff`, with a Remove
 button. The panel shows how many comments point at changed lines above Submit, and
 Submit sends them as they are.
 
+**The review cannot change while it is being sent.** From the press on Submit review until the answer arrives, the overall comment, the verdict, Discard all and the Remove buttons in the panel are disabled, and Add to review, a new line selection and Remove on a line comment do nothing. An open comment box keeps its text. A success removes only the comments that the review carried, so a comment that another tab saved in the meantime stays pending.
+
 **The review panel links to each comment.** Between the count and the overall
 comment the panel lists one button for each comment, in the order of the diff. Its
 text is the path, the side and lines, and the first 60 characters of the body. A
@@ -1426,6 +1428,8 @@ button, no "Resolve conversation" button, no Edit button and no line selection w
 does when the block is missing or unreadable: a control that the server refuses is
 not drawn. The side that reads is unaffected, so a reaction count and a CI mark
 still appear.
+
+**A reply leaves its box once GitHub took it.** The reply box empties when the write succeeds, also when the read of the pull request after it fails. That failure shows its sentence in the strip and does not bring the text back, so a second press cannot post the reply twice. A refusal by GitHub keeps the text in the box.
 
 **The description and the account's own comments can be edited.** The header of
 the description card, of a conversation comment and of a comment inside a review
