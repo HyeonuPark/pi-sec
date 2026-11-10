@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -320,6 +320,37 @@ describe("validation gate", () => {
     expect(change.text).toContain("committed-marker");
     expect(change.text).toContain("uncommitted-marker");
     expect(change.text).toContain("untracked-marker");
+  });
+
+  it("reads an untracked file whose name is Korean", async () => {
+    const { workspace, snapshot } = await trees();
+    await writeFile(join(workspace, "한글-이름.ts"), "export const k = 'korean-name-marker';\n");
+
+    const change = await collectChangeText(workspace, snapshot);
+
+    expect(change.problem).toBeUndefined();
+    expect(change.text).toContain("korean-name-marker");
+  });
+
+  it.skipIf(process.getuid?.() === 0)("fails when an untracked file cannot be read", async () => {
+    const { workspace, snapshot } = await trees();
+    const locked = join(workspace, "locked-file.ts");
+    await writeFile(locked, "export const l = 1;\n");
+    await chmod(locked, 0o000);
+
+    const change = await collectChangeText(workspace, snapshot);
+
+    expect(change.text).toBeUndefined();
+    expect(change.problem).toContain("locked-file.ts");
+  });
+
+  it("skips an untracked link whose target is missing", async () => {
+    const { workspace, snapshot } = await trees();
+    await symlink(join(workspace, "no-such-target"), join(workspace, "dangling-link"));
+
+    const change = await collectChangeText(workspace, snapshot);
+
+    expect(change.problem).toBeUndefined();
   });
 
   it("reads a committed change in full, past the length a tool result keeps", async () => {

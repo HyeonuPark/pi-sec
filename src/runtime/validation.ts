@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { lstat, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -294,6 +294,20 @@ export interface ChangeTextOptions {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * Whether an untracked entry that could not be read holds no content: a symbolic
+ * link whose target does not exist, or one that names a directory, or a directory
+ * itself (git lists a nested repository that way).
+ */
+async function hasNoContent(path: string): Promise<boolean> {
+  const link = await lstat(path).catch(() => undefined);
+  if (link === undefined) return false;
+  if (link.isDirectory()) return true;
+  if (!link.isSymbolicLink()) return false;
+  const target = await stat(path).catch(() => undefined);
+  return target === undefined || target.isDirectory();
+}
+
 export async function collectChangeText(
   root: string,
   snapshotRoot: string,
@@ -315,18 +329,22 @@ export async function collectChangeText(
   if (!tracked.ok) return { problem: `git diff failed: ${tracked.output}` };
   if (tracked.truncated) return { problem: "the change is larger than the scan limit" };
 
-  const listed = await runCommand("git", ["ls-files", "--others", "--exclude-standard"], root, timeoutMs, signal, SCAN_LIMIT_BYTES, false);
+  const listed = await runCommand("git", ["ls-files", "-z", "--others", "--exclude-standard"], root, timeoutMs, signal, SCAN_LIMIT_BYTES, false);
   if (!listed.ok) return { problem: `git ls-files failed: ${listed.output}` };
   if (listed.truncated) return { problem: "the list of untracked files is larger than the scan limit" };
 
   const parts = [committed.output, tracked.output];
   let bytes = committed.output.length + tracked.output.length;
   if (bytes > SCAN_LIMIT_BYTES) return { problem: "the change is larger than the scan limit" };
-  for (const line of listed.output.split("\n")) {
-    const relative = line.trim();
+  // `-z` prints names raw and ends each with NUL, so a name with non-ASCII
+  // characters or a newline resolves as it is. A name is never trimmed.
+  for (const relative of listed.output.split("\0")) {
     if (relative === "") continue;
     const text = await readFile(join(root, relative), "utf8").catch(() => undefined);
-    if (text === undefined) continue;
+    if (text === undefined) {
+      if (await hasNoContent(join(root, relative))) continue;
+      return { problem: `cannot read the untracked file ${relative}, so the scan cannot cover it` };
+    }
     bytes += text.length;
     if (bytes > SCAN_LIMIT_BYTES) return { problem: "the change is larger than the scan limit" };
     parts.push(`${relative}\n${text}`);
