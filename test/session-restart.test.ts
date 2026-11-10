@@ -1019,6 +1019,37 @@ describe("restarting a session", () => {
     ).toBeUndefined();
   });
 
+  it("refuses to count a closed round, and leaves its record as the close wrote it", async () => {
+    const { test, conversation } = await withRestart();
+    await makeChild(test, conversation, "slow-one", "running");
+    await say(
+      test,
+      conversation,
+      [callTool("restart_cascade_start", { reason: "the prompt moved" }), ...answers()],
+      "open the round",
+    );
+    const round = await ledgerOf(test, conversation);
+    await say(
+      test,
+      conversation,
+      [callTool("restart_cascade_close", { roundId: round.roundId, note: "done" }), ...answers()],
+      "close the round",
+    );
+    const closedDoc = await ledgerOf(test, conversation);
+    const closedMirror = await mirrorOf(test, conversation);
+    expect(closedDoc.closedAt).toBeGreaterThan(0);
+
+    const counted = await say(
+      test,
+      conversation,
+      [callTool("restart_cascade_status", { roundId: round.roundId }), ...answers()],
+      "count the round",
+    );
+    expect(toolResult(rows(counted.entries))).toContain(`round "${round.roundId}" is already closed, so it is not counted again.`);
+    expect(await ledgerOf(test, conversation)).toEqual(closedDoc);
+    expect(await mirrorOf(test, conversation)).toEqual(closedMirror);
+  });
+
   it("counts a child whose log the scan could not finish as done without evidence", async () => {
     const { test, conversation } = await withRestart();
     const slow = await makeChild(test, conversation, "slow-one", "running");

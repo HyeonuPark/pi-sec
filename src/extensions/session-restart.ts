@@ -1116,6 +1116,9 @@ export function createSessionRestartExtension(
       if (snapshot.roundId !== args.roundId) {
         return text(`this conversation's recorded round is "${snapshot.roundId}", not "${args.roundId}".`, true);
       }
+      // A closed round keeps the verdicts its close recorded: counting it again
+      // would rewrite them and tell the owner to close what is already closed.
+      if (snapshot.closedAt !== 0) return text(`round "${args.roundId}" is already closed, so it is not counted again. Open a new round with \`restart_cascade_start\` when a new prompt has to reach your children.`, true);
 
       const checkedAt = Date.now();
       const verdicts = new Map<string, Verdict>();
@@ -1137,9 +1140,10 @@ export function createSessionRestartExtension(
       }
 
       const updated = await harness.commit(
-        async (tx): Promise<RestartRoundRecord | undefined> => {
+        async (tx): Promise<RestartRoundRecord | "closed" | undefined> => {
           const doc = await tx.doc(SecRestartRound, self, ROUND_KEY, ROUND_KEY);
           if (doc.roundId !== args.roundId || doc.startedAt === 0) return undefined;
+          if (doc.closedAt !== 0) return "closed";
           for (const target of doc.targets) {
             const verdict = verdicts.get(target.name);
             if (verdict === undefined) continue;
@@ -1161,6 +1165,7 @@ export function createSessionRestartExtension(
           true,
         );
       }
+      if (updated === "closed") return text(`round "${args.roundId}" is already closed, so it is not counted again. Open a new round with \`restart_cascade_start\` when a new prompt has to reach your children.`, true);
       await mirrorRound(context, String(self), updated);
 
       const targetList = updated.targets;
