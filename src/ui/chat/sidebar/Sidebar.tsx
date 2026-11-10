@@ -21,7 +21,7 @@
  * added after the page loaded appears without a reload.
  */
 import { h, type ComponentType } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { request } from "../../api/request.ts";
 import { at, mountAt } from "../../mount.ts";
 import { afterTheTask, isNarrow, setSidebar, sidebarIsOpen, sidebarMoved, watchWidth } from "../../state/panels.ts";
@@ -146,9 +146,13 @@ export function PagesRow() {
   // opens, the list is read again from the server, so a page an extension added
   // after this page loaded appears without a reload. A failed read keeps the list.
   const [links, setLinks] = useState<readonly PageLink[]>(() => [...PAGE_LINKS, ...extensionPageLinks()]);
+  // Each read takes a number. An answer replaces the list only while its number is
+  // the newest, so an older read that ends last never puts an older list back.
+  const newest = useRef(0);
   const refreshLinks = (): void => {
+    const mine = ++newest.current;
     void fetchExtensionPageLinks().then((fresh) => {
-      if (fresh !== undefined) setLinks([...PAGE_LINKS, ...fresh]);
+      if (mine === newest.current && fresh !== undefined) setLinks([...PAGE_LINKS, ...fresh]);
     });
   };
   // A press on a link is a press that leaves, so the row puts itself away. The

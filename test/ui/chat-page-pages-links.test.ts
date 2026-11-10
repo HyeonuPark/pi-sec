@@ -132,6 +132,41 @@ describe("the Pages menu reads the list again each time it opens", () => {
     expect(links(open).at(-1)!.getAttribute("href")).toBe("/sec/ext/host-status/");
   });
 
+  it("keeps the list of the newest read when an older read ends last", async () => {
+    let reads = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    open = await loadChatPage({
+      pagesLinks: [PRS],
+      fetch: {
+        "/api/ui/page-links": async () => {
+          reads += 1;
+          if (reads === 1) {
+            await held;
+            return { body: [PRS] };
+          }
+          return { body: [PRS, HOST] };
+        },
+      },
+    });
+    press(open, byId(open, "pages-toggle"));
+    await more(1);
+    press(open, byId(open, "pages-toggle"));
+    await more(1);
+    press(open, byId(open, "pages-toggle"));
+    await more(3);
+    expect(links(open).map((each) => each.textContent)).toEqual(["Reports", "Usage", "Chats", "PRs", "Host status"]);
+
+    // The first read answers last, with the list it saw before the server added
+    // the second link.
+    release();
+    await more(3);
+    expect(reads).toBe(2);
+    expect(links(open).map((each) => each.textContent)).toEqual(["Reports", "Usage", "Chats", "PRs", "Host status"]);
+  });
+
   it("keeps the list from the data block when the read fails or answers something else", async () => {
     for (const answer of [{ status: 500, body: { error: "x" } }, { body: "not a list" }, { body: {} }]) {
       open = await loadChatPage({ pagesLinks: [PRS], fetch: { "/api/ui/page-links": answer } });

@@ -419,4 +419,46 @@ describe("chat-side: a reconnect re-reads the open report panel", () => {
     expect(callsTo(ui, "/api/user-queries")).toHaveLength(2);
     expect(reportReads()).toBeGreaterThan(opened);
   });
+
+  it("keeps the newer revision when an older read of the same report ends last", async () => {
+    let reads = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ui = await loadChatPage({
+      fetch: {
+        "/api/inbox": { body: { items: [reportNotice()] } },
+        "/api/reports/r1": async () => {
+          reads += 1;
+          // The first read after the panel opened is the slow one, and it answers
+          // with the older revision.
+          if (reads === 2) {
+            await held;
+            return { body: reportRecord(1) };
+          }
+          return { body: reportRecord(2) };
+        },
+        "/api/reports/r1/versions/1": { text: "# Plan\n\nfirst revision" },
+        "/api/reports/r1/versions/2": { text: "# Plan\n\nsecond revision" },
+      },
+    });
+    open = ui;
+    ui.emit("snapshot", { entries: [] });
+    await more();
+    await openReportPanel(ui);
+    expect(reads).toBe(1);
+
+    // Two reconnects: the older read is still in flight when the newer one ends.
+    ui.emit("snapshot", { entries: [] });
+    await more();
+    ui.emit("snapshot", { entries: [] });
+    await more();
+    release();
+    await more();
+
+    expect(reads).toBe(3);
+    expect(byId(ui, "report-pane-body").textContent).toContain("second revision");
+    expect(byId(ui, "report-pane-body").textContent).not.toContain("first revision");
+  });
 });

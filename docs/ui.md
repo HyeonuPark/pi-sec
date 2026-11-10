@@ -837,7 +837,8 @@ server planted in the page, and the runtime extension links that declare
 `menu: true`. When the menu opens, it reads `GET /api/ui/page-links` and redraws
 the list. If the read fails, the menu keeps the list from the page's data block, so
 a page an extension added after the chat page loaded appears the next time the
-menu opens, without a reload.
+menu opens, without a reload. An older read that ends after a newer one does not
+replace the newer list.
 
 ---
 

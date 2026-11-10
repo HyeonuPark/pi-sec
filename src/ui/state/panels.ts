@@ -262,12 +262,20 @@ export function reportPaneIsOpen(): boolean {
 }
 
 /**
+ * Raised by each open of the report panel and by its close. A read writes its
+ * answer or its failure only while the serial is still its own, so an older read
+ * of the same report cannot bring an older revision back.
+ */
+let paneSerial = 0;
+
+/**
  * Close the report panel.
  *
  * The id goes with it, so a read still in flight fails its own guard instead of
  * opening the panel again on its own.
  */
 export function closeReportPane(doc: Document = document): void {
+  paneSerial += 1;
   if (!reportPaneIsOpen()) return;
   closePane(doc);
   reportPane.value = shutReportPane();
@@ -282,6 +290,7 @@ export function closeReportPane(doc: Document = document): void {
  * loading line, which is the one case where the panel had nothing to show.
  */
 export async function openReportPane(id: string, doc: Document = document): Promise<void> {
+  const mine = ++paneSerial;
   const same = reportPane.value.id === id && reportPane.value.text !== null;
   takeSlot("report", doc);
   // The same report read again keeps what is on screen until the new text lands.
@@ -291,7 +300,7 @@ export async function openReportPane(id: string, doc: Document = document): Prom
     const version = record.versions.length;
     const text = await requestText(`/api/reports/${encodeURIComponent(id)}/versions/${version}`);
     // Another report was opened, or this one was closed, while the reads ran.
-    if (reportPane.value.id !== id) return;
+    if (mine !== paneSerial || reportPane.value.id !== id) return;
     reportPane.value = {
       id,
       title: record.title,
@@ -309,7 +318,7 @@ export async function openReportPane(id: string, doc: Document = document): Prom
       },
     };
   } catch (error) {
-    if (reportPane.value.id !== id) return;
+    if (mine !== paneSerial || reportPane.value.id !== id) return;
     reportPane.value = { ...reportPane.value, failed: true, text: null, target: null };
     const reason = error instanceof ApiError ? error.message : String(error);
     showError(`Could not load the report: ${reason}`);
