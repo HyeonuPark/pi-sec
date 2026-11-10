@@ -23,7 +23,6 @@ import type { Config } from "../src/config/schema.ts";
 import { join } from "node:path";
 import { SUBAGENT_TOOL_REMOVALS, FOCUSED_CHAT_TOOLS } from "../src/agent/tool-profile.ts";
 import { NO_RESPONSE_MARKER, isSilentAssistantTurn } from "../src/shared/silent-turn.ts";
-import { isSilentAssistantTurn as pageJudgement } from "../src/ui/chat/transcript/envelope.ts";
 import { ENVELOPE_CLOSE, ENVELOPE_OPEN, MESSAGE_SOURCES, escapeBody, encodeAttribute, envelopeInstant, hasEnvelope, readMessage, sourceLabel, unescapeBody, wrapMessage } from "../src/message-envelope.ts";
 import { reviewInput } from "../src/review.ts";
 import { zoneIso, zoneMinute } from "../src/time-format.ts";
@@ -589,10 +588,6 @@ describe("silent-turn.test.ts", () => {
       for (const row of ROWS) {
         expect({ case: row.case, silent: isSilentAssistantTurn(row.text) }).toEqual({ case: row.case, silent: row.silent });
       }
-    });
-
-    it("is the same function the chat screen judges with", () => {
-      expect(pageJudgement).toBe(isSilentAssistantTurn);
     });
 
     it("names the line once, and the role file writes it on a line of its own", async () => {

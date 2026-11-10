@@ -17,12 +17,6 @@
  */
 import type { ConversationEntry } from "../../../shared/wire/conversation.ts";
 
-/**
- * The no-response line and the judgement of it, from the module the server reads too:
- * an answer whose whole text is that line, or nothing, draws no row.
- */
-export { NO_RESPONSE_MARKER, isSilentAssistantTurn } from "../../../shared/silent-turn.ts";
-
 const ENVELOPE_OPEN = "<pi-message";
 const ENVELOPE_CLOSE = "</pi-message>";
 /** The closing string without its `>`, which is the prefix the server escapes. */

@@ -17,7 +17,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { MESSAGE_SOURCES, wrapMessage, type MessageSource } from "../../src/message-envelope.ts";
 import { slimSnapshot } from "../../src/server/stream-entries.ts";
-import { isSilentAssistantTurn } from "../../src/ui/chat/transcript/envelope.ts";
+import { isSilentAssistantTurn } from "../../src/shared/silent-turn.ts";
 import { settle } from "./harness.ts";
 import { assistant, loadStreamPage, operatorMessage, toolResult, type StreamPage } from "./chat-stream-harness.ts";
 import { fullEntries } from "../stream-entries-fixture.ts";
