@@ -1187,6 +1187,23 @@ describe("secrets.test.ts", () => {
       expect(registry.redactor().redact("ghp_secret abc123")).toBe("\u27e6secret:gh_token\u27e7 \u27e6secret:EXAMPLE_KEY\u27e7");
     });
 
+    it("does not quote a malformed env line in a warning", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "pi-sec-secrets-"));
+      const madeUp = ["made", "up", "stray", "value"].join("-");
+      await writeFile(join(dir, "env"), `EXAMPLE_KEY=abc12345\n${madeUp}\n`);
+      const warnings: string[] = [];
+      const registry = new SecretRegistry({
+        dir,
+        includeModelCredentials: false,
+        onWarning: (message) => warnings.push(message),
+      });
+      await registry.load();
+      expect(registry.names()).toEqual(["EXAMPLE_KEY"]);
+      expect(warnings).toHaveLength(1);
+      expect(registry.diagnostics()).toHaveLength(1);
+      expect(JSON.stringify([warnings, registry.diagnostics()])).not.toContain(madeUp);
+    });
+
     it("registers credential material from auth.json, not its metadata", async () => {
       const dir = await mkdtemp(join(tmpdir(), "pi-sec-secrets-"));
       // Outside the store, or the store would register the whole file as one secret.

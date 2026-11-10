@@ -27,15 +27,24 @@
 // starts with `!` is not a word. It names one install value (see below) that the
 // scan does not search for, compared without case.
 //
+// An exception never removes a `secret-value` finding. It applies to words,
+// machine values, install values and shapes only, because a hidden secret value
+// is a leak.
+//
 // `--allow <file>`: one exception per line, as `<path or path glob>` TAB
 // `<JavaScript regex>`. Blank lines and lines starting with `#` are ignored. In
 // the first field `*` matches any run of characters except `/`, and `**`
 // matches any run of characters. A finding is skipped when its path matches the
-// first field and its line matches the second. The repository's own
+// first field and its line matches the second, unless the finding is a
+// `secret-value`. The repository's own
 // `scripts/scan-allow.txt` is always applied; this option adds files to it.
 //
 // `--secrets-dir <dir>`: every regular file in the directory holds one secret
-// value. Each value is searched for in the tree, and a hit prints the secret
+// value, except the file named `env`. The daemon registry reads `env` line by
+// line (`KEY=value`), and so does this script, with the same parser
+// (`src/secrets/env-file.ts`). A finding for a value of `env` names it
+// `env:<KEY>`. A malformed line of `env` is counted and never printed. A secret
+// file this script cannot read is a usage error. Each value is searched for in the tree, and a hit prints the secret
 // file's name and the location, never the value and never the matching line.
 // Values shorter than 8 characters are skipped, because they would match
 // everywhere. Without this option the scan reads the secrets directory of the
@@ -84,6 +93,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { hostname, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseEnvFile } from "../src/secrets/env-file.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** The repository's own exceptions, applied to every run. */
@@ -415,7 +425,7 @@ async function walkedFiles(root) {
     try {
       entries = await readdir(directory, { withFileTypes: true });
     } catch {
-      return;
+      throw new UsageError(`cannot read the directory ${directory}`);
     }
     entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
     for (const entry of entries) {
@@ -439,13 +449,13 @@ async function inputFiles(root) {
   return tracked.filter((path) => !path.split("/").some((segment) => SKIP_DIRS.has(segment)));
 }
 
-/** One file's text, or `undefined` when it is binary or cannot be read. */
+/** One file's text, or `undefined` when it is binary. A file that cannot be read is a usage error. */
 async function readText(path) {
   let buffer;
   try {
     buffer = await readFile(path);
   } catch {
-    return undefined;
+    throw new UsageError(`cannot read the input file ${path}`);
   }
   const probe = buffer.subarray(0, BINARY_PROBE_BYTES);
   if (probe.includes(0)) return undefined;
@@ -473,18 +483,28 @@ async function readSecrets(directory) {
   entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
   const values = [];
   let short = 0;
+  let malformed = 0;
   for (const entry of entries) {
     if (!entry.isFile()) continue;
-    const raw = await readFile(join(directory, entry.name), "utf8").catch(() => undefined);
-    if (raw === undefined) continue;
-    const value = raw.replace(/\r?\n$/, "");
-    if (value.length < MIN_SECRET_LENGTH) {
-      short += 1;
-      continue;
+    const raw = await readFile(join(directory, entry.name), "utf8").catch(() => {
+      throw new UsageError(`cannot read the secret file ${entry.name}`);
+    });
+    // The daemon registry parses `env` line by line, so the scan does too.
+    const found =
+      entry.name === "env"
+        ? parseEnvFile(raw, (message) => {
+            if (message.startsWith("secrets env: ignoring malformed line")) malformed += 1;
+          }).map((item) => ({ name: `env:${item.name}`, value: item.value }))
+        : [{ name: entry.name, value: raw.replace(/\r?\n$/, "") }];
+    for (const item of found) {
+      if (item.value.length < MIN_SECRET_LENGTH) {
+        short += 1;
+        continue;
+      }
+      values.push(item);
     }
-    values.push({ name: entry.name, value });
   }
-  return { values, short };
+  return { values, short, malformed };
 }
 
 async function main(argv) {
@@ -501,7 +521,7 @@ async function main(argv) {
     // rather than refused.
     if (install !== undefined && (await isDirectory(install))) secretsDir = install;
   }
-  const secrets = secretsDir === undefined ? { values: [], short: 0 } : await readSecrets(secretsDir);
+  const secrets = secretsDir === undefined ? { values: [], short: 0, malformed: 0 } : await readSecrets(secretsDir);
 
   const paths = await inputFiles(options.root);
   let scanned = 0;
@@ -565,6 +585,7 @@ async function main(argv) {
   if (secrets.short > 0) {
     process.stderr.write(`scan: skipped ${secrets.short} secret file(s) shorter than ${MIN_SECRET_LENGTH} characters\n`);
   }
+  if (secrets.malformed > 0) process.stderr.write(`scan: skipped ${secrets.malformed} malformed line(s) of env\n`);
   process.stdout.write(`\nscan: ${scanned} files, ${findings} findings\n`);
   return findings === 0 ? 0 : 1;
 }

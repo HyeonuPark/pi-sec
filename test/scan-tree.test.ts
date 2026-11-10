@@ -17,7 +17,7 @@
  * check looks for the host name of the machine this test runs on.
  */
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { hostname, tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -271,6 +271,23 @@ describe("scan-tree: the input set", () => {
   });
 });
 
+describe("scan-tree: unreadable input", () => {
+  it("fails with exit 2 when a tracked file cannot be read", async () => {
+    const where = await tree({ "kept.txt": "fine", "gone.txt": `name = ${LOCAL_WORD}` });
+    const words = await outside("words.txt", LOCAL_WORD);
+    const git = (...args: string[]) => spawnSync("git", ["-C", where, ...args], { encoding: "utf8" });
+    expect(git("init", "-q").status).toBe(0);
+    expect(git("add", "kept.txt", "gone.txt").status).toBe(0);
+    await rm(join(where, "gone.txt"));
+
+    const result = run(["--words", words], where);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("gone.txt");
+    expect(result.stderr).not.toContain("binary");
+  });
+});
+
 describe("scan-tree: the two option files", () => {
   it("matches a word only where no ASCII letter touches it, in either case", async () => {
     const where = await tree({
@@ -310,6 +327,20 @@ describe("scan-tree: the two option files", () => {
   });
 });
 
+describe("scan-tree: allow entries and secret values", () => {
+  it("never lets an allow entry remove a secret-value finding", async () => {
+    const secrets = await secretsDir("allow-secrets", SECRET_VALUE);
+    const words = await outside("words.txt", LOCAL_WORD);
+    const where = await tree({ "mixed.txt": `one = ${LOCAL_WORD} and ${SECRET_VALUE}` });
+    const allow = await outside("allow.txt", ["mixed.txt", `^one = `].join("\t"));
+
+    const result = run(["--secrets-dir", secrets, "--words", words, "--allow", allow], where);
+
+    expect(result.code).toBe(1);
+    expect(findings(result)).toEqual([`mixed.txt:1: secret-value ${SECRET_FILE}`]);
+  });
+});
+
 describe("scan-tree: a secrets directory", () => {
   it("reports the location and the secret file name, and never the value", async () => {
     const secrets = await secretsDir("given-secrets", SECRET_VALUE);
@@ -331,6 +362,45 @@ describe("scan-tree: a secrets directory", () => {
     // what identifies the finding.
     expect(result.stdout).not.toContain(`inside.txt:2: secret-value ${SECRET_FILE}\n    `);
     expect(result.stderr).toContain("shorter than 8");
+  });
+
+  it("reads the env file line by line, like the daemon registry", async () => {
+    const envValue = ["env", "value", "one", "xyz"].join("-");
+    const quoted = ["env", "quoted", "two", "xyz"].join("-");
+    const malformed = ["malformed", "line", "text", "xyz"].join("-");
+    const dir = join(root, "env-secrets");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "env"),
+      [`FIRST_KEY=${envValue}`, "# a comment", `SECOND_KEY="${quoted}"`, malformed, ""].join("\n"),
+    );
+    const where = await tree({
+      "inside.txt": ["a line", `${envValue}`, `x = ${quoted}`, "last"].join("\n"),
+    });
+
+    const result = run(["--secrets-dir", dir], where);
+
+    expect(findings(result)).toEqual([
+      "inside.txt:2: secret-value env:FIRST_KEY",
+      "inside.txt:3: secret-value env:SECOND_KEY",
+    ]);
+    for (const text of [envValue, quoted, malformed]) {
+      expect(result.stdout).not.toContain(text);
+      expect(result.stderr).not.toContain(text);
+    }
+    expect(result.stderr).toContain("skipped 1 malformed line(s) of env");
+  });
+
+  it.skipIf(process.getuid?.() === 0)("fails with exit 2 on a secret file it cannot read", async () => {
+    const secrets = await secretsDir("locked-secrets", SECRET_VALUE);
+    await chmod(join(secrets, SECRET_FILE), 0o000);
+    const where = await tree({ "inside.txt": "nothing here" });
+
+    const result = run(["--secrets-dir", secrets], where);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(SECRET_FILE);
+    expect(result.stderr).not.toContain(SECRET_VALUE);
   });
 
   it("reads the secrets directory of the install when no option is given", async () => {

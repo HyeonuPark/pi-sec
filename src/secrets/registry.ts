@@ -7,6 +7,9 @@ import {
   type RedactorOptions,
   type SecretValue,
 } from "./redact.ts";
+import { parseEnvFile } from "./env-file.ts";
+
+export { parseEnvFile };
 
 export interface SecretRegistryOptions {
   readonly dir: string;
@@ -58,34 +61,6 @@ export function isCredentialFileReference(node: unknown): node is CredentialFile
 /** Remove one trailing newline, the way a secret file is read. */
 export function stripTrailingNewline(value: string): string {
   return value.replace(/\r?\n$/, "");
-}
-
-/** Parse an optional `env` file of `KEY=value` lines. Malformed lines are warned and skipped. */
-export function parseEnvFile(text: string, onWarning?: (message: string) => void): SecretValue[] {
-  const out: SecretValue[] = [];
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (line === "" || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq <= 0) {
-      onWarning?.(`secrets env: ignoring malformed line: ${rawLine}`);
-      continue;
-    }
-    const name = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if (
-      value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (name.length === 0 || value.length === 0) {
-      onWarning?.(`secrets env: ignoring empty entry ${name || "<unnamed>"}`);
-      continue;
-    }
-    out.push({ name, value });
-  }
-  return out;
 }
 
 /** Collect the credential material of `auth.json`, named `model-auth.<path>`. */

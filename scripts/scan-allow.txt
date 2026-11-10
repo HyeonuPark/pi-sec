@@ -1,8 +1,9 @@
 # Exceptions for the tree scan in `scripts/scan-tree.mjs`.
 #
-# The scan looks for known values and never for shapes, so an entry here hides
-# one known value in one place: a word from the word list, a machine value, or a
-# registered secret value that is legitimate in that place and nowhere else.
+# An entry here hides one finding in one place: a word from the word list, a
+# machine value, an install value, or a shape. An entry never removes a
+# `secret-value` finding. A secret value in the tree is a leak, so the fix is to
+# remove the value or to change the secret.
 #
 # Every entry must cover a false match in the file it names. An entry never
 # covers a real leak. The file may hold no entry at all, and then the scan

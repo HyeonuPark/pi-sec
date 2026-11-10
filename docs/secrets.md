@@ -213,6 +213,9 @@ type Registry = {
   unreadable at runtime, every model and tool request is refused until it is
   restored. It never runs with a partial or empty registry while secret files
   exist.
+- The commit, push and export hooks run `scripts/scan-tree.mjs`. It reads the
+  `env` file with the same parser as the registry (`src/secrets/env-file.ts`), and
+  it exits with code 2 when it cannot read a secret file or an input file.
 - The registry is refreshed on file change and snapshotted per request so a run
   sees a consistent view.
 
