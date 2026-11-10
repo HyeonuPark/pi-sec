@@ -62,6 +62,7 @@ import { adviceTargetOf, watchOpenRound, type LiveStep, type RoundWatchResult } 
 import { idleAdvice } from "../context-advice.ts";
 import { FOCUSED_CHAT_IDENTITY } from "./focused-chat-texts.ts";
 import { createFocusedChatTools } from "./focused-chat.ts";
+import { scanDocumentKeys } from "../runtime/storage.ts";
 
 /**
  * The bundled `subagents` extension.
@@ -956,38 +957,12 @@ export class SubagentHub {
 
   /** Keys of one document family inside one conversation. */
   async conversationKeys(kind: string, conversationId: ConversationId, ctx: Context): Promise<string[]> {
-    const keys: string[] = [];
-    let cursor: Parameters<ExtensionContext["storage"]["scanDocuments"]>[2];
-    for (;;) {
-      const page = await this.#context.storage.scanDocuments(
-        { scope: { kind: "conversation", conversationId }, at: "current", kind },
-        200,
-        cursor,
-        ctx,
-      );
-      for (const record of page.items) if (record.key !== undefined) keys.push(record.key);
-      if (page.next === undefined) break;
-      cursor = page.next;
-    }
-    return keys;
+    return scanDocumentKeys(this.#context.storage, kind, ctx, { kind: "conversation", conversationId });
   }
 
   /** Keys of one session-scoped family. */
   async sessionKeys(kind: string, ctx: Context): Promise<string[]> {
-    const keys: string[] = [];
-    let cursor: Parameters<ExtensionContext["storage"]["scanDocuments"]>[2];
-    for (;;) {
-      const page = await this.#context.storage.scanDocuments(
-        { scope: { kind: "session" }, at: "current", kind },
-        200,
-        cursor,
-        ctx,
-      );
-      for (const record of page.items) if (record.key !== undefined) keys.push(record.key);
-      if (page.next === undefined) break;
-      cursor = page.next;
-    }
-    return keys;
+    return scanDocumentKeys(this.#context.storage, kind, ctx);
   }
 
   /**

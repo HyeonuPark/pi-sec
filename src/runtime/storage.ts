@@ -34,12 +34,17 @@ export async function writeSchemaVersion(paths: Paths, version: number): Promise
  * The `sec.*` families are not enumerable from inside a `Tx`, so anything that
  * needs to walk them has to go through Storage directly.
  */
-export async function scanDocumentKeys(storage: Storage, kind: string, context: Context): Promise<string[]> {
+export async function scanDocumentKeys(
+  storage: Storage,
+  kind: string,
+  context: Context,
+  scope: Parameters<Storage["scanDocuments"]>[0]["scope"] = { kind: "session" },
+): Promise<string[]> {
   const keys: string[] = [];
   let cursor: Parameters<Storage["scanDocuments"]>[2];
   for (;;) {
     const page = await storage.scanDocuments(
-      { scope: { kind: "session" }, at: "current", kind },
+      { scope, at: "current", kind },
       500,
       cursor,
       context,

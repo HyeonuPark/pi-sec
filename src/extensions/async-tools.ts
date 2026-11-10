@@ -30,6 +30,7 @@ import { requireHarness, type ExtensionContext } from "./context.ts";
 import { zoneIso } from "../time-format.ts";
 import { createInboxItemTx } from "./notify.ts";
 import { restartWatchOf } from "./self-edit.ts";
+import { scanDocumentKeys } from "../runtime/storage.ts";
 
 /**
  * The bundled `async-tools` extension: `async_call`, `async_cancel`, and
@@ -340,19 +341,7 @@ async function listCallRecords(
   ctx: Context,
 ): Promise<readonly Readonly<AsyncCallRecord>[]> {
   const harness = requireHarness(context);
-  const keys: string[] = [];
-  let cursor: Parameters<ExtensionContext["storage"]["scanDocuments"]>[2];
-  for (;;) {
-    const page = await context.storage.scanDocuments(
-      { scope: { kind: "conversation", conversationId }, at: "current", kind: "sec.asyncCall" },
-      200,
-      cursor,
-      ctx,
-    );
-    for (const record of page.items) if (record.key !== undefined) keys.push(record.key);
-    if (page.next === undefined) break;
-    cursor = page.next;
-  }
+  const keys = await scanDocumentKeys(context.storage, "sec.asyncCall", ctx, { kind: "conversation", conversationId });
   const found: Readonly<AsyncCallRecord>[] = [];
   for (const key of keys) {
     const record = await harness.snapshot(SecAsyncCall, conversationId, key, ctx);
