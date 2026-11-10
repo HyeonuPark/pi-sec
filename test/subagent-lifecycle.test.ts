@@ -686,6 +686,13 @@ describe("finishing a subagent", () => {
   function lateAnswerer(timeoutMs: number): FauxResponseFactory[] {
     return script((context) => {
       if (hasUser(context, "BRIEF")) {
+        // A message that arrives while this child works makes await_orders refuse.
+        // The child then ends its turn without a tool call, as the refusal asks,
+        // and the waiting message starts its next run.
+        const end = last(context);
+        if (end?.role === "toolResult" && messageText(end).includes("await_orders was refused: a message is waiting")) {
+          return say("reading the waiting message");
+        }
         if (!hasUser(context, "ANSWER-NOW") || hasResult(context, "withdrawn")) return park();
         return call("send_reply", { replyToken: tokenIn(context), body: "THE-LATE-ANSWER" });
       }
