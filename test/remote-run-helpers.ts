@@ -375,15 +375,22 @@ async function boot(options: RunFixtureOptions, remote: string, clock: FakeClock
   });
 
   const readLog = async (file: string): Promise<Readonly<Record<string, unknown>>[]> => {
+    let text: string;
     try {
-      const text = await readFile(file, "utf8");
-      return text
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .map((line) => JSON.parse(line) as Record<string, unknown>);
-    } catch {
-      return [];
+      text = await readFile(file, "utf8");
+    } catch (error) {
+      // The fake tool makes the file at its first call, so a missing file is no call yet.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
     }
+    // Only complete lines count: text after the last line break is a line the fake
+    // tool is still writing, and the next read has it. A complete line that is not
+    // JSON is a broken log, and it throws.
+    const complete = text.slice(0, text.lastIndexOf("\n") + 1);
+    return complete
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
   };
 
   const readConversation = async (conversationId: string): Promise<string[]> => {
@@ -425,7 +432,9 @@ async function boot(options: RunFixtureOptions, remote: string, clock: FakeClock
     for (;;) {
       const left = await fakeMachineProcesses(remote);
       if (left.length === 0) return;
-      if (Date.now() > limit) return;
+      if (Date.now() > limit) {
+        throw new Error(`a process of the fake machine still runs after SIGKILL: ${left.join(", ")}`);
+      }
       for (const pid of left) {
         const group = await groupOf(pid);
         try {

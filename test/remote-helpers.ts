@@ -221,15 +221,22 @@ export async function createRemoteFixture(options: RemoteFixtureOptions = {}): P
   });
 
   const readCalls = async (): Promise<FakeSshCall[]> => {
+    let text: string;
     try {
-      const text = await readFile(logFile, "utf8");
-      return text
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .map((line) => JSON.parse(line) as FakeSshCall);
-    } catch {
-      return [];
+      text = await readFile(logFile, "utf8");
+    } catch (error) {
+      // The fake tool makes the file at its first call, so a missing file is no call yet.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
     }
+    // Only complete lines count: text after the last line break is a line the fake
+    // tool is still writing, and the next read has it. A complete line that is not
+    // JSON is a broken log, and it throws.
+    const complete = text.slice(0, text.lastIndexOf("\n") + 1);
+    return complete
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line) as FakeSshCall);
   };
 
   const fixture: RemoteFixture = {
