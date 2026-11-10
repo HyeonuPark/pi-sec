@@ -1115,3 +1115,38 @@ describe("migration.test.ts", () => {
     });
   });
 });
+
+describe("jobs_list with archived jobs", () => {
+  const ctx = BACKGROUND_CONTEXT;
+  let harness: TestHarness | undefined;
+
+  afterEach(async () => {
+    await harness?.close();
+    harness = undefined;
+  });
+
+  it("applies status, parent and label to archived jobs too", async () => {
+    harness = await createTestHarness();
+    const { jobs, archive } = harness.runtime;
+    const red = await jobs.create(ctx, { title: "red work", labels: ["red"] });
+    const blue = await jobs.create(ctx, { title: "blue work", labels: ["blue"] });
+    await jobs.update(ctx, red.id, { status: "done" });
+    await jobs.update(ctx, blue.id, { status: "done" });
+    await archive.sweep(ctx, 0);
+    const entry = harness.runtime.registry.snapshot().tools().find((item) => item.tool.name === "jobs_list");
+    const listText = async (args: Record<string, unknown>): Promise<string> => {
+      const result = await entry!.tool.execute(args, { conversationId: "01JOBSLIST000000000000000" } as unknown as ToolExecutionApi, ctx);
+      return result.output.map((part) => (part.type === "text" ? (part.text ?? "") : "")).join("\n");
+    };
+
+    const narrowed = await listText({ label: "red", includeArchived: true });
+    expect(narrowed).toContain(red.id);
+    expect(narrowed).not.toContain(blue.id);
+    const byStatus = await listText({ status: "active", includeArchived: true });
+    expect(byStatus).not.toContain(red.id);
+    // Without a filter, every archived job is still listed.
+    const all = await listText({ includeArchived: true });
+    expect(all).toContain(red.id);
+    expect(all).toContain(blue.id);
+  });
+});

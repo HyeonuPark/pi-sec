@@ -2,7 +2,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import type { Session, Storage } from "@earendil-works/pi-durable";
 import { TERMINAL_JOB_STATUSES, type JobRecord } from "../documents.ts";
-import { JobRegistry } from "./registry.ts";
+import { JobRegistry, type JobFilter } from "./registry.ts";
 
 /** How long a finished job stays in the live store, and when to look. */
 export interface ArchivePolicy {
@@ -135,8 +135,8 @@ export class ArchiveStore {
     return this.archive;
   }
 
-  async list(context: Context): Promise<JobRecord[]> {
-    return this.archive.list(context);
+  async list(context: Context, filter?: JobFilter): Promise<JobRecord[]> {
+    return this.archive.list(context, filter);
   }
 
   /** Look one job up in the archive only. */

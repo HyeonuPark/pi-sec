@@ -471,12 +471,14 @@ export class ReportStore {
     return (await this.get(context, id)) ?? (await this.getArchived(context, id));
   }
 
-  async listArchived(context: Context): Promise<ReportRecord[]> {
+  async listArchived(context: Context, filter?: { readonly jobId?: string }): Promise<ReportRecord[]> {
     if (this.archiveSession === undefined || this.archiveStorage === undefined) return [];
     const records: ReportRecord[] = [];
     for (const key of await scanDocumentKeys(this.archiveStorage, "sec.report", context)) {
       const record = await this.archiveSession.snapshot(SecReport, key, context);
-      if (record !== undefined) records.push(record as ReportRecord);
+      if (record === undefined) continue;
+      if (filter?.jobId !== undefined && record.jobId !== filter.jobId) continue;
+      records.push(record as ReportRecord);
     }
     return records;
   }

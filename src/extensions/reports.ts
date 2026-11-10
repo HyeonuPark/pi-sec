@@ -735,8 +735,9 @@ export function createReportsExtension(context: ExtensionContext): Extension<Too
     replay: "safe",
     execute: async (args, _api, ctx) => {
       const reports = requireReports(context);
-      const live = await reports.list(ctx, args.jobId === undefined ? undefined : { jobId: args.jobId });
-      const archived = args.includeArchived === true ? await reports.listArchived(ctx) : [];
+      const filter = args.jobId === undefined ? undefined : { jobId: args.jobId };
+      const live = await reports.list(ctx, filter);
+      const archived = args.includeArchived === true ? await reports.listArchived(ctx, filter) : [];
       const lines = live.map((record) => formatReport(record, zone()));
       if (archived.length > 0) {
         // An archived report left the live store in one of two ways: with its job,

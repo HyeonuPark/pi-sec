@@ -240,7 +240,9 @@ export function createJobsExtension(context: ExtensionContext): Extension<ToolRe
       const jobs = requireJobs(context);
       const archive = optionalArchive(context);
       const archived =
-        args.includeArchived === true && archive !== undefined ? await archive.list(ctx) : [];
+        args.includeArchived === true && archive !== undefined
+          ? await archive.list(ctx, { status: args.status, parentId: args.parentId, label: args.label })
+          : [];
       const section =
         archived.length === 0
           ? ""

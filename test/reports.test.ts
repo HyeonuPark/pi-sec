@@ -741,6 +741,31 @@ describe("report store", () => {
     expect(await reports.readVersion(report.id, 2)).toBeUndefined();
   });
 
+  it("narrows archived reports to the job it names", async () => {
+    const h = await boot();
+    const { jobs, reports, archive } = h.runtime;
+    const first = await jobs.create(ctx, { title: "first" });
+    const second = await jobs.create(ctx, { title: "second" });
+    const one = await reports.create(ctx, { jobId: first.id, title: "Report one", content: "one\n" });
+    const two = await reports.create(ctx, { jobId: second.id, title: "Report two", content: "two\n" });
+    await jobs.update(ctx, first.id, { status: "done" });
+    await jobs.update(ctx, second.id, { status: "done" });
+    await archive.sweep(ctx, 0);
+    const entry = h.runtime.registry.snapshot().tools().find((item) => item.tool.name === "reports_list");
+    const listText = async (args: Record<string, unknown>): Promise<string> => {
+      const result = await entry!.tool.execute(args, { conversationId: 1 } as unknown as ToolExecutionApi, ctx);
+      return result.output.map((part) => (part.type === "text" ? (part.text ?? "") : "")).join("\n");
+    };
+
+    const narrowed = await listText({ jobId: first.id, includeArchived: true });
+    expect(narrowed).toContain(one.id);
+    expect(narrowed).not.toContain(two.id);
+    // Without a filter, every archived report is still listed.
+    const all = await listText({ includeArchived: true });
+    expect(all).toContain(one.id);
+    expect(all).toContain(two.id);
+  });
+
   it("refuses a report it does not have", async () => {
     const h = await boot();
     expect(await h.runtime.reports.approve(ctx, "no-such-report", 1, { via: "viewer" })).toEqual({
