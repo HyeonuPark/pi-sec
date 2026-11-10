@@ -21,6 +21,7 @@ import { SseHub } from "../src/server/sse.ts";
 import { StreamHub } from "../src/server/streams.ts";
 import { BUNDLED_EXTENSIONS, bundledExtension, type BundledExtension } from "../src/extensions/index.ts";
 import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
+import { withPageLinks } from "../src/server/routes/basic-chat.ts";
 import type { AppDeps } from "../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 import { installHostStatus } from "./ext-pages-helpers.ts";
@@ -97,6 +98,12 @@ describe("the page links the enabled extensions declare", () => {
     expect(response.headers.get("content-security-policy")).not.toContain("script-src 'self' 'nonce");
     // It takes the place the shell left for it, after the page's own module.
     expect(page.indexOf('id="pages-links"')).toBeGreaterThan(page.indexOf("ui-chat.js"));
+  });
+
+  it("writes a label with a `$` pattern into the data block as it is", () => {
+    const label = "$& $' $` $$ $1";
+    const page = withPageLinks("A<!--pages-links-->B", [{ label, path: "/x" }]);
+    expect(linksOf(page)).toEqual([{ label, path: "/x" }]);
   });
 
   it("writes an empty list when the extension is off", async () => {

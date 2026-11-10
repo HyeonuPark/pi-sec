@@ -404,6 +404,12 @@ describe("personality-name-page.test.ts", () => {
       expect(injectName(PAGE_WITHOUT_NAME, "테스트봇")).toBe(PAGE_WITHOUT_NAME);
     });
 
+    it("writes a name with a `$` pattern as it is", () => {
+      const stamped = injectName(PAGE, "N$&M $' $$");
+      expect(stamped).toContain('content="N$&amp;M $\' $$"');
+      expect(stamped.match(/pi-sec-name/g)?.length).toBe(1);
+    });
+
     it("escapes a name that carries markup", () => {
       const stamped = injectName(PAGE, 'A&B "C" <D>');
       expect(stamped).toContain('<meta name="pi-sec-name" content="A&amp;B &quot;C&quot; &lt;D&gt;" />');

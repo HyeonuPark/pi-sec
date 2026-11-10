@@ -210,7 +210,7 @@ const NAME_META = /<meta\s+name="pi-sec-name"\s+content="[^"]*"\s*\/?>/i;
 export function injectName(html: string, name: string): string {
   if (!NAME_META.test(html)) return html;
   const value = escapeAttribute(name);
-  return html.replace(NAME_META, `<meta name="pi-sec-name" content="${value}" />`);
+  return html.replace(NAME_META, () => `<meta name="pi-sec-name" content="${value}" />`);
 }
 
 /** The shared UI state a page is stamped with. Every field is optional. */

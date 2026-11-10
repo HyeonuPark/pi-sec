@@ -26,6 +26,7 @@ import { defaultWebDir, startServer, type StartedServer } from "../src/server/se
 import type { AppDeps } from "../src/server/deps.ts";
 import { ANTHROPIC_USAGE_URL } from "../src/server/usage/fetchers.ts";
 import type { UsageAnswer, UsageRefreshAnswer } from "../src/server/usage/values.ts";
+import { withFirstPaint } from "../src/server/routes/usage.ts";
 import type { UsageLedger } from "../src/server/usage/records.ts";
 import type { UsageRouteOptions } from "../src/server/routes/usage.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
@@ -303,6 +304,16 @@ describe("the answer the page carries", () => {
     expect(page).toContain('<script type="application/json" id="usage-first">');
     // The policy still names no script nonce: the block is data, never run.
     expect(response.headers.get("content-security-policy")).toBe(CSP_BASE);
+  });
+
+  it("writes a value with a `$` pattern into the data block as it is", () => {
+    const answer = {
+      generatedAt: 1,
+      timezone: "UTC",
+      cards: [{ provider: "p", name: "$& $' $` $$", shape: "usage", receivedAt: null, fields: {} }],
+    } as unknown as UsageAnswer;
+    const page = withFirstPaint("<p>x</p><!--usage-first--><p>y</p>", answer);
+    expect(firstPaintOf(page)).toEqual(answer);
   });
 
   it("writes every angle bracket in the block as an escape, so no value can end the element", async () => {

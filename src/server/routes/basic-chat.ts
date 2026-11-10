@@ -268,7 +268,7 @@ const PAGE_LINKS_MARKER = "<!--pages-links-->";
  */
 export function withPageLinks(html: string, links: readonly ExtensionPageLink[]): string {
   const json = JSON.stringify(links).replaceAll("<", "\\u003c");
-  return html.replace(PAGE_LINKS_MARKER, `<script type="application/json" id="pages-links">${json}</script>`);
+  return html.replace(PAGE_LINKS_MARKER, () => `<script type="application/json" id="pages-links">${json}</script>`);
 }
 
 /**

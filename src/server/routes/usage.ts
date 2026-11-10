@@ -51,7 +51,7 @@ const FIRST_PAINT_MARKER = "<!--usage-first-->";
  */
 export function withFirstPaint(html: string, answer: UsageAnswer): string {
   const json = JSON.stringify(answer).replaceAll("<", "\\u003c");
-  return html.replace(FIRST_PAINT_MARKER, `<script type="application/json" id="usage-first">${json}</script>`);
+  return html.replace(FIRST_PAINT_MARKER, () => `<script type="application/json" id="usage-first">${json}</script>`);
 }
 
 export interface UsageRouteOptions {
