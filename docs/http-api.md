@@ -1858,7 +1858,8 @@ the head commit and the title come from `gh`. The route adds `repo` and `title`
 to the answer. A first fetch that would pass `githubPr.diskLimitMegabytes` is
 refused with `409` and the three sizes, and nothing is fetched. With the value 0
 the limit is off and the route never refuses for size. A `gh` or `git`
-failure is `502`.
+failure is `502`. The `path` and `oldPath` of a file are the names that the
+repository holds, in UTF-8, with no escapes.
 
 `GET /api/github/pr/<owner>/<repo>/<number>/commits/<sha>` computes the diff of one
 commit of the pull request from the same bare repository. `<sha>` is the full

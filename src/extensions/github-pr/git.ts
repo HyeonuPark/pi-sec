@@ -10,6 +10,10 @@ import { spawn } from "node:child_process";
  * it by mistake: `push`, `gc`, `reset`, `checkout`, `clean`, `update-ref`,
  * `reflog` and the rest are not on the list.
  *
+ * Every call starts as `git -c core.quotePath=false <args>`, so a path that git
+ * prints is the name in UTF-8. That setting changes nothing for a command that
+ * prints no path.
+ *
  * Two more properties matter for a daemon that runs unattended.
  *
  *   - `GIT_TERMINAL_PROMPT=0`. A private repository authenticates through the
@@ -145,7 +149,10 @@ export async function runGit(
   };
 
   const result = await new Promise<GitResult>((resolve, reject) => {
-    const child = spawn("git", [...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    // `core.quotePath=false` keeps git from escaping every byte over 0x7f in a path
+    // it prints, which is how a Korean file name stays readable. The gate above
+    // already checked the caller's first argument, so a caller still cannot pass `-c`.
+    const child = spawn("git", ["-c", "core.quotePath=false", ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let stdoutBytes = 0;

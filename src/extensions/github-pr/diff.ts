@@ -18,7 +18,9 @@ import { DiskLimitError, type RepoStore } from "./store.ts";
  *      diff is then the change the PR makes and not the change main took since
  *      the branch was cut.
  *   4. `git diff --no-color --find-renames -U3` between the merge base and the
- *      head, parsed into hunks.
+ *      head, parsed into hunks. `runGit` sets `core.quotePath=false`, so git
+ *      prints a non-ASCII name as it is. A name with a control character, a
+ *      double quote or a backslash stays quoted, and the parser decodes it.
  *   5. Add the whole file on both sides of every changed file, so the browser
  *      can expand a collapsed context region without another request. A file
  *      over 50000 lines is left out: it is not expandable, and the payload is
@@ -373,7 +375,6 @@ async function fileLines(path: string, sha: string, file: string): Promise<strin
 }
 
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
-const DIFF_GIT = /^diff --git "?a\/(.*?)"? "?b\/(.*?)"?$/;
 const LINE_TYPE: Readonly<Record<string, DiffLine["t"]>> = { "+": "add", "-": "del", " ": "ctx" };
 
 /**
@@ -395,10 +396,10 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
 
   for (const line of text.split("\n")) {
     if (line.startsWith("diff --git ")) {
-      const match = DIFF_GIT.exec(line);
+      const header = parseDiffGitHeader(line.slice("diff --git ".length));
       current = {
-        oldPath: match?.[1] ?? null,
-        path: match?.[2] ?? null,
+        oldPath: header?.oldPath ?? null,
+        path: header?.path ?? null,
         status: "M",
         binary: false,
         hunks: [],
@@ -443,16 +444,16 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
     } else if (line.startsWith("+++ ")) {
       current.path = stripDevNull(line.slice(4));
     } else if (line.startsWith("rename from ")) {
-      current.oldPath = line.slice("rename from ".length);
+      current.oldPath = decodePath(line.slice("rename from ".length));
       current.status = "R";
     } else if (line.startsWith("rename to ")) {
-      current.path = line.slice("rename to ".length);
+      current.path = decodePath(line.slice("rename to ".length));
       current.status = "R";
     } else if (line.startsWith("copy from ")) {
-      current.oldPath = line.slice("copy from ".length);
+      current.oldPath = decodePath(line.slice("copy from ".length));
       current.status = "R";
     } else if (line.startsWith("copy to ")) {
-      current.path = line.slice("copy to ".length);
+      current.path = decodePath(line.slice("copy to ".length));
       current.status = "R";
     } else if (line.startsWith("new file")) {
       current.status = "A";
@@ -470,16 +471,106 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
   return files;
 }
 
+/** The escapes git writes inside a quoted path, besides three-digit octal bytes. */
+const PATH_ESCAPES: Readonly<Record<string, number>> = {
+  a: 0x07,
+  b: 0x08,
+  t: 0x09,
+  n: 0x0a,
+  v: 0x0b,
+  f: 0x0c,
+  r: 0x0d,
+  '"': 0x22,
+  "\\": 0x5c,
+};
+
+/**
+ * Read the quoted form of a path that git prints for a name with a control
+ * character, a double quote, a backslash or (without `core.quotePath=false`) a
+ * byte over 0x7f. Escapes become bytes and the bytes are read as UTF-8. A value
+ * that is not wrapped in double quotes is returned as it is.
+ */
+function decodePath(raw: string): string {
+  if (raw.length < 2 || !raw.startsWith('"') || !raw.endsWith('"')) return raw;
+  const inner = raw.slice(1, -1);
+  const bytes: number[] = [];
+  for (let index = 0; index < inner.length; ) {
+    const char = inner[index] ?? "";
+    if (char !== "\\") {
+      const point = inner.codePointAt(index) ?? 0;
+      const text = String.fromCodePoint(point);
+      bytes.push(...Buffer.from(text, "utf8"));
+      index += text.length;
+      continue;
+    }
+    const octal = /^[0-7]{3}/.exec(inner.slice(index + 1));
+    if (octal !== null) {
+      bytes.push(parseInt(octal[0], 8) & 0xff);
+      index += 4;
+      continue;
+    }
+    const escaped = PATH_ESCAPES[inner[index + 1] ?? ""];
+    if (escaped !== undefined) {
+      bytes.push(escaped);
+      index += 2;
+      continue;
+    }
+    // An escape that git does not write: keep the backslash.
+    bytes.push(0x5c);
+    index += 1;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+/** Split off one path token at the start of `text`: quoted, or up to the next space. */
+function quotedPrefix(text: string): string | undefined {
+  if (!text.startsWith('"')) return undefined;
+  for (let index = 1; index < text.length; index += 1) {
+    if (text[index] === "\\") index += 1;
+    else if (text[index] === '"') return text.slice(0, index + 1);
+  }
+  return undefined;
+}
+
+/**
+ * The two paths of a `diff --git` line, without the `a/` and `b/` prefixes. Each
+ * side can be quoted or not. A name with a space is not quoted, so for two
+ * unquoted sides the line is cut where both halves are the same name, or else at
+ * the first ` b/`.
+ */
+function parseDiffGitHeader(rest: string): { oldPath: string; path: string } | undefined {
+  const first = quotedPrefix(rest);
+  if (first !== undefined) {
+    const second = rest.slice(first.length + 1);
+    return { oldPath: stripPrefix(decodePath(first)), path: stripPrefix(decodePath(second)) };
+  }
+  const quotedSecond = rest.indexOf(' "b/');
+  if (quotedSecond > 0) {
+    return { oldPath: stripPrefix(rest.slice(0, quotedSecond)), path: stripPrefix(decodePath(rest.slice(quotedSecond + 1))) };
+  }
+  const middle = (rest.length - 1) / 2;
+  if (Number.isInteger(middle) && rest[middle] === " " && rest.slice(0, middle).startsWith("a/")) {
+    const left = rest.slice(2, middle);
+    if (rest.slice(middle + 1) === `b/${left}`) return { oldPath: left, path: left };
+  }
+  const match = /^a\/(.*?) b\/(.*)$/.exec(rest);
+  return match === null ? undefined : { oldPath: match[1] ?? "", path: match[2] ?? "" };
+}
+
+/**
+ * The path of a `---` or `+++` line: `null` for the exact marker `/dev/null`,
+ * else the decoded name without its `a/` or `b/` prefix. Git ends an unquoted
+ * name that has a space with a tab, which is dropped here.
+ */
 function stripDevNull(path: string): string | null {
-  const trimmed = path.trim();
-  if (trimmed === "/dev/null") return null;
-  return stripPrefix(trimmed);
+  const raw = path.endsWith("\t") ? path.slice(0, -1) : path;
+  if (raw === "/dev/null") return null;
+  return stripPrefix(decodePath(raw));
 }
 
 function stripPrefix(path: string): string {
-  const unquoted = path.replace(/^"|"$/g, "");
-  if (unquoted.startsWith("a/") || unquoted.startsWith("b/")) return unquoted.slice(2);
-  return unquoted;
+  if (path.startsWith("a/") || path.startsWith("b/")) return path.slice(2);
+  return path;
 }
 
 function compare(a: string, b: string): number {

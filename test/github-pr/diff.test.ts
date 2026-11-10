@@ -385,6 +385,49 @@ describe("diff payload", () => {
     expect(spaced?.newContent).toEqual(["spaced content"]);
   });
 
+  /** Branch off the base commit, run `change`, and publish the head as pull request `number`. */
+  async function prAfter(fixture: Fixture, number: number, change: () => void) {
+    git(fixture.origin, ["checkout", "--quiet", "-b", `pr-${number}`, fixture.baseSha]);
+    change();
+    const head = commit(fixture.origin, `pull request ${number}`);
+    git(fixture.origin, ["update-ref", `refs/pull/${number}/head`, head]);
+    git(fixture.origin, ["checkout", "--quiet", "main"]);
+    const diff = await computePrDiff({ store: fixture.store, repo: "acme/app", number, baseRef: "main", headSha: head });
+    return { head, diff };
+  }
+
+  it("keeps a Korean file name and reads its whole content", async () => {
+    const fixture = makeFixture();
+    const { diff } = await prAfter(fixture, 11, () => writeFileSync(fixture.file("한글.txt"), "내용\n"));
+    const korean = diff.files.find((file) => file.path === "한글.txt");
+    expect(korean?.status).toBe("A");
+    expect(korean?.newContent).toEqual(["내용"]);
+  });
+
+  it("keeps a name with a tab and a double quote", async () => {
+    const fixture = makeFixture();
+    const name = 'tab\t"q".txt';
+    const { diff } = await prAfter(fixture, 12, () => writeFileSync(fixture.file(name), "quoted name\n"));
+    const odd = diff.files.find((file) => file.path === name);
+    expect(odd?.newContent).toEqual(["quoted name"]);
+  });
+
+  it("finds a rename between two non-ASCII names", async () => {
+    const fixture = makeFixture();
+    // Both names exist at the base commit, so the pull request only renames.
+    writeFileSync(fixture.file("옛 이름 é.txt"), "same\ncontent\nhere\n");
+    git(fixture.origin, ["add", "--all"]);
+    git(fixture.origin, ["commit", "--quiet", "-m", "non-ascii base"]);
+    const base = git(fixture.origin, ["rev-parse", "HEAD"]).trim();
+    git(fixture.origin, ["checkout", "--quiet", "-b", "pr-13", base]);
+    git(fixture.origin, ["mv", "옛 이름 é.txt", "새 이름 ü.txt"]);
+    const head = commit(fixture.origin, "rename");
+    git(fixture.origin, ["update-ref", "refs/pull/13/head", head]);
+    git(fixture.origin, ["checkout", "--quiet", "main"]);
+    const diff = await computePrDiff({ store: fixture.store, repo: "acme/app", number: 13, baseRef: "main", headSha: head });
+    expect(diff.files.map((file) => [file.status, file.oldPath, file.path])).toEqual([["R", "옛 이름 é.txt", "새 이름 ü.txt"]]);
+  });
+
   it("leaves the whole content out for a file over the line limit, and still sends the hunks", async () => {
     const fixture = makeFixture();
     git(fixture.origin, ["checkout", "--quiet", "-b", "big", fixture.baseSha]);
@@ -509,6 +552,18 @@ describe("commit diff", () => {
       body: "",
     });
     expect(diff.commit.authoredAt).toMatch(/^\d{4}-\d\d-\d\dT/);
+  });
+
+  it("keeps a Korean name on the commit page", async () => {
+    const fixture = makeFixture();
+    git(fixture.origin, ["checkout", "--quiet", "feature"]);
+    writeFileSync(fixture.file("한글.txt"), "내용\n");
+    const sha = commit(fixture.origin, "add a Korean name");
+    git(fixture.origin, ["update-ref", "refs/pull/7/head", sha]);
+    git(fixture.origin, ["checkout", "--quiet", "main"]);
+    const diff = await commitDiffOf(fixture, sha, sha);
+    const korean = diff.files.find((file) => file.path === "한글.txt");
+    expect(korean?.newContent).toEqual(["내용"]);
   });
 
   it("gives a root commit's creation diff with no old content, and says it has no parent", async () => {
@@ -685,5 +740,21 @@ describe("parseUnifiedDiff", () => {
       { t: "del", s: "x" },
       { t: "add", s: "y" },
     ]);
+  });
+
+  it("reads the path of every header form that git writes", () => {
+    const rows: { name: string; lines: string[]; oldPath: string | null; path: string | null }[] = [
+      { name: "octal escapes", lines: ['diff --git "a/\\355\\225\\234.txt" "b/\\355\\225\\234.txt"', '--- "a/\\355\\225\\234.txt"', '+++ "b/\\355\\225\\234.txt"'], oldPath: "한.txt", path: "한.txt" },
+      { name: "tab, quote and backslash", lines: ['diff --git "a/t\\tq\\"b\\\\.txt" "b/t\\tq\\"b\\\\.txt"', '--- "a/t\\tq\\"b\\\\.txt"', '+++ "b/t\\tq\\"b\\\\.txt"'], oldPath: 't\tq"b\\.txt', path: 't\tq"b\\.txt' },
+      { name: "rename lines with quotes", lines: ['diff --git "a/old \\303\\251.txt" "b/new \\303\\274.txt"', "similarity index 100%", 'rename from "old \\303\\251.txt"', 'rename to "new \\303\\274.txt"'], oldPath: "old é.txt", path: "new ü.txt" },
+      { name: "copy lines with quotes", lines: ['diff --git "a/c\\303\\251.txt" "b/d\\303\\251.txt"', 'copy from "c\\303\\251.txt"', 'copy to "d\\303\\251.txt"'], oldPath: "cé.txt", path: "dé.txt" },
+      { name: "one side quoted, one not", lines: ['diff --git a/plain.txt "b/new\\tname.txt"', "--- a/plain.txt", '+++ "b/new\\tname.txt"'], oldPath: "plain.txt", path: "new\tname.txt" },
+      { name: "unquoted name with a space (control)", lines: ["diff --git a/with space.txt b/with space.txt", "--- a/with space.txt\t", "+++ b/with space.txt\t"], oldPath: "with space.txt", path: "with space.txt" },
+      { name: "a new file against /dev/null (control)", lines: ["diff --git a/n.txt b/n.txt", "new file mode 100644", "--- /dev/null", "+++ b/n.txt"], oldPath: null, path: "n.txt" },
+    ];
+    for (const row of rows) {
+      const [file] = parseUnifiedDiff(`${row.lines.join("\n")}\n`);
+      expect([row.name, file?.oldPath, file?.path]).toEqual([row.name, row.oldPath, row.path]);
+    }
   });
 });
