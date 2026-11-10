@@ -584,7 +584,8 @@ records only. See [architecture.md](./architecture.md#scheduling).
 response to `POST /api/admin/reload` carry `legacyScheduleProblem` (`string |
 null`). A non-null value means `config.scheduler.jobs` is not empty, so the
 scheduler ignored that list: the text names the entries it ignored and says to
-fix `routine` on the record. The jobs panel draws it as a banner.
+fix `routine` on the record. The jobs panel draws it as a banner. A job event
+that happens while that snapshot is read follows the snapshot.
 
 A write that creates, changes, or removes `routine` takes `reportId`, and so does
 a status change on a job that carries `routine`, including a cancel. The report
@@ -1215,7 +1216,10 @@ one.
 `/api/user-queries/events` sends one `snapshot` event first when the connection
 needs it, `{ "type": "snapshot", "apiVersion": "…", "userQueries": [ … ] }`, and
 only then the two events above. A client that joins late can draw the list from
-that array, without a second read.
+that array, without a second read. Each change reaches each client once, however
+many clients are connected. A change that happens while the snapshot is read
+follows the snapshot. A change made while no client is connected is replayed to a
+client that resumes with `Last-Event-ID` within the buffer time.
 
 Durability: the active list is the session document `sec.userQueryList`, and it is
 the only record of which questions are open. The answer route reads that document

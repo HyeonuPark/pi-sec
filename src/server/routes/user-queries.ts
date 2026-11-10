@@ -2,7 +2,6 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import {
   SecUserQueryList,
-  USER_QUERY_EVENT,
   USER_QUERY_RESOLVED_EVENT,
   type UserQueryListItem,
   type UserQueryMode,
@@ -105,21 +104,11 @@ function bodyObject(body: unknown): Record<string, unknown> | undefined {
 
 export function registerUserQueries(router: Router, deps: AppDeps): void {
   router.get("/api/user-queries/events", async (route: RouteContext) => {
-    const channel = deps.sse.channel("user-queries");
-    const { writer, needsSnapshot } = channel.attach(route.req, route.res);
-    if (needsSnapshot && writer !== undefined) {
-      writer.send("snapshot", {
-        type: "snapshot",
-        apiVersion: API_VERSION,
-        userQueries: await openQuestions(deps),
-      });
-    }
-    const unsubscribe = deps.bus.subscribe((event) => {
-      if (event.type === USER_QUERY_EVENT || event.type === USER_QUERY_RESOLVED_EVENT) {
-        channel.publish(event.type, event.data);
-      }
-    });
-    route.res.on("close", unsubscribe);
+    await deps.streams.attachUserQueries(route, async () => ({
+      type: "snapshot",
+      apiVersion: API_VERSION,
+      userQueries: await openQuestions(deps),
+    }));
   });
 
   router.get("/api/user-queries", async (route) => {

@@ -7,7 +7,7 @@ import {
   type Storage,
 } from "@earendil-works/pi-durable";
 import type { AgentRuntime } from "../agent/harness.ts";
-import { DOC_KINDS, SecAgent, type JobRecord } from "../documents.ts";
+import { DOC_KINDS, SecAgent, USER_QUERY_EVENT, USER_QUERY_RESOLVED_EVENT, type JobRecord } from "../documents.ts";
 import type { ExtensionContext } from "../extensions/context.ts";
 import { newestEntryId, snapshotOf, translateView, type AgentEvent, type SnapshotEvent } from "./conversation-events.ts";
 import type { JobNode } from "../jobs/registry.ts";
@@ -572,11 +572,89 @@ class ConversationStream {
   }
 }
 
+/**
+ * One endpoint whose snapshot is read asynchronously, fanned out to every client.
+ *
+ * One bus subscription serves the endpoint for the process lifetime, made at the
+ * first attach: subscribing per connection would publish each event once per open
+ * client. While a snapshot is read, publications wait in a queue and go out in
+ * order after the snapshot is sent, with their frame ids assigned then, so the
+ * snapshot and the frames tile exactly (the rule `ConversationStream.pause` and
+ * `resume` follow). Attaches run one at a time, so two snapshots are never read at
+ * once.
+ */
+class SnapshotEndpoint {
+  #unsubscribe: (() => void) | undefined;
+  #paused = false;
+  #held: (() => void)[] = [];
+  #attaching: Promise<unknown> = Promise.resolve();
+
+  private readonly deps: StreamDeps;
+  private readonly channel: SseChannel;
+  private readonly accepts: (type: string) => boolean;
+
+  constructor(deps: StreamDeps, key: string, accepts: (type: string) => boolean) {
+    this.deps = deps;
+    this.channel = deps.sse.channel(key);
+    this.accepts = accepts;
+  }
+
+  /** Attach one client: replay for a resume, otherwise send the snapshot `read` builds. */
+  attach(route: RouteContext, read: () => Promise<unknown>): Promise<void> {
+    if (this.#unsubscribe === undefined) {
+      this.#unsubscribe = this.deps.bus.subscribe((event) => {
+        if (this.accepts(event.type)) this.#publish(event.type, event.data);
+      });
+    }
+    const task = async (): Promise<void> => {
+      this.#paused = true;
+      try {
+        const { writer, needsSnapshot } = this.channel.attach(route.req, route.res);
+        if (writer === undefined || !needsSnapshot) return;
+        let snapshot: unknown;
+        try {
+          snapshot = await read();
+        } catch (error) {
+          writer.close();
+          throw error;
+        }
+        if (!writer.isClosed) writer.send("snapshot", snapshot);
+      } finally {
+        this.#resume();
+      }
+    };
+    const next = this.#attaching.then(task, task);
+    this.#attaching = next.catch(() => undefined);
+    return next;
+  }
+
+  /** Drop the bus subscription. Attached clients are closed by the hub. */
+  close(): void {
+    this.#unsubscribe?.();
+    this.#unsubscribe = undefined;
+  }
+
+  #publish(event: string, data: unknown): void {
+    if (this.#paused) {
+      this.#held.push(() => this.channel.publish(event, data));
+      return;
+    }
+    this.channel.publish(event, data);
+  }
+
+  #resume(): void {
+    this.#paused = false;
+    const held = this.#held;
+    this.#held = [];
+    for (const publish of held) publish();
+  }
+}
+
 /** The fan-out for every streaming endpoint. */
 export class StreamHub {
   readonly #conversations = new Map<number, ConversationStream>();
-  #jobChannel: SseChannel | undefined;
-  #jobUnsubscribe: (() => void) | undefined;
+  #jobs: SnapshotEndpoint | undefined;
+  #userQueries: SnapshotEndpoint | undefined;
   #focusedChatChannel: SseChannel | undefined;
   #focusedChatUnsubscribe: (() => void) | undefined;
   #closed = false;
@@ -625,31 +703,42 @@ export class StreamHub {
   /**
    * Attach one more client to the job events. One bus subscription serves the
    * endpoint for the process lifetime: subscribing per connection would publish
-   * every job event once per open window.
+   * every job event once per open window. A job event that happens while the
+   * snapshot is read follows the snapshot.
    */
   async attachJobs(route: RouteContext): Promise<void> {
     if (this.#closed) return refuseStream(route.res);
-    const channel = this.#jobChannel ?? (this.#jobChannel = this.deps.sse.channel("jobs"));
-    if (this.#jobUnsubscribe === undefined) {
-      this.#jobUnsubscribe = this.deps.bus.subscribe((event) => {
-        if (event.type.startsWith("job_")) channel.publish(event.type, event.data);
-      });
-    }
-    const { writer, needsSnapshot } = channel.attach(route.req, route.res);
-    if (writer === undefined || !needsSnapshot) return;
-    const tree = await this.deps.runtime.jobs.tree(BACKGROUND_CONTEXT);
-    // The first screen is filled from this snapshot, so it carries the derived
-    // "working now" list just as `GET /api/jobs` does; without it the marker
-    // would only appear after the next unrelated event.
-    const workers = await jobWorkers(this.deps.runtime, jobTreeIds(tree));
-    const legacyListText = await legacyScheduleProblem(this.deps.runtime);
-    if (!writer.isClosed)
-      writer.send("snapshot", {
+    this.#jobs ??= new SnapshotEndpoint(this.deps, "jobs", (type) => type.startsWith("job_"));
+    await this.#jobs.attach(route, async () => {
+      const tree = await this.deps.runtime.jobs.tree(BACKGROUND_CONTEXT);
+      // The first screen is filled from this snapshot, so it carries the derived
+      // "working now" list just as `GET /api/jobs` does; without it the marker
+      // would only appear after the next unrelated event.
+      const workers = await jobWorkers(this.deps.runtime, jobTreeIds(tree));
+      const legacyListText = await legacyScheduleProblem(this.deps.runtime);
+      return {
         type: "snapshot",
         apiVersion: API_VERSION,
         jobs: withWorkingTree(tree, workers),
         legacyScheduleProblem: legacyListText,
-      });
+      };
+    });
+  }
+
+  /**
+   * Attach one more client to the question events. `read` builds the snapshot
+   * frame. The endpoint follows the same rules as the job events: one bus
+   * subscription for the process lifetime, so each event reaches each client
+   * once and also fills the resume buffer while no client is connected.
+   */
+  async attachUserQueries(route: RouteContext, read: () => Promise<unknown>): Promise<void> {
+    if (this.#closed) return refuseStream(route.res);
+    this.#userQueries ??= new SnapshotEndpoint(
+      this.deps,
+      "user-queries",
+      (type) => type === USER_QUERY_EVENT || type === USER_QUERY_RESOLVED_EVENT,
+    );
+    await this.#userQueries.attach(route, read);
   }
 
   /**
@@ -685,9 +774,10 @@ export class StreamHub {
   /** Drop the endpoint-level subscriptions; attached clients are closed by the hub. */
   close(): void {
     this.#closed = true;
-    this.#jobUnsubscribe?.();
-    this.#jobUnsubscribe = undefined;
-    this.#jobChannel = undefined;
+    this.#jobs?.close();
+    this.#jobs = undefined;
+    this.#userQueries?.close();
+    this.#userQueries = undefined;
     this.#focusedChatUnsubscribe?.();
     this.#focusedChatUnsubscribe = undefined;
     this.#focusedChatChannel = undefined;

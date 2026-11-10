@@ -3,7 +3,7 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { AdminNotes } from "../src/runtime/notes.ts";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { defaultConfig, type Config } from "../src/config/schema.ts";
@@ -14,7 +14,7 @@ import { StreamHub } from "../src/server/streams.ts";
 import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
 import type { AppDeps, UiRestartOutcome } from "../src/server/deps.ts";
 import { createInboxItemTx } from "../src/extensions/notify.ts";
-import { SecAgent } from "../src/documents.ts";
+import { SecAgent, SecUserQueryList } from "../src/documents.ts";
 import { resolveRoutineApproval } from "../src/jobs/registry.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 
@@ -974,6 +974,94 @@ describe("with more than one client attached", () => {
     expect(inboxItems(resumed.text)).toBe(1);
     expect(resumed.text).toContain("after");
     expect(resumed.text).not.toContain("seen");
+  });
+
+  it("delivers a question event to each client exactly once", async () => {
+    const { origin, deps } = await boot();
+    const clients = [
+      await ChatClient.open(origin, "/api/user-queries/events"),
+      await ChatClient.open(origin, "/api/user-queries/events"),
+    ];
+    await Promise.all(clients.map((client) => client.waitFor(sawSnapshot, "the question snapshot")));
+
+    deps.bus.sink.emit("user_query", { id: "q-1" });
+
+    await Promise.all(clients.map((client) => client.waitFor((text) => countOf(text, "event: user_query\n") >= 1, "the question event")));
+    await Promise.all(clients.map((client) => client.settle()));
+    clients.forEach((client) => client.close());
+    for (const client of clients) expect(countOf(client.text, "event: user_query\n")).toBe(1);
+  });
+
+  it("sends a question event that arrives during the snapshot read after the snapshot", async () => {
+    const { origin, deps } = await boot();
+    let open = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const harness = deps.runtime.harness;
+    const original = harness.snapshot.bind(harness) as (...args: unknown[]) => Promise<unknown>;
+    vi.spyOn(harness, "snapshot").mockImplementation((async (...args: unknown[]) => {
+      if (args[0] === SecUserQueryList) await gate;
+      return await original(...args);
+    }) as never);
+    let client: ChatClient | undefined;
+    try {
+      client = await ChatClient.open(origin, "/api/user-queries/events");
+      deps.bus.sink.emit("user_query", { id: "q-during" });
+      await client.settle(100);
+    } finally {
+      open();
+    }
+    await client.waitFor(sawSnapshot, "the question snapshot");
+    await client.settle();
+    client.close();
+    const events = parseFrames(client.text).map((frame) => frame.event);
+    expect(events.filter((event) => event !== "notice")).toEqual(["snapshot", "user_query"]);
+  });
+
+  it("replays a question event made while no client was attached", async () => {
+    const { origin, deps } = await boot();
+    const first = await ChatClient.open(origin, "/api/user-queries/events");
+    await first.waitFor(sawSnapshot, "the question snapshot");
+    deps.bus.sink.emit("user_query", { id: "q-seen" });
+    await first.waitFor((text) => countOf(text, "event: user_query\n") === 1, "the first question event");
+    const lastId = Math.max(...parseFrames(first.text).map((frame) => frame.id));
+    first.close();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    deps.bus.sink.emit("user_query", { id: "q-while-idle" });
+    const resumed = await ChatClient.open(origin, "/api/user-queries/events", { "last-event-id": String(lastId) });
+    await resumed.settle(200);
+    resumed.close();
+    expect(resumed.text).toContain("q-while-idle");
+    expect(resumed.text).not.toContain("event: snapshot");
+  });
+
+  it("sends a job event that arrives during the snapshot reads after the snapshot", async () => {
+    const { origin, deps } = await boot();
+    let open = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const jobs = deps.runtime.jobs;
+    const original = jobs.tree.bind(jobs);
+    vi.spyOn(jobs, "tree").mockImplementation((async (...args: Parameters<typeof original>) => {
+      await gate;
+      return await original(...args);
+    }) as never);
+    let client: ChatClient | undefined;
+    try {
+      client = await ChatClient.open(origin, "/api/jobs/events");
+      deps.bus.sink.emit("job_updated", { id: "job-during" });
+      await client.settle(100);
+    } finally {
+      open();
+    }
+    await client.waitFor(sawSnapshot, "the job snapshot");
+    await client.settle();
+    client.close();
+    const events = parseFrames(client.text).map((frame) => frame.event);
+    expect(events.filter((event) => event !== "notice")).toEqual(["snapshot", "job_updated"]);
   });
 
   it("snapshots a client that reconnects after the endpoint went idle", async () => {

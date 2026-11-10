@@ -18,7 +18,7 @@ import { createTestHarness, type TestHarness } from "./helpers.ts";
  * browser opens it again by itself after the old one ended. The HTTP server then
  * waits for that stream for good, so the daemon never ends. These cases show the
  * three refusals that stop it: a hub that refuses after it closed, a stream hub
- * that refuses on all three attach methods, and a server close that ends while a
+ * that refuses on all four attach methods, and a server close that ends while a
  * client still holds a request.
  */
 
@@ -85,7 +85,7 @@ describe("SseHub after closeAll", () => {
 });
 
 describe("StreamHub after close", () => {
-  it("answers 503 on each of its three attach methods", async () => {
+  it("answers 503 on each of its four attach methods", async () => {
     const sse = new SseHub(OPTIONS);
     // The refusal comes before the hub reads anything of its dependencies.
     const streams = new StreamHub({ sse } as never);
@@ -95,9 +95,10 @@ describe("StreamHub after close", () => {
       const path = req.url ?? "";
       if (path === "/conversation") void streams.attachConversation(route, 1);
       else if (path === "/jobs") void streams.attachJobs(route);
+      else if (path === "/questions") void streams.attachUserQueries(route, async () => ({}));
       else streams.attachFocusedChatEvents(route);
     });
-    for (const path of ["/conversation", "/jobs", "/focused"]) await expectRefusal(await fetch(`${origin}${path}`));
+    for (const path of ["/conversation", "/jobs", "/questions", "/focused"]) await expectRefusal(await fetch(`${origin}${path}`));
     expect(sse.channel("jobs").size).toBe(0);
   });
 });
