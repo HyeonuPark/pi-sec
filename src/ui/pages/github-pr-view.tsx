@@ -193,7 +193,12 @@ export async function loadPr(): Promise<boolean> {
   }
 }
 
-/** One write, and the read that shows its result. A failure is the strip's sentence. */
+/**
+ * One write, and the read that shows its result. A failure of the write is the
+ * strip's sentence and the answer is false. The answer is true once the write
+ * succeeded: a failure of the read after it shows its own sentence in the strip,
+ * and does not say that the write failed.
+ */
 async function write(work: () => Promise<unknown>): Promise<boolean> {
   if (route === null) return false;
   try {
@@ -202,7 +207,8 @@ async function write(work: () => Promise<unknown>): Promise<boolean> {
     error.value = listFailureText(failure);
     return false;
   }
-  return await loadPr();
+  await loadPr();
+  return true;
 }
 
 /** React to one comment, review or description. */

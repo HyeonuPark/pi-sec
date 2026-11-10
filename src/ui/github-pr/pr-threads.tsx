@@ -118,11 +118,16 @@ export interface ReplyBoxProps {
 export function ReplyBox({ label, placeholder, onSend }: ReplyBoxProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  // A ref as well as the state, as in `ResolveButton`: two presses before the next
+  // render both see the state as idle.
+  const inFlight = useRef(false);
   const send = (): void => {
     const body = text.trim();
-    if (body === "" || sending) return;
+    if (body === "" || sending || inFlight.current) return;
+    inFlight.current = true;
     setSending(true);
     const done = (ok: boolean): void => {
+      inFlight.current = false;
       setSending(false);
       if (ok) setText("");
     };

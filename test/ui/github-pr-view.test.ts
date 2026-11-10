@@ -787,6 +787,69 @@ describe("the write controls", () => {
     }
   });
 
+  /** Write `text` into the first thread's reply box, and let the box draw it. */
+  async function writeReply(page: Awaited<ReturnType<typeof openView>>, text: string) {
+    const box = page.document.querySelector(".thread-card .reply-box textarea");
+    const button = page.document.querySelector(".thread-card .reply-btn");
+    if (!(box instanceof page.window.HTMLTextAreaElement)) throw new Error("no reply box");
+    if (!(button instanceof page.window.HTMLButtonElement)) throw new Error("no reply button");
+    box.value = text;
+    box.dispatchEvent(new page.window.Event("input", { bubbles: true }));
+    await page.settle();
+    return { box, button };
+  }
+
+  it("clears a reply that GitHub took when the read after it fails", async () => {
+    const page = await openView({ replies: { "/api/github/pr/acme/widgets/12": { body: prAnswer() } } });
+    try {
+      page.respond("/api/github/pr/acme/widgets/12/reply", { body: { ok: true } });
+      page.respond("/api/github/pr/acme/widgets/12", { status: 502, body: { error: "gh: read failed" } });
+      const { box, button } = await writeReply(page, "Good catch");
+      button.click();
+      await page.settle();
+      // The reply is on GitHub, so the box is empty and a second press has nothing to post.
+      expect(box.value).toBe("");
+      expect(page.document.querySelector("#error-banner")?.textContent).toBe("gh: read failed");
+      expect(page.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("keeps the text when GitHub refuses the reply", async () => {
+    const page = await openView({ replies: { "/api/github/pr/acme/widgets/12": { body: prAnswer() } } });
+    try {
+      page.respond("/api/github/pr/acme/widgets/12/reply", { status: 400, body: { error: "gh refused the reply" } });
+      const { box, button } = await writeReply(page, "Good catch");
+      button.click();
+      await page.settle();
+      expect(box.value).toBe("Good catch");
+      expect(page.document.querySelector("#error-banner")?.textContent).toBe("gh refused the reply");
+    } finally {
+      page.close();
+    }
+  });
+
+  it("sends one reply for two presses before the page draws again", async () => {
+    const page = await openView({ replies: { "/api/github/pr/acme/widgets/12": { body: prAnswer() } } });
+    try {
+      let release: () => void = () => {};
+      page.respond("/api/github/pr/acme/widgets/12/reply", () => new Promise((resolve) => {
+        release = () => resolve({ body: { ok: true } });
+      }));
+      const { button } = await writeReply(page, "Good catch");
+      // Two presses in one task: the state of the box has not been drawn between them.
+      button.click();
+      button.click();
+      await page.settle();
+      expect(page.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+      release();
+      await page.settle();
+    } finally {
+      page.close();
+    }
+  });
+
   it("draws the resolve button only for an unresolved thread that the account can resolve", async () => {
     const base = prAnswer();
     const extra = {
