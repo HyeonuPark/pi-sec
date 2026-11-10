@@ -177,6 +177,23 @@ describe("review draft store", () => {
     expect((await readdir(dir)).sort()).toEqual([aside, "notes.txt"]);
   });
 
+  it("sets a second unreadable file aside without replacing the first", async () => {
+    const { dir, store } = await fresh();
+    const pr = target("acme/widgets", 8);
+    await mkdir(dir, { recursive: true });
+
+    await writeFile(join(dir, "acme+widgets+8.json"), "{ first broken");
+    await store.get(pr);
+    clock += 1000;
+    await writeFile(join(dir, "acme+widgets+8.json"), "{ second broken");
+    await store.get(pr);
+
+    const aside = (await readdir(dir)).filter((n) => n.startsWith("acme+widgets+8.json.unreadable")).sort();
+    expect(aside).toHaveLength(2);
+    const contents = await Promise.all(aside.map((n) => readFile(join(dir, n), "utf8")));
+    expect(contents.sort()).toEqual(["{ first broken", "{ second broken"]);
+  });
+
   it("lands two changes sent at the same time, in order", async () => {
     const { dir, store } = await fresh();
     const pr = target("acme/widgets", 7);
