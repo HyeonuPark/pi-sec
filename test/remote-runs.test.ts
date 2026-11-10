@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { access, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT, withCancel } from "@earendil-works/chord/context";
@@ -365,6 +365,62 @@ describe("the four judgments", { timeout: 30_000 }, () => {
       await fixture.close();
     }
   });
+  it("says a stop failed, and keeps the run, when ssh cannot start", async () => {
+    const fixture = await createRunFixture();
+    try {
+      await fixture.pinHostKey();
+      await fixture.setLevel("box-a", "on");
+      const started = await fixture.runtime.remoteMachines.runs().start({
+        conversationId: "conv-1",
+        toolCallId: "call-stop-no-ssh",
+        machine: "box-a",
+        command: "while true; do echo tick; sleep 1; done",
+        waitMs: 1_000,
+      });
+      const runId = (started as { runId: string }).runId;
+
+      const broken = await fixture.restart({ sshPath: join(fixture.remote, "no-such-ssh") });
+      try {
+        await broken.pinHostKey();
+        const stopped = await broken.runtime.remoteMachines.runs().stop({ runId, who: "agent" });
+        expect(stopped.kind).toBe("failed");
+        const record = await recordOf(broken, runId);
+        expect(record?.settled).not.toBe(true);
+        expect(record?.lastState).not.toBe("lost");
+      } finally {
+        await broken.close();
+      }
+    } finally {
+      await settle();
+    }
+  });
+
+  it("records a run whose directory is gone as lost when it is stopped", async () => {
+    const fixture = await createRunFixture();
+    try {
+      await fixture.pinHostKey();
+      await fixture.setLevel("box-a", "on");
+      const runs = fixture.runtime.remoteMachines.runs();
+      const started = await runs.start({
+        conversationId: "conv-1",
+        toolCallId: "call-stop-gone",
+        machine: "box-a",
+        command: "while true; do echo tick; sleep 1; done",
+        waitMs: 1_000,
+      });
+      const runId = (started as { runId: string }).runId;
+      await rm(join(fixture.remote, ".local/state/pi-sec/runs", runId), { recursive: true, force: true });
+
+      const stopped = await runs.stop({ runId, who: "agent" });
+      expect(stopped.kind).toBe("stopped");
+      const record = await recordOf(fixture, runId);
+      expect(record?.settled).toBe(true);
+      expect(record?.lastState).toBe("lost");
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("stops every process of a restricted run, not only the runner", async () => {
     const fixture = await createRunFixture();
     try {

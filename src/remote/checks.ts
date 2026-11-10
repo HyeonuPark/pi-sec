@@ -536,7 +536,12 @@ export class RemoteRuns {
       return { kind: "failed", reason: "the machine did not answer while the run was stopping" };
     }
     const facts = parseRunFacts(result.stdout);
-    if (!facts.exists && result.code === 255) {
+    // Every real answer of the stop script starts with an `exists=` line. An answer
+    // without one and with a non-zero code means the script did not run (ssh could
+    // not start, or failed on its own), so the run may still be running: the stop
+    // failed and the record stays as it was.
+    const answered = /^exists=/m.test(result.stdout);
+    if (!answered && result.code !== 0) {
       return { kind: "failed", reason: lastLine(result.stderr, "the machine did not answer") };
     }
     const state = readRunState(facts);

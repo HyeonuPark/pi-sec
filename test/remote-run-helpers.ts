@@ -247,7 +247,7 @@ export interface RunFixture {
    * machine that went away while the daemon was down is expressed, because the
    * manager's own environment is fixed when it is built.
    */
-  restart(overrides?: { readonly sshFail?: string }): Promise<RunFixture>;
+  restart(overrides?: { readonly sshFail?: string; readonly sshPath?: string }): Promise<RunFixture>;
   close(): Promise<void>;
 }
 
@@ -270,6 +270,8 @@ export interface RunFixtureOptions {
   readonly seedRoot?: boolean;
   /** Fail every ssh call with this text, as an unreachable machine would. */
   readonly sshFail?: string;
+  /** The ssh program the manager runs. Default: the fake ssh. */
+  readonly sshPath?: string;
   /**
    * Leave the machine's host key unpinned. Default false: a pinned key is the state
    * of an install that has been set up, and it is what a restart has to find again.
@@ -346,7 +348,7 @@ async function boot(options: RunFixtureOptions, remote: string, clock: FakeClock
     ...(options.sshFail === undefined ? {} : { FAKE_EXEC_FAIL: options.sshFail }),
   };
   const overrides: RemoteMachinesOverrides = {
-    sshPath: FAKE_EXEC_SSH,
+    sshPath: options.sshPath ?? FAKE_EXEC_SSH,
     sftpPath: FAKE_EXEC_SFTP,
     rsyncPath: FAKE_EXEC_RSYNC,
     sshEnv: environment,
@@ -501,6 +503,8 @@ async function boot(options: RunFixtureOptions, remote: string, clock: FakeClock
           home,
           storage: undefined,
           ...(overrides?.sshFail === undefined ? {} : { sshFail: overrides.sshFail }),
+          // Only the override sets it: a restart without it goes back to the fake ssh.
+          sshPath: overrides?.sshPath,
         },
         remote,
         clock,
