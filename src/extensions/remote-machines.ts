@@ -83,7 +83,7 @@ When the work needs a wider level than the machine has, do not work around it. T
 
 /** One tool's description: the approved wording, word for word. */
 const DESCRIPTION_REMOTE_MACHINES = `Show the remote machines this install can use. For each machine it gives the level, whether a level change is still being applied, the users with their reachability, and why connections are stopped if they are. Name one machine to read its live load, memory and logged-in sessions. That read is one short command, so it asks the machine. Call it without an argument to find out what is registered. Name a machine before heavy work on a machine at level on.`;
-const DESCRIPTION_REMOTE_RUN = `Run one command on a remote machine in a way that keeps it alive after the ssh session ends. A command that finishes within the wait returns its output and exit code. A longer command returns a run id, and the core then checks the run at least every 30 minutes and reports to this conversation. The command is a shell command line, and bash runs it in the user's home or in cwd. At level restricted it runs at low priority under a time limit. At level on it runs as it is. Starting the same call twice does not start a second run.`;
+const DESCRIPTION_REMOTE_RUN = `Run one command on a remote machine in a way that keeps it alive after the ssh session ends. A command that finishes within the wait returns its output and exit code. A longer command returns a run id, and the core then checks the run at least every 30 minutes and reports to this conversation. The command is a shell command line, and bash runs it in the user's home, or in cwd when you give one. If cwd does not exist on the machine, the command does not run, and the run ends with exit code 125 and an error line in its output. At level restricted it runs at low priority under a time limit. At level on it runs as it is. Starting the same call twice does not start a second run.`;
 const DESCRIPTION_REMOTE_RUN_STATUS = `Read one run: whether it is running, finished, lost, stopped or stranded, its exit code, how large its output is and when it last grew, and the end of its output. The read asks the machine now, so an answer that the machine cannot be reached says nothing about the run itself.`;
 const DESCRIPTION_REMOTE_RUN_STOP = `Stop one run. The core asks the run's process group to stop, and kills it if it is still there after ten seconds. The run is then reported as stopped. Work the run already did is not undone.`;
 const DESCRIPTION_REMOTE_READ = `Read a remote file over sftp and return its text. A file larger than the cap is refused rather than cut, so an edit that follows sees every byte. Name the user when the file is in a secondary user's home.`;
@@ -236,7 +236,10 @@ export function createRemoteMachinesExtension(context: ExtensionContext): Extens
         command: str({ description: "Shell command line; bash runs it" }),
         user: opt(str({ description: "ssh user; the machine's main user when absent" })),
         cwd: opt(
-          str({ description: "Directory to run in, on the remote machine; the user's home when absent" }),
+          str({
+            description:
+              "Directory to run in, on the remote machine; the user's home when absent. If it does not exist, the command does not run.",
+          }),
         ),
       },
     ),

@@ -154,6 +154,51 @@ describe("the four judgments", { timeout: 30_000 }, () => {
     }
   });
 
+  it("does not run the command when cwd does not exist", async () => {
+    const fixture = await createRunFixture();
+    try {
+      await fixture.pinHostKey();
+      await fixture.setLevel("box-a", "on");
+      const started = await fixture.runtime.remoteMachines.runs().start({
+        conversationId: "conv-1",
+        toolCallId: "call-missing-cwd",
+        machine: "box-a",
+        command: "touch ran-here",
+        cwd: join(fixture.remote, "no-such-dir"),
+        waitMs: 10_000,
+      });
+      expect(started.kind).toBe("done");
+      const done = started as { code: number; output: string };
+      expect(done.code).toBe(125);
+      expect(done.output).toContain("cannot change to directory");
+      await expect(access(join(fixture.remote, "ran-here"))).rejects.toThrow();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("runs the command in cwd when it exists", async () => {
+    const fixture = await createRunFixture();
+    try {
+      await fixture.pinHostKey();
+      await fixture.setLevel("box-a", "on");
+      const started = await fixture.runtime.remoteMachines.runs().start({
+        conversationId: "conv-1",
+        toolCallId: "call-existing-cwd",
+        machine: "box-a",
+        command: "pwd",
+        cwd: fixture.remote,
+        waitMs: 10_000,
+      });
+      expect(started.kind).toBe("done");
+      const done = started as { code: number; output: string };
+      expect(done.code).toBe(0);
+      expect(done.output).toContain(fixture.remote);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("judges a run whose process is alive as running, and one whose process was killed as lost", async () => {
     const fixture = await createRunFixture();
     try {

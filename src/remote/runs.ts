@@ -145,7 +145,11 @@ printf '%s %s\\n' "$$" "$tick" > "$RD/.pid" && mv "$RD/.pid" "$RD/pid"
 wrap=$(cat "$RD/wrap" 2>/dev/null)
 cmd=$(cat "$RD/command" 2>/dev/null)
 cwd=$(cat "$RD/cwd" 2>/dev/null)
-if [ -n "\${cwd:-}" ]; then cd "$cwd" 2>/dev/null || true; fi
+if [ -n "\${cwd:-}" ] && ! cd "$cwd" 2>/dev/null; then
+  printf 'pi-sec: cannot change to directory %s; the command did not run\\n' "$cwd"
+  printf '125\\n' > "$RD/.exit" && mv "$RD/.exit" "$RD/exit"
+  exit 125
+fi
 if [ -n "\${wrap:-}" ]; then
   $wrap bash -c "$cmd"
 else

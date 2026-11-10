@@ -897,7 +897,9 @@ number and tick, when the next check is due and the last judgment delivered. The
 run id is a digest of the conversation and the tool call, so a call that is
 replayed after a restart finds its own directory, and creating that directory is
 the one step that starts a process: `mkdir` fails when it is there, so the second
-call starts nothing.
+call starts nothing. If `cwd` is set and the runner cannot change to it, the runner
+writes one error line to the output, records exit code 125 and does not run the
+command.
 
 **One timer per live run.** The interval is `runCheckSeconds`, and a check starts
 thirty seconds before it so that the message lands inside the interval instead of
