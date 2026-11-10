@@ -121,6 +121,8 @@ secret and stay in `auth.json`.
   name, and it is not registered as a value.
 - Reading `~/.pi/sec/auth.json` through a tool shows a reference. Reading the
   secret file shows a placeholder, so the agent still cannot see the value.
+- A key that a file holds in `$VAR` or `!command` form is redacted by its resolved
+  value from the first read on, and a reload of the registry keeps that value.
 - Values under sensitive keys (`apiKey`, `api_key`, `token`, `secret`,
   `password`, `authorization`, `bearer`) that `~/.pi/sec/models.json` holds are
   collected from that file the same way.

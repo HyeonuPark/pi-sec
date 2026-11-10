@@ -217,6 +217,7 @@ async function commandStart(args: readonly string[]): Promise<number> {
       modelsPath: paths.modelsFile,
       secretsDir,
       onCredentialsChanged: () => secrets.reload(),
+      onResolvedCredential: (entry) => secrets.addValues([entry]),
       log: (level, message, fields) => logger[level](message, fields),
       // The stored list is registered before this returns, so the root vmodel
       // check below sees the models the last read named. The read of the

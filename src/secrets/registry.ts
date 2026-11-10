@@ -142,6 +142,8 @@ function credentialValues(value: unknown, prefix: string): SecretValue[] {
 export class SecretRegistry {
   private readonly options: SecretRegistryOptions;
   private entries: SecretValue[] = [];
+  /** Values added while the daemon runs. A reload keeps them. */
+  private runtimeEntries: SecretValue[] = [];
   private current: Redactor = NULL_REDACTOR;
   private readonly warnings: string[] = [];
 
@@ -167,7 +169,7 @@ export class SecretRegistry {
     const entries = await this.readStore(warn);
     this.warnings.length = 0;
     this.warnings.push(...warnings);
-    this.entries = entries;
+    this.entries = [...entries, ...this.runtimeEntries];
     this.current = createRedactor(this.entries, this.redactorOptions);
   }
 
@@ -252,13 +254,23 @@ export class SecretRegistry {
     await this.load();
   }
 
-  /** Merge extra values discovered at runtime. */
+  /**
+   * Merge extra values discovered at runtime. They stay registered across
+   * `load` and `reload`. A call that adds nothing new does not rebuild the
+   * redactor.
+   */
   addValues(entries: readonly SecretValue[]): void {
-    if (entries.length === 0) return;
-    const byName = new Map<string, SecretValue>();
-    for (const entry of this.entries) byName.set(`${entry.name}\u0000${entry.value}`, entry);
-    for (const entry of entries) byName.set(`${entry.name}\u0000${entry.value}`, entry);
-    this.entries = [...byName.values()];
+    const known = new Set(this.entries.map((entry) => `${entry.name}\u0000${entry.value}`));
+    const fresh: SecretValue[] = [];
+    for (const entry of entries) {
+      const key = `${entry.name}\u0000${entry.value}`;
+      if (known.has(key)) continue;
+      known.add(key);
+      fresh.push(entry);
+    }
+    if (fresh.length === 0) return;
+    this.runtimeEntries = [...this.runtimeEntries, ...fresh];
+    this.entries = [...this.entries, ...fresh];
     this.current = createRedactor(this.entries, this.redactorOptions);
   }
 

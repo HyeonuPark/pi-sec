@@ -147,6 +147,54 @@ describe("ModelCredentialStore reads", () => {
     expect(await store.read("deepseek")).toEqual({ type: "api_key", key: FAKE_KEY });
   });
 
+  it("registers the resolved value of a $VAR key with the registry", async () => {
+    vi.stubEnv("PI_SEC_FAKE_KEY_VAR", FAKE_KEY);
+    const env = await setup({ deepseek: { type: "api_key", key: { file: "model-auth.deepseek.key" } } });
+    await writeSecrets(env.secretsDir, { "model-auth.deepseek.key": "$PI_SEC_FAKE_KEY_VAR" });
+    const registry = new SecretRegistry({ dir: env.secretsDir });
+    await registry.load();
+    const namesBefore = registry.names();
+    expect(registry.redactor().containsSecret(FAKE_KEY)).toBe(false);
+    const models = await createModels({
+      authPath: env.authPath,
+      modelsPath: null,
+      secretsDir: env.secretsDir,
+      onResolvedCredential: (entry) => registry.addValues([entry]),
+    });
+    const auth = await models.getAuth("deepseek");
+    expect(auth?.auth.apiKey).toBe(FAKE_KEY);
+    expect(registry.redactor().containsSecret(FAKE_KEY)).toBe(true);
+    expect(registry.names()).toEqual(namesBefore);
+  });
+
+  it("keeps a resolved value after a registry reload", async () => {
+    vi.stubEnv("PI_SEC_FAKE_KEY_VAR", FAKE_KEY);
+    const env = await setup({ deepseek: { type: "api_key", key: { file: "model-auth.deepseek.key" } } });
+    await writeSecrets(env.secretsDir, { "model-auth.deepseek.key": "$PI_SEC_FAKE_KEY_VAR" });
+    const registry = new SecretRegistry({ dir: env.secretsDir });
+    await registry.load();
+    const store = new ModelCredentialStore({
+      authPath: env.authPath,
+      secretsDir: env.secretsDir,
+      onResolvedValue: (entry) => registry.addValues([entry]),
+    });
+    expect((await store.read("deepseek"))?.type).toBe("api_key");
+    await registry.reload();
+    expect(registry.redactor().containsSecret(FAKE_KEY)).toBe(true);
+  });
+
+  it("does not report a literal key as a resolved value", async () => {
+    const env = await setup(inlineAuth());
+    const seen: string[] = [];
+    const store = new ModelCredentialStore({
+      authPath: env.authPath,
+      secretsDir: env.secretsDir,
+      onResolvedValue: (entry) => seen.push(entry.name),
+    });
+    await store.read("deepseek");
+    expect(seen).toEqual([]);
+  });
+
   it("fails with names only when a referenced file is missing or auth.json is broken", async () => {
     const env = await setup(referencedAuth());
     const store = new ModelCredentialStore({ authPath: env.authPath, secretsDir: env.secretsDir });

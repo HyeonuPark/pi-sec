@@ -36,6 +36,11 @@ export interface CreateModelsOptions {
   readonly secretsDir?: string;
   /** Called after a credential write, so the secret registry reloads. */
   readonly onCredentialsChanged?: () => Promise<void> | void;
+  /**
+   * Called with the resolved value of an api key that `auth.json` holds in
+   * `$VAR` or `!command` form, so the secret registry redacts that value.
+   */
+  readonly onResolvedCredential?: (entry: { readonly name: string; readonly value: string }) => void;
   readonly log?: ModelCredentialLog;
   /** Register synthetic.new's model list from `stateDir`. Absent: the one model. */
   readonly syntheticCatalog?: SyntheticCatalogSettings;
@@ -91,6 +96,9 @@ export async function createModels(options: CreateModelsOptions): Promise<ModelR
               // list read waited for: read now instead of at the next interval.
               if (providerId === SYNTHETIC_PROVIDER_ID) void catalog?.refresh();
             },
+            ...(options.onResolvedCredential === undefined
+              ? {}
+              : { onResolvedValue: options.onResolvedCredential }),
             log: options.log,
           }),
         }),

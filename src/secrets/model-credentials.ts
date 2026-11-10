@@ -290,6 +290,14 @@ export interface ModelCredentialStoreOptions extends ModelCredentialPaths {
    * or writes the store.
    */
   readonly onChange?: (providerId: string) => Promise<void> | void;
+  /**
+   * Called when `read` resolved an api key (`$VAR` or `!command` form) to a value
+   * that differs from the text the file holds. The entry carries the resolved
+   * value under the name of the secret file that holds the reference, so the
+   * registry redacts the value the request really uses. It is called once for
+   * each new resolved value of a provider, and its failure never fails the read.
+   */
+  readonly onResolvedValue?: (entry: { readonly name: string; readonly value: string }) => void;
   readonly log?: ModelCredentialLog;
 }
 
@@ -307,6 +315,8 @@ export class ModelCredentialStore implements CredentialStore {
    * a different digest is the signal that the secret list is out of date.
    */
   readonly #fingerprints = new Map<string, string>();
+  /** The resolved key last reported for each provider. It never leaves memory. */
+  readonly #resolved = new Map<string, string>();
 
   constructor(options: ModelCredentialStoreOptions) {
     this.#options = options;
@@ -339,7 +349,23 @@ export class ModelCredentialStore implements CredentialStore {
     options?.signal?.throwIfAborted();
     if (credential.type !== "api_key" || credential.key === undefined) return credential;
     const resolveConfigValue = await loadResolveConfigValue();
-    return { ...credential, key: resolveConfigValue(credential.key, credential.env) } as Credential;
+    const resolved = resolveConfigValue(credential.key, credential.env);
+    this.#reportResolved(providerId, stored["key"], credential.key, resolved);
+    return { ...credential, key: resolved } as Credential;
+  }
+
+  /** Tell the registry about a resolved key value that no file holds. */
+  #reportResolved(providerId: string, reference: unknown, literal: string, resolved: string | undefined): void {
+    const callback = this.#options.onResolvedValue;
+    if (callback === undefined || resolved === undefined || resolved === literal) return;
+    if (this.#resolved.get(providerId) === resolved) return;
+    this.#resolved.set(providerId, resolved);
+    const name = isCredentialFileReference(reference) ? reference.file : modelSecretName(providerId, "key");
+    try {
+      callback({ name, value: resolved });
+    } catch {
+      this.#options.log?.("warn", "registering a resolved model credential failed", { provider: providerId });
+    }
   }
 
   async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
