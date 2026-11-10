@@ -162,20 +162,21 @@ export async function reloadList(): Promise<void> {
 /**
  * Read one report by its slug.
  *
- * `keep` is the revision to stay on: it is honoured when the report still has
- * that revision, so a reader who moved off the newest one is not moved back by a
- * read that comes from somewhere else.
+ * With `keepChosen` the reader's revision is taken when the answer arrives, not
+ * when the request left: it is honoured when the report still has that revision,
+ * so a reader who moved off the newest one, or who chose another revision during
+ * the read, is not moved back by a read that comes from somewhere else.
  */
-async function readReport(name: string, keep?: number): Promise<void> {
+async function readReport(name: string, keepChosen = false): Promise<void> {
   const report = await request<ReportDetail>(`/api/reports/by-name/${encodeURIComponent(name)}`);
   // A report always has at least one revision, so an answer without the list is
   // not a report: it is a wrong address or a page talking to something else. It
   // fails like any other answer that cannot be used, instead of drawing a head
   // with no revision behind it.
   if (!Array.isArray(report.versions)) throw new Error("the answer carried no revisions");
+  const keep = openVersion.value;
   viewerReport.value = report;
-  openVersion.value =
-    keep !== undefined && report.versions.some((entry) => entry.n === keep) ? keep : report.versions.length;
+  openVersion.value = keepChosen && report.versions.some((entry) => entry.n === keep) ? keep : report.versions.length;
 }
 
 /** Read one report for the viewer, then its body. */
@@ -198,18 +199,27 @@ export async function openReport(name: string): Promise<void> {
  * keeps a version change, the compare box and a report read in step.
  */
 export async function refreshViewer(): Promise<void> {
-  await loadBody();
-  if (compareMode.value) await loadDiff();
+  const mine = ++viewerSerial;
+  await loadBody(mine);
+  if (mine === viewerSerial && compareMode.value) await loadDiff(mine);
 }
 
+/**
+ * Raised by each read of the viewer. An answer is drawn only while the serial is
+ * still its own, so a late answer for a revision the reader left changes nothing.
+ */
+let viewerSerial = 0;
+
 /** Read the markdown of the revision on screen. A failure says so and leaves an empty body. */
-async function loadBody(): Promise<void> {
+async function loadBody(mine: number): Promise<void> {
   const report = viewerReport.value;
   if (report === null) return;
   const version = openVersion.value;
   try {
-    bodyText.value = await requestText(`/api/reports/${encodeURIComponent(report.id)}/versions/${version}`);
+    const text = await requestText(`/api/reports/${encodeURIComponent(report.id)}/versions/${version}`);
+    if (mine === viewerSerial) bodyText.value = text;
   } catch {
+    if (mine !== viewerSerial) return;
     bodyText.value = "";
     showError("Could not load that revision.");
   }
@@ -221,7 +231,7 @@ async function loadBody(): Promise<void> {
  * The first revision has nothing before it, so it is identical to itself and no
  * request is made — which is what the old page did before it asked the server.
  */
-async function loadDiff(): Promise<void> {
+async function loadDiff(mine: number): Promise<void> {
   const report = viewerReport.value;
   if (report === null) return;
   const to = openVersion.value;
@@ -230,7 +240,14 @@ async function loadDiff(): Promise<void> {
     reportDiff.value = { identical: true, hunks: [], added: 0, removed: 0, truncated: false };
     return;
   }
-  reportDiff.value = await request<LineDiff>(`/api/reports/${encodeURIComponent(report.id)}/diff?from=${from}&to=${to}`);
+  try {
+    const diff = await request<LineDiff>(`/api/reports/${encodeURIComponent(report.id)}/diff?from=${from}&to=${to}`);
+    if (mine === viewerSerial) reportDiff.value = diff;
+  } catch {
+    if (mine !== viewerSerial) return;
+    reportDiff.value = null;
+    showError("Could not load the comparison.");
+  }
 }
 
 /** The reader chose a revision: the choice is theirs, and the body follows it. */
@@ -254,7 +271,7 @@ export async function reloadReport(): Promise<void> {
   const report = viewerReport.value;
   if (report === null) return;
   try {
-    await readReport(report.name, openVersion.value);
+    await readReport(report.name, true);
   } catch (error) {
     showError(`Could not reload the report: ${messageOf(error)}`);
   }

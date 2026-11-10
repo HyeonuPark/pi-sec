@@ -448,6 +448,133 @@ describe("report viewer", () => {
     }
   });
 
+  /** Choose a revision in the selector, as a reader does. */
+  function choose(page: UiPageHandle, n: number): void {
+    const select = page.document.querySelector("#version-select") as HTMLSelectElement;
+    select.value = String(n);
+    select.dispatchEvent(new page.window.Event("change"));
+  }
+
+  /** An answer that waits for the test: call the returned function to let it go. */
+  function gated<T>(answer: () => T): { readonly answer: () => Promise<T>; readonly release: () => void } {
+    let release: () => void = () => undefined;
+    const open = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return {
+      answer: async () => {
+        await open;
+        return answer();
+      },
+      release,
+    };
+  }
+
+  it("draws the revision chosen last when the two answers come back in reverse order", async () => {
+    const { page } = await openReportPage({ url: "/report/plan" });
+    try {
+      const first = gated(() => ({ text: BODIES["1"] ?? "" }));
+      page.respond("/api/reports/r1/versions/1", first.answer);
+      choose(page, 1);
+      await settle();
+      choose(page, 2);
+      await settle();
+      await settle();
+      first.release();
+      await settle();
+      await settle();
+
+      expect(page.document.querySelector("#report-body")?.textContent).toContain("second");
+      expect(page.document.querySelector("#report-body")?.textContent).not.toContain("first");
+    } finally {
+      page.close();
+    }
+  });
+
+  it("draws the comparison of the revision chosen last", async () => {
+    const { page } = await openReportPage({ url: "/report/plan" });
+    try {
+      (page.document.querySelector("#diff-toggle") as HTMLInputElement).click();
+      await settle();
+      await settle();
+      choose(page, 1);
+      await settle();
+      await settle();
+      expect(page.document.querySelectorAll("#report-body .diff-add")).toHaveLength(0);
+
+      const held = gated(() => ({ body: DIFF }));
+      page.respond("/api/reports/r1/diff", held.answer);
+      choose(page, 2);
+      await settle();
+      await settle();
+      choose(page, 1);
+      await settle();
+      await settle();
+      held.release();
+      await settle();
+      await settle();
+
+      // v1 has nothing before it, so its comparison is empty: the late answer
+      // for v2 is not drawn under it.
+      expect(page.document.querySelectorAll("#report-body .diff-add")).toHaveLength(0);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("says a comparison that failed, and draws the chosen revision's text", async () => {
+    const { page } = await openReportPage({ url: "/report/plan" });
+    try {
+      (page.document.querySelector("#diff-toggle") as HTMLInputElement).click();
+      await settle();
+      await settle();
+      choose(page, 1);
+      await settle();
+      await settle();
+      // Draw a comparison first, so the failure has something to take away.
+      choose(page, 2);
+      await settle();
+      await settle();
+      expect(page.document.querySelectorAll("#report-body .diff-add")).toHaveLength(1);
+
+      choose(page, 1);
+      await settle();
+      await settle();
+      page.respond("/api/reports/r1/diff", () => ({ status: 500, body: { error: { code: "boom", message: "diff broke" } } }));
+      choose(page, 2);
+      await settle();
+      await settle();
+
+      expect(page.document.querySelectorAll("#report-body .diff-add")).toHaveLength(0);
+      expect(page.document.querySelector("#report-body")?.textContent).toContain("second");
+      expect(page.document.getElementById("toast")?.textContent).toContain("Could not load the comparison.");
+    } finally {
+      page.close();
+    }
+  });
+
+  it("keeps a revision chosen while a restored page reads the report again", async () => {
+    const { page, report } = await openReportPage({ url: "/report/plan" });
+    try {
+      const held = gated(() => ({ body: report }));
+      page.respond("/api/reports/by-name/plan", held.answer);
+      page.pageShow(true);
+      await settle();
+      choose(page, 1);
+      await settle();
+      await settle();
+      held.release();
+      await settle();
+      await settle();
+      await settle();
+
+      expect((page.document.querySelector("#version-select") as HTMLSelectElement).value).toBe("1");
+      expect(page.document.querySelector("#report-body")?.textContent).toContain("first");
+    } finally {
+      page.close();
+    }
+  });
+
   it("keeps the selector's element and its focus when another revision is chosen", async () => {
     const { page } = await openReportPage({ url: "/report/plan" });
     try {

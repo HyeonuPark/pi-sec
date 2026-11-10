@@ -891,6 +891,9 @@ top-level page is sent to the shell.
   scrolling sideways, and only the words that changed are marked. Its header
   carries `▤ all reports`, and the list hides it. The list draws no link back to
   a report: the browser's back button returns to the report the reader came from.
+  The body and the comparison always belong to the revision on screen: an answer
+  for a revision the reader left is not drawn, and a report read again keeps the
+  revision the reader chose last.
 - **Feedback and approval share one bar.** On the viewer the page is a shell of a
   fixed height: the header and the bar are rows, and the report column between
   them is what scrolls. The bar is the last row of that shell, so a browser that
