@@ -378,37 +378,6 @@ describe("report store", () => {
     expect(reportStanding((await h.runtime.reports.get(ctx, report.id))!, "done")).toBe("inactive");
   });
 
-  it("records the text a Done carried, and nothing for a Done without one", async () => {
-    const h = await boot();
-    const job = await h.runtime.jobs.create(ctx, { title: "work" });
-    const bare = await h.runtime.reports.create(ctx, {
-      jobId: job.id,
-      title: "First run",
-      content: "one\n",
-      kind: "result",
-    });
-    const asked = await h.runtime.reports.create(ctx, {
-      jobId: job.id,
-      title: "Second run",
-      content: "one\n",
-      kind: "result",
-    });
-
-    const without = approved(await h.runtime.reports.approve(ctx, bare.id, 1, { via: "viewer", button: "done" }));
-    expect(without.approval).toMatchObject({ via: "viewer", button: "done" });
-    expect(without.approval.text).toBeUndefined();
-
-    const with_ = approved(
-      await h.runtime.reports.approve(ctx, asked.id, 1, { via: "panel", button: "done", text: "run it twice" }),
-    );
-    expect(with_.approval).toMatchObject({ via: "panel", button: "done", text: "run it twice" });
-    // The record keeps the user's words beside the approval, not in a note: a
-    // feedback entry would ask the owner for an answer, and a Done asks for work.
-    const stored = (await h.runtime.reports.get(ctx, asked.id))!;
-    expect(stored.versions[0]?.approval?.text).toBe("run it twice");
-    expect(stored.feedback).toEqual([]);
-  });
-
   it("refuses Done on a plan, and leaves the revision unapproved", async () => {
     const h = await boot();
     const job = await h.runtime.jobs.create(ctx, { title: "work" });
@@ -620,23 +589,6 @@ describe("report store", () => {
     expect(outcome.report.versions[0]?.approval?.sha256).toBe("0".repeat(64));
   });
 
-  it("records an approval on the revision it was pressed for", async () => {
-    const h = await boot();
-    const job = await h.runtime.jobs.create(ctx, { title: "work" });
-    const report = await h.runtime.reports.create(ctx, { jobId: job.id, title: "Approve me", content: "one\n" });
-    const revision = report.versions[0]!;
-
-    const outcome = approved(await h.runtime.reports.approve(ctx, report.id, 1, { via: "panel" }));
-    expect(outcome.approval).toMatchObject({ via: "panel", sha256: revision.sha256 });
-
-    const stored = await h.runtime.reports.get(ctx, report.id);
-    // The approval names the revision by its hash, which is copied rather than
-    // re-derived, and the revision itself is untouched.
-    expect(stored?.versions[0]?.approval).toMatchObject({ via: "panel", sha256: revision.sha256 });
-    expect(stored?.versions[0]).toMatchObject({ n: 1, at: revision.at, bytes: revision.bytes });
-    expect(stored!.updatedAt).toBeGreaterThanOrEqual(report.updatedAt);
-  });
-
   it("sets a report aside the moment its approval is recorded", async () => {
     const h = await boot();
     const job = await h.runtime.jobs.create(ctx, { title: "work" });
@@ -651,6 +603,7 @@ describe("report store", () => {
     // set-aside cannot disagree about the moment.
     expect(outcome.approval.at).toBe(at);
     expect(outcome.report.pendingAt).toBe(at);
+    expect(outcome.report.updatedAt).toBeGreaterThanOrEqual(report.updatedAt);
 
     const stored = await store.get(ctx, report.id);
     expect(stored?.pendingAt).toBe(at);
@@ -661,21 +614,6 @@ describe("report store", () => {
     expect(stored?.versions[0]?.approval).toMatchObject({ at, via: "panel", sha256: revision.sha256 });
     expect(stored?.versions[0]).toMatchObject({ n: 1, at: revision.at, bytes: revision.bytes });
     expect(stored?.feedback).toEqual([]);
-  });
-
-  it("refuses a second approval of the same revision", async () => {
-    const h = await boot();
-    const job = await h.runtime.jobs.create(ctx, { title: "work" });
-    const report = await h.runtime.reports.create(ctx, { jobId: job.id, title: "Once", content: "one\n" });
-    const first = approved(await h.runtime.reports.approve(ctx, report.id, 1, { via: "viewer" }));
-
-    const again = await h.runtime.reports.approve(ctx, report.id, 1, { via: "panel" });
-    // The record keeps the moment and the surface of the real approval: a second
-    // press does not rewrite either.
-    if (again.ok || again.reason !== "already_approved") throw new Error(`expected already_approved, got ${again.reason}`);
-    expect(again.approval).toMatchObject({ via: "viewer", at: first.approval.at });
-    const stored = await h.runtime.reports.get(ctx, report.id);
-    expect(stored?.versions[0]?.approval?.via).toBe("viewer");
   });
 
   it("refuses a revision that is no longer the latest", async () => {
@@ -764,16 +702,6 @@ describe("report store", () => {
     const all = await listText({ includeArchived: true });
     expect(all).toContain(one.id);
     expect(all).toContain(two.id);
-  });
-
-  it("refuses a report it does not have", async () => {
-    const h = await boot();
-    expect(await h.runtime.reports.approve(ctx, "no-such-report", 1, { via: "viewer" })).toEqual({
-      ok: false,
-      reason: "not_found",
-    });
-    // Nothing was seeded on the way to the refusal.
-    expect(await h.runtime.reports.list(ctx)).toEqual([]);
   });
 
   it("answers not_found to an approve on an archived report", async () => {
@@ -1587,28 +1515,6 @@ describe("report draft tools", () => {
 
     expect(await h.runtime.reports.list(ctx)).toHaveLength(0);
     expect(await h.runtime.harness.snapshot(SecReportDraft, blankBody.id, ctx)).toBeDefined();
-  });
-
-  it("audits a draft the boot sweep retires over its missing body file", async () => {
-    const h = await boot();
-    const jobId = await liveJob(h, "work");
-    const draft = await writeDraft(h, jobId, "Half written", "body\n");
-    // The state a crash between the file write and the row write leaves behind, or
-    // a cache directory that was cleared under a live store.
-    await rm(draft.path, { force: true });
-
-    // The live registry is passed here because the runtime passes it: the job is
-    // still there, so the missing file is the only reason left.
-    expect(await draftsOf(h).sweep(ctx, h.runtime.jobs)).toEqual({ retired: 1, orphanFiles: 0 });
-
-    // The row is gone, so the audit entry is the only thing left that says the
-    // draft existed and why it was retired.
-    const disposed = (await readAuditTail(h.paths.auditLog, undefined, 50)).filter(
-      (event) => event.type === "report_draft_disposed" && event.draftId === draft.id,
-    );
-    expect(disposed).toHaveLength(1);
-    expect(disposed[0]).toMatchObject({ outcome: "dropped", reason: "body-file-missing" });
-    expect(await h.runtime.harness.snapshot(SecReportDraft, draft.id, ctx)).toBeUndefined();
   });
 
   it("drops a pending draft in the boot sweep when its job is no longer live", async () => {

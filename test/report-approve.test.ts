@@ -303,15 +303,18 @@ describe("approve route", () => {
   it("refuses a second approval without putting a second input in", async () => {
     const origin = await boot();
     const created = await report(origin);
-    await post(origin, `/api/reports/${created.id}/approve`, { version: 1, via: "viewer" });
+    const firstPress = (await (await post(origin, `/api/reports/${created.id}/approve`, { version: 1, via: "viewer" })).json()) as {
+      approval: { at: number };
+    };
 
     const again = await post(origin, `/api/reports/${created.id}/approve`, { version: 1, via: "panel" });
     expect(again.status).toBe(409);
-    const body = (await again.json()) as { error: { code: string }; approval: { via: string } };
+    const body = (await again.json()) as { error: { code: string }; approval: { via: string; at: number } };
     expect(body.error.code).toBe("already_approved");
     // The record keeps the surface and the moment of the real approval, and that
     // record is beside `error` because the feedback bar reads it there.
     expect(body.approval.via).toBe("viewer");
+    expect(body.approval.at).toBe(firstPress.approval.at);
     expect(await userTexts()).toHaveLength(1);
   });
 
@@ -380,6 +383,10 @@ describe("approve route", () => {
   it("answers not_found at the store without writing a report", async () => {
     harness = await createTestHarness();
     expect(await harness.runtime.reports.checkApproval(ctx, "no-such-report", 1)).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+    expect(await harness.runtime.reports.approve(ctx, "no-such-report", 1, { via: "viewer" })).toEqual({
       ok: false,
       reason: "not_found",
     });

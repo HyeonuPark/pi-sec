@@ -579,6 +579,13 @@ describe("attachment tools", () => {
 
     const noJob = jsonOf(await tool.execute({ ids: [mine.id], jobId: "job-gone" } as never, api, ctx));
     expect(noJob["refused"]).toEqual([{ id: mine.id, reason: "job-missing" }]);
+    const noJobUnknown = jsonOf(
+      await tool.execute({ ids: [mine.id, "01ARZ3NDEK0000000000005FAV"], jobId: "job-gone" } as never, api, ctx),
+    );
+    expect(noJobUnknown["refused"]).toEqual([
+      { id: mine.id, reason: "job-missing" },
+      { id: "01ARZ3NDEK0000000000005FAV", reason: "job-missing" },
+    ]);
   });
 
   it("keeps attachments_assign out of the tools a subagent and a scheduled run are offered", async () => {

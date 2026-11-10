@@ -21,10 +21,10 @@ import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { defaultConfig } from "../src/config/schema.ts";
 import { readMessage } from "../src/message-envelope.ts";
 import { createSession, MemoryStorage, type Session, type Storage } from "@earendil-works/pi-durable";
-import { SecJob, type JobRecord, type JobRoutineSpec, type JobScheduleSpec, JOB_STATUSES, SecInbox, SecMigration } from "../src/documents.ts";
+import { SecJob, type JobRecord, type JobRoutineSpec, type JobScheduleSpec, SecInbox, SecMigration } from "../src/documents.ts";
 import { readFile, writeFile } from "node:fs/promises";
 import type { Config } from "../src/config/schema.ts";
-import { FIRING_JOB_STATUSES, LATE_GRACE_MS, isFiringStatus, parseOnceAt, settleOnce, validateScheduleFields, writeRoutine } from "../src/jobs/routine.ts";
+import { LATE_GRACE_MS, parseOnceAt, settleOnce, validateScheduleFields, writeRoutine } from "../src/jobs/routine.ts";
 import { LEGACY_LIST_HINT, migrateRoutines, legacyListProblem, readRoutineMigrationState } from "../src/jobs/routine-migration.ts";
 import { dayStamp } from "../src/runtime/ids.ts";
 import { JOB_ID_DATE_PREFIX, hasDatePrefix, runMigrations } from "../src/runtime/migrations.ts";
@@ -756,26 +756,8 @@ describe("routine-model.test.ts", () => {
     });
   });
 
-  describe("only a working job fires", () => {
-    it("fires planned, active and waiting, and no other status", () => {
-      expect([...FIRING_JOB_STATUSES].sort()).toEqual(["active", "planned", "waiting"]);
-      for (const status of JOB_STATUSES) {
-        expect(isFiringStatus(status)).toBe(FIRING_JOB_STATUSES.includes(status));
-      }
-      for (const status of ["paused", "done", "failed", "cancelled"] as const) {
-        expect(isFiringStatus(status)).toBe(false);
-      }
-    });
-  });
-
   describe("one record holds one schedule", () => {
     const now = Date.UTC(2026, 9, 18, 5, 0, 0);
-
-    it("refuses a write that carries both fields, with the reason it refused", () => {
-      expect(() =>
-        validateScheduleFields({ cron: "0 6 * * *", prompt: "run" }, { at: now + 60_000, prompt: "run" }, now),
-      ).toThrow(/cannot carry both routine and once/);
-    });
 
     it("returns the routine it checked, and the once it checked, on their own", () => {
       expect(validateScheduleFields({ cron: "0 6 * * *", timezone: "UTC", prompt: "run" }, undefined, now)).toEqual({

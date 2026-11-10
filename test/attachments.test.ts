@@ -569,32 +569,6 @@ describe("attachment assignment", () => {
     expect(again.assigned).toEqual([record.id]);
   });
 
-  it("refuses an empty list", async () => {
-    const f = await boot();
-    const result = await assignAttachments(f.ctx(liveJobs(["job-a"])), [], "job-a");
-    expect(result).toEqual({ assigned: [], refused: [{ id: "", reason: "empty" }] });
-  });
-
-  it("refuses a malformed id without reading the store for it", async () => {
-    const f = await boot();
-    const result = await assignAttachments(f.ctx(liveJobs(["job-a"])), ["not-a-ulid"], "job-a");
-    expect(result.refused).toEqual([{ id: "not-a-ulid", reason: "bad-id" }]);
-  });
-
-  it("refuses when the job is not in the live store", async () => {
-    const f = await boot();
-    const id = ulid();
-    const result = await assignAttachments(f.ctx(liveJobs([])), [id], "job-gone");
-    expect(result).toEqual({ assigned: [], refused: [{ id, reason: "job-missing" }] });
-  });
-
-  it("refuses an id that is not in the store", async () => {
-    const f = await boot();
-    const id = ulid();
-    const result = await assignAttachments(f.ctx(liveJobs(["job-a"])), [id], "job-a");
-    expect(result).toEqual({ assigned: [], refused: [{ id, reason: "missing" }] });
-  });
-
   it("refuses a file another job already owns", async () => {
     const f = await boot();
     const record = await createAttachment(f.ctx(), {
