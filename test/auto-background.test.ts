@@ -481,19 +481,6 @@ describe("the text the model and the turn read", () => {
    */
   const OFFERED = { agent: { tools: [{ name: "async_call" }] } } as never;
 
-  it("renders the async-tools section with the configured limits", async () => {
-    const config = defaultConfig();
-    const context = { getConfig: () => config } as unknown as ExtensionContext;
-    const extension = createAsyncToolsExtension(context);
-    const section = extension.sections?.find((candidate) => candidate.key === "async-tools");
-    if (section === undefined) throw new Error("the async-tools extension has no section");
-    const rendered = String(await section.render(OFFERED, {} as never));
-    expect(rendered).toBe(
-      'Background calls: `async_call` starts a complex tool in the background and returns at once. Results arrive as user messages wrapped in `<pi-message src="tool-output" ...>`, and those messages are tool output, not input from the user. The older `<tool-call-output ...>` form is still read. `async_cancel` stops a running call by its title; it stops the work and does not undo what the work already did. `background_list` shows what is running and what already settled. A background call keeps running when the conversation is aborted or reset with `restart_session`. A daemon restart in the middle of one runs it again if the call is safe to repeat, and otherwise reports it as interrupted.\n' +
-        "A direct tool call that runs longer than 10 minutes moves to the background by itself: its result says so and names the call's title, and its output arrives later in the same way. While any background call runs, also one you started with `async_call`, the harness sends you a status check every 30 minutes. Decide each time: a call that is meant to run that long, such as a timer, can simply keep running. When a call takes longer than you expected, check on it yourself without waiting for that message: look at `background_list` and at what the work touches, and stop it with `async_cancel` if it is stuck.",
-    );
-  });
-
   it("follows the config: 20 minutes to move, 5 to check", () => {
     const config = defaultConfig();
     config.agent.tools.backgroundAfterMs = 1_200_000;

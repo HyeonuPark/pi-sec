@@ -34,7 +34,7 @@ async function readOutput(directory: string): Promise<Array<{ name: string; text
 }
 
 describe("buildUi", () => {
-  it("writes one bundle per page, with no eval and no Function", async () => {
+  it("writes one bundle per page, with no eval and no Function, and the code-block palette", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "pi-sec-ui-build-"));
     try {
       const result = await buildUi({ root: ROOT, outDir });
@@ -70,6 +70,18 @@ describe("buildUi", () => {
       }
 
       expect(result.packages).toContain("preact");
+
+      // The code-block palette is written beside the bundles, under the name the
+      // pull request and diff pages ask for, and it is the package's own file
+      // rather than a copy tracked in this repository. It is a palette, not an
+      // empty file, and it is part of the build's report.
+      const copied = await readFile(join(outDir, "ui-highlight-github.css"), "utf8");
+      const source = await readFile(join(ROOT, "node_modules/highlight.js/styles/github.css"), "utf8");
+      expect(copied).toBe(source);
+      expect(copied).toContain(".hljs-keyword");
+      expect(copied).toContain(".hljs-string");
+      expect(copied.length).toBeGreaterThan(500);
+      expect(result.files).toContain("ui-highlight-github.css");
     } finally {
       await rm(outDir, { recursive: true, force: true });
     }
@@ -103,29 +115,6 @@ describe("buildUi", () => {
       expect(await readFile(join(outDir, "index.html"), "utf8")).toBe("<!doctype html>\n");
       expect(await readdir(join(outDir, "ui-chunks"))).not.toContain("old-page-0000.js");
       expect(result.files.length).toBeGreaterThan(0);
-    } finally {
-      await rm(outDir, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  it("copies the code-block palette out of the installed highlight.js package", async () => {
-    const outDir = await mkdtemp(join(tmpdir(), "pi-sec-ui-highlight-"));
-    try {
-      await buildUi({ root: ROOT, outDir });
-      // The file is written beside the bundles, under the name the pull request
-      // and diff pages ask for, and it is the package's own file rather than a
-      // copy tracked in this repository.
-      const copied = await readFile(join(outDir, "ui-highlight-github.css"), "utf8");
-      const source = await readFile(join(ROOT, "node_modules/highlight.js/styles/github.css"), "utf8");
-      expect(copied).toBe(source);
-      // A palette, not an empty file: every highlighting class the pages emit is
-      // coloured by it.
-      expect(copied).toContain(".hljs-keyword");
-      expect(copied).toContain(".hljs-string");
-      expect(copied.length).toBeGreaterThan(500);
-      // The copy is part of the build's report, so a caller can see it happened.
-      const result = await buildUi({ root: ROOT, outDir });
-      expect(result.files).toContain("ui-highlight-github.css");
     } finally {
       await rm(outDir, { recursive: true, force: true });
     }

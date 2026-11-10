@@ -36,38 +36,6 @@ const rowKeys = (ui: StreamPage): string[] =>
 const title = (ui: StreamPage) => ui.document.getElementById("chat-title") as HTMLButtonElement;
 
 describe("a stream the server closed", () => {
-  it("opens a new one after a second, waiting longer each failed attempt", async () => {
-    const ui = await page();
-    vi.useFakeTimers();
-    expect(ui.streams()).toHaveLength(1);
-
-    ui.currentStream().fail();
-    await vi.advanceTimersByTimeAsync(999);
-    expect(ui.streams()).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(ui.streams()).toHaveLength(2);
-
-    // The second attempt failed too, and the wait doubles.
-    ui.currentStream().fail();
-    await vi.advanceTimersByTimeAsync(1500);
-    expect(ui.streams()).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(500);
-    expect(ui.streams()).toHaveLength(3);
-  });
-
-  it("opens nothing while the tab is hidden, and does on the return", async () => {
-    const ui = await page();
-    vi.useFakeTimers();
-    ui.setVisibility("hidden");
-    ui.currentStream().fail();
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(ui.streams()).toHaveLength(1);
-
-    ui.setVisibility("visible");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(ui.streams()).toHaveLength(2);
-  });
-
   it("gives up a stream a hidden page held for a minute, and opens a new one on the return", async () => {
     const ui = await page();
     vi.useFakeTimers();
@@ -84,42 +52,6 @@ describe("a stream the server closed", () => {
     ui.setVisibility("visible");
     await vi.advanceTimersByTimeAsync(0);
     expect(ui.streams()).toHaveLength(2);
-  });
-
-  it("keeps the stream of a page that comes back before the minute is up", async () => {
-    const ui = await page();
-    vi.useFakeTimers();
-    ui.currentStream().open();
-    ui.setVisibility("hidden");
-    await vi.advanceTimersByTimeAsync(10_000);
-    ui.setVisibility("visible");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(ui.streams()).toHaveLength(1);
-  });
-
-  it("opens a new stream when a hidden page comes back after thirty seconds", async () => {
-    const ui = await page();
-    vi.useFakeTimers();
-    ui.currentStream().open();
-    ui.setVisibility("hidden");
-    await vi.advanceTimersByTimeAsync(30_000);
-    ui.setVisibility("visible");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(ui.streams()).toHaveLength(2);
-  });
-
-  it("opens a new stream for a page restored from the back/forward cache, and for the network's return", async () => {
-    const ui = await page();
-    vi.useFakeTimers();
-    ui.currentStream().open();
-    ui.pageShow(true);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(ui.streams()).toHaveLength(2);
-
-    ui.currentStream().open();
-    ui.online();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(ui.streams()).toHaveLength(3);
   });
 });
 

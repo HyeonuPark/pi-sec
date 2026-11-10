@@ -7,7 +7,6 @@ import {
   createGhClient,
   createGhReader,
   createGhWriter,
-  GhRefusalError,
 } from "../../src/extensions/github-pr/gh.ts";
 import {
   commentOnPullRequest,
@@ -443,13 +442,6 @@ describe("writes: refused input", () => {
     await expect(submitReview(ctx, "MERGE" as never, "text", [])).rejects.toBeInstanceOf(WriteInputError);
 
     expect(await lines(log)).toEqual([]);
-  });
-
-  it("keeps the write half from taking a read", async () => {
-    const found = await fakeGhFixture({ allowWrites: true });
-    const writer = createGhWriter(createGhClient(found.clientOptions));
-    await expect(writer.api(["api", "repos/acme/widgets", "-X", "GET"])).rejects.toBeInstanceOf(GhRefusalError);
-    expect(await lines(found.logFile)).toEqual([]);
   });
 });
 

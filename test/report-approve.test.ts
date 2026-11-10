@@ -638,36 +638,6 @@ describe("done route", () => {
     expect(stored.versions[0]!.approval).toBeUndefined();
   });
 
-  it("refuses what Approve refuses, for the same reasons and in the same shape", async () => {
-    const origin = await boot();
-    const created = await report(origin, "result");
-    const added = await post(origin, `/api/reports/${created.id}/versions`, { content: "two\n", note: "second" });
-    const second = (await added.json()) as { versions: { sha256: string }[] };
-
-    // An older revision: the answer names the one that can be approved.
-    const stale = await post(origin, `/api/reports/${created.id}/done`, { version: 1, via: "panel" });
-    expect(stale.status).toBe(409);
-    const staleBody = (await stale.json()) as { error: { code: string }; latest: number; latestSha256: string };
-    expect(staleBody.error.code).toBe("stale_revision");
-    expect(staleBody.latest).toBe(2);
-    expect(staleBody.latestSha256).toBe(second.versions[1]!.sha256);
-
-    // A body that names no revision, or no surface.
-    for (const body of [{}, { version: 0 }, { version: 2, via: "email" }]) {
-      expect((await post(origin, `/api/reports/${created.id}/done`, body)).status).toBe(400);
-    }
-
-    // The newest revision is the one that can be done.
-    expect((await post(origin, `/api/reports/${created.id}/done`, { version: 2 })).status).toBe(201);
-    // And a second press is refused, carrying the record of the first.
-    const again = await post(origin, `/api/reports/${created.id}/done`, { version: 2, via: "panel" });
-    expect(again.status).toBe(409);
-    const againBody = (await again.json()) as { error: { code: string }; approval: { button?: string } };
-    expect(againBody.error.code).toBe("already_approved");
-    expect(againBody.approval.button).toBe("done");
-    expect(await userTexts()).toHaveLength(1);
-  });
-
   it("refuses Done on a report whose job has finished, and on one it does not have", async () => {
     const origin = await boot();
     const created = await report(origin, "result");

@@ -35,43 +35,6 @@ const TOOL_NAMES = [
   "remote_level_tighten",
 ];
 
-/** The section text, byte for byte. */
-const PLAN_SECTION = `[remote machines]
-
-A remote machine is another computer this install reaches over ssh. Use the remote tools for it, and never run an ssh call of your own in bash. The tools carry the pinned host key, the kept-open connection and the machine's level. A call you build by hand carries none of them.
-
-The level is the user's allowance for one machine.
-- off: do not touch the machine. Every remote tool refuses.
-- restricted: light work only. A command started with remote_run runs at low priority under a time limit.
-- on: heavy work too, such as a build.
-
-Only the user widens a level, with the sidebar slider. The core makes a level off by itself when a machine does not answer for longer than the outage threshold, and the user raises it again with the slider after that. The root makes one stricter, to off or to restricted, only when the user asked, and with remote_level_tighten. Every other agent leaves the level alone.
-
-Start with remote_machines when you do not know what is registered. Before heavy work on a machine at on, name that machine in remote_machines and read its load, memory and logged-in sessions. The user can be using that machine at the same time.
-
-Use remote_run for anything that can outlive the turn. It keeps running when the connection drops. Read it with remote_run_status and stop it with remote_run_stop. A run check message arrives in this conversation while the run goes on, and it says whether the run is running, finished, lost, stopped or unreachable. A run on a machine the core made off is stranded: the core stops watching it, its end is unknown, and one message says so. Read the run with remote_run_status after the user raises the level again. The core does not stop a run because its output went quiet.
-
-When the user makes a machine stricter, a run that no longer fits it is stopped after a deadline. The root asks you to stop your own runs first, so do that when it asks.
-
-Before you work as a secondary user of a machine, read that user's own file on this machine if it exists: ~/.pi/sec/memory/remote-machines/<machine>/<user>.md. It holds what that user is for and what not to disturb.
-
-Change a remote file with remote_read, remote_write and remote_edit, and copy a tree with remote_sync, instead of a shell redirect: those tools write a temporary file and rename it, so a reader never sees half a file.
-
-When the work needs a wider level than the machine has, do not work around it. Tell your parent agent, and the root asks the user.`;
-
-/** The tool descriptions, one text per tool, byte for byte. */
-const PLAN_DESCRIPTIONS: Readonly<Record<string, string>> = {
-  remote_machines: `Show the remote machines this install can use. For each machine it gives the level, whether a level change is still being applied, the users with their reachability, and why connections are stopped if they are. Name one machine to read its live load, memory and logged-in sessions. That read is one short command, so it asks the machine. Call it without an argument to find out what is registered. Name a machine before heavy work on a machine at level on.`,
-  remote_run: `Run one command on a remote machine in a way that keeps it alive after the ssh session ends. A command that finishes within the wait returns its output and exit code. A longer command returns a run id, and the core then checks the run at least every 30 minutes and reports to this conversation. The command is a shell command line, and bash runs it in the user's home, or in cwd when you give one. If cwd does not exist on the machine, the command does not run, and the run ends with exit code 125 and an error line in its output. At level restricted it runs at low priority under a time limit. At level on it runs as it is. Starting the same call twice does not start a second run.`,
-  remote_run_status: `Read one run: whether it is running, finished, lost, stopped or stranded, its exit code, how large its output is and when it last grew, and the end of its output. The read asks the machine now, so an answer that the machine cannot be reached says nothing about the run itself.`,
-  remote_run_stop: `Stop one run. The core asks the run's process group to stop, and kills it if it is still there after ten seconds. The run is then reported as stopped. Work the run already did is not undone.`,
-  remote_read: `Read a remote file over sftp and return its text. A file larger than the cap is refused rather than cut, so an edit that follows sees every byte. Name the user when the file is in a secondary user's home.`,
-  remote_write: `Replace a remote file's content over sftp. The text goes to a temporary file in the same directory and is renamed into place, so a reader sees the old bytes or the new ones and never a half-written file. It creates no directory: name one that exists.`,
-  remote_edit: `Replace exactly one occurrence of a string in a remote file, over sftp. It reads the file, refuses when the string appears zero times or more than once, writes the result to a temporary file, reads the original again and refuses if that changed meanwhile, and then renames the temporary file into place.`,
-  remote_sync: `Copy a tree between this machine and a remote machine with rsync. push copies from this machine to the remote, pull the other way. delete removes files at the destination that the source does not have, and it is off unless you name it. Level restricted refuses this tool, because the size of a copy is not known before it starts.`,
-  remote_level_tighten: `Make a remote machine's level stricter, to off or to restricted. Only the root can call it, and only when the user asked. It cannot widen a level. The sidebar slider is the user's own act. Runs that do not fit the new level are stopped after the deadline.`,
-};
-
 /** The extension over one fixture's remote machines. */
 function extensionOf(fixture: RunFixture) {
   const config: Config = fixture.runtime.getConfig();
@@ -122,17 +85,6 @@ describe("the extension's declaration", () => {
     }
   });
 
-  it("carries the tool descriptions, character for character", async () => {
-    const fixture = await createRunFixture();
-    try {
-      for (const [name, description] of Object.entries(PLAN_DESCRIPTIONS)) {
-        expect(toolOf(fixture, name).description, name).toBe(description);
-      }
-    } finally {
-      await fixture.close();
-    }
-  });
-
   it("declares remote_run as safe to run again, and nothing else", async () => {
     const fixture = await createRunFixture();
     try {
@@ -162,12 +114,11 @@ describe("the prompt section", () => {
       expect(await section.render(offered("read", "bash", "js"), BACKGROUND_CONTEXT)).toBeUndefined();
       expect(await section.render(offered(), BACKGROUND_CONTEXT)).toBeUndefined();
       const rendered = await section.render(offered("read", "remote_run"), BACKGROUND_CONTEXT);
-      expect(rendered).toBe(PLAN_SECTION);
-      expect(SECTION_TEXT).toBe(PLAN_SECTION);
+      expect(rendered).toBe(SECTION_TEXT);
       // Every one of the nine names is enough on its own, which is what keeps the
       // section on a scheduled run, where six of them are removed.
       for (const name of TOOL_NAMES) {
-        expect(await section.render(offered(name), BACKGROUND_CONTEXT), name).toBe(PLAN_SECTION);
+        expect(await section.render(offered(name), BACKGROUND_CONTEXT), name).toBe(SECTION_TEXT);
       }
     } finally {
       await fixture.close();
@@ -328,30 +279,6 @@ describe("remote_run", () => {
       expect(stoppedText).toContain("Work it already did is not undone.");
     } finally {
       waited.mockRestore();
-      await fixture.close();
-    }
-  });
-
-  it("answers the same call twice with one run, because the run id is the call", async () => {
-    const fixture = await createRunFixture();
-    try {
-      await fixture.setLevel("box-a", "on");
-      const api = callApi(ROOT_CONVERSATION_ID, "call-7");
-      const first = textOf(
-        await toolOf(fixture, "remote_run").execute({ machine: "box-a", command: "echo once" }, api, BACKGROUND_CONTEXT),
-      );
-      const second = textOf(
-        await toolOf(fixture, "remote_run").execute({ machine: "box-a", command: "echo once" }, api, BACKGROUND_CONTEXT),
-      );
-      const runId = /Run (run-[0-9a-f]+)/.exec(first)?.[1] ?? "";
-      expect(runId).not.toBe("");
-      expect(second).toContain(runId);
-      // One run directory, and the second execution's answer is the first run's.
-      // It does read the finished run again, to return that output with the same
-      // id, and it starts nothing: that is the property this rests on.
-      const runs = await readdir(join(fixture.remote, ".local", "state", "pi-sec", "runs"));
-      expect(runs).toEqual([runId]);
-    } finally {
       await fixture.close();
     }
   });

@@ -1083,7 +1083,9 @@ describe("the edit buttons", () => {
 });
 
 describe("the thread an address names", () => {
-  it("opens it, marks it, and brings it into view", async () => {
+  // The scroll itself is a layout fact, so test/browser/github-pr.browser.ts checks it
+  // in Chromium.
+  it("opens it and marks it, and leaves the other thread unmarked", async () => {
     const page = await openView({
       path: "/github/pr/acme/widgets/12#thread-T1",
       replies: { "/api/github/pr/acme/widgets/12": { body: prAnswer() } },
@@ -1096,30 +1098,6 @@ describe("the thread an address names", () => {
       expect(card?.querySelector(".thread-toggle")?.textContent).toBe("▾ Hide resolved thread (1 comment)");
       // The other thread is not marked.
       expect(page.document.getElementById("thread-T2")?.className).toBe("thread-card");
-    } finally {
-      page.close();
-    }
-  });
-
-  it("scrolls to it, and does not claim to have done so when the browser has no such call", async () => {
-    const scrolled: string[] = [];
-    const page = await openView({
-      path: "/github/pr/acme/widgets/12#thread-T1",
-      replies: { "/api/github/pr/acme/widgets/12": { body: prAnswer() } },
-      before: (window) => {
-        // jsdom has no layout, so the page's scroll call is a method this test
-        // installs; without it the page must simply not throw.
-        Object.defineProperty(window.Element.prototype, "scrollIntoView", {
-          configurable: true,
-          writable: true,
-          value(this: Element) {
-            scrolled.push(this.id);
-          },
-        });
-      },
-    });
-    try {
-      expect(scrolled).toEqual(["thread-T1"]);
     } finally {
       page.close();
     }

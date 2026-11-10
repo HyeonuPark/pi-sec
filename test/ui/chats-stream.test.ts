@@ -4,14 +4,14 @@
  *
  * The stream carries `focused_chat_updated` and nothing else, so what it costs is
  * one read of the lists it can touch, and a burst costs one read per burst. The
- * connection's own rules — a hidden tab gives up its stream after a minute, a
+ * connection's own rules (a hidden tab gives up its stream after a minute, a
  * return opens a new one, and the snapshot that new stream opens with stands for
- * the frames nobody heard — are `StreamClient`'s, and these tests drive them
- * through the page.
+ * the frames nobody heard) are `StreamClient`'s, and test/ui/stream-client.test.ts
+ * tests them. These tests cover what the page does with a snapshot.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { archivedChat, archivedReads, activeReads, chatsPage, click, openChat, rows } from "./chats-fixtures.ts";
-import { settle, type UiPageHandle } from "./harness.ts";
+import { settle } from "./harness.ts";
 
 /** One stream frame, as the server writes it. */
 function frame(change: string, conversationId = 3): Record<string, unknown> {
@@ -172,97 +172,6 @@ describe("the focused chat stream (2.3-8)", () => {
       // tab was hidden, and a list is read at a glance.
       expect(page.fetchCalls.length).toBeGreaterThan(before);
       expect(archivedReads(page)).toHaveLength(2);
-    } finally {
-      page.close();
-    }
-  });
-});
-
-describe("a page that was away (2.3-9)", () => {
-  /** Run `body` with the page's clock under the test's control. */
-  async function withFakeClock(body: (flush: () => Promise<void>) => Promise<void>): Promise<void> {
-    vi.useFakeTimers();
-    try {
-      await body(() => vi.advanceTimersByTimeAsync(0));
-    } finally {
-      vi.useRealTimers();
-    }
-  }
-
-  it("closes the stream of a tab hidden for a minute, and opens a new one on the return", async () => {
-    const page = await chatsPage({
-      active: [openChat(3, "Topic notes")],
-      archived: { "": { items: [archivedChat(1, "Release notes")] } },
-    });
-    try {
-      page.emit("snapshot", SNAPSHOT);
-      await settle();
-      await withFakeClock(async (flush) => {
-        const archivedBefore = archivedReads(page).length;
-        page.setVisibility("hidden");
-        await vi.advanceTimersByTimeAsync(59_999);
-        // A minute has not passed, so the light stream stays open.
-        expect(page.currentStream().closed).toBe(false);
-
-        await vi.advanceTimersByTimeAsync(1);
-        // A minute hidden: the page gives up its own stream, and opens nothing
-        // while the tab is still hidden.
-        expect(page.currentStream().closed).toBe(true);
-        expect(page.streams()).toHaveLength(1);
-
-        page.setVisibility("visible");
-        await flush();
-        // The return opens a new stream, which starts with a snapshot.
-        expect(page.streams()).toHaveLength(2);
-        expect(page.streams()[1]).toBe("/api/focused-chats/events");
-
-        page.emit("snapshot", SNAPSHOT);
-        await flush();
-        // That snapshot stands for a minute of frames nobody heard, so both
-        // lists are read again.
-        expect(archivedReads(page)).toHaveLength(archivedBefore + 1);
-        expect(activeReads(page)).toHaveLength(2);
-      });
-    } finally {
-      page.close();
-    }
-  });
-
-  it("keeps its stream, and reads nothing, when the tab comes back before the minute is up", async () => {
-    const page: UiPageHandle = await chatsPage({ active: [openChat(3, "Topic notes")], archived: { "": { items: [] } } });
-    try {
-      await withFakeClock(async (flush) => {
-        const before = page.fetchCalls.length;
-        page.setVisibility("hidden");
-        await vi.advanceTimersByTimeAsync(20_000);
-
-        page.setVisibility("visible");
-        await vi.advanceTimersByTimeAsync(60_000);
-
-        expect(page.currentStream().closed).toBe(false);
-        expect(page.streams()).toHaveLength(1);
-        // Nothing was read either: the connection was never away.
-        expect(page.fetchCalls.length).toBe(before);
-      });
-    } finally {
-      page.close();
-    }
-  });
-
-  it("opens a new stream for a page restored from the back/forward cache, and reads on its snapshot", async () => {
-    const page = await chatsPage({ active: [], archived: { "": { items: [] } } });
-    try {
-      page.emit("snapshot", SNAPSHOT);
-      await settle();
-      const archivedBefore = archivedReads(page).length;
-
-      page.pageShow(true);
-      await settle();
-      expect(page.streams()).toHaveLength(2);
-
-      page.emit("snapshot", SNAPSHOT);
-      await settle();
-      expect(archivedReads(page)).toHaveLength(archivedBefore + 1);
     } finally {
       page.close();
     }

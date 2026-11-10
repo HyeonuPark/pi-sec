@@ -1003,22 +1003,11 @@ describe("the file tree", () => {
     }
   });
 
-  it("brings the file it names into view, and marks it", async () => {
-    const scrolled: string[] = [];
-    const page = await openDiff({
-      replies: { [PR_PATH]: { body: prAnswer() }, [DIFF_PATH]: { body: diffAnswer() } },
-      before: (window) => {
-        // jsdom has no layout, so the page's scroll call is a method this test
-        // installs; without it the page must simply not throw.
-        Object.defineProperty(window.Element.prototype, "scrollIntoView", {
-          configurable: true,
-          writable: true,
-          value(this: Element) {
-            scrolled.push(this.id);
-          },
-        });
-      },
-    });
+  // The scroll a press starts is a layout fact, so test/browser/github-pr.browser.ts
+  // checks it in Chromium. Here the row of the deleted file is pressed, which the
+  // browser fixture does not have.
+  it("marks the first file, and moves the mark to the file a press names, a deleted one too", async () => {
+    const page = await openDiff({ replies: { [PR_PATH]: { body: prAnswer() }, [DIFF_PATH]: { body: diffAnswer() } } });
     try {
       expect(page.document.querySelectorAll(".tree-file.active")).toHaveLength(1);
       expect(page.document.querySelector(".tree-file.active")?.getAttribute("data-idx")).toBe("0");
@@ -1026,7 +1015,8 @@ describe("the file tree", () => {
       if (!(row instanceof page.window.HTMLElement)) throw new Error("no tree row for the deleted file");
       row.click();
       await page.settle();
-      expect(scrolled).toEqual(["file-2"]);
+      // The file the press moves to is on the page.
+      expect(page.document.getElementById("file-2")).not.toBeNull();
       expect(page.document.querySelector(".tree-file.active")?.getAttribute("data-idx")).toBe("2");
     } finally {
       page.close();
