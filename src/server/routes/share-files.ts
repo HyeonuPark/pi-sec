@@ -1,8 +1,7 @@
-import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { apiError, type Router } from "../router.ts";
 import type { AppDeps } from "../deps.ts";
-import { resolveRoots } from "../../attachments/store.ts";
+import { readRegularFile, resolveRoots } from "../../attachments/store.ts";
 import { attachmentContext, writeStoredFile, type AttachmentRouteOptions } from "./attachments.ts";
 
 /**
@@ -56,9 +55,8 @@ export function registerShareFiles(
     }
     let data: Buffer;
     try {
-      const info = await stat(path);
-      if (!info.isFile()) throw new Error("not a file");
-      data = await readFile(path);
+      // No link is followed: a link in the share root is a missing file here.
+      data = await readRegularFile(path);
     } catch {
       apiError(route.res, 404, "not_found", "file not found", route.requestId);
       return;

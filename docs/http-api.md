@@ -2728,7 +2728,7 @@ answers 404.
 The name is the only thing protecting a file: this server has no authentication,
 so `/api/share` is exactly as reachable as the chat is. What it is *not* is a way to
 read anything else on the machine — one path segment, no traversal, and an
-extension allowlist of raster images only. SVG is deliberately excluded: it is a
+extension allowlist of raster images only, and no symbolic link: a link in the share directory answers `404`. SVG is deliberately excluded: it is a
 document, it would be same-origin, and opening one directly would run whatever
 script it carries. Responses carry `X-Content-Type-Options: nosniff`, and a
 response that is not a raster image also carries `Content-Security-Policy:

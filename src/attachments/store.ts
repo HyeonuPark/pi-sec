@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { chmod, mkdir, open, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -398,9 +399,27 @@ export async function listAttachments(
   return found.sort((a, b) => a.collectedAt - b.collectedAt);
 }
 
+/**
+ * Read one regular file without following a symbolic link at its last path part.
+ *
+ * The file is opened with `O_NOFOLLOW`, checked with `fstat` on the open handle and
+ * read from that handle, so a link swapped in after the check cannot be read. A
+ * link fails with `ELOOP`, and a file that is not regular fails with `EINVAL`.
+ */
+export async function readRegularFile(path: string): Promise<Buffer> {
+  const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw Object.assign(new Error(`not a regular file: ${basename(path)}`), { code: "EINVAL" });
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
+
 /** The bytes on disk. There is no other reader of an attachment body. */
 export async function readAttachmentBytes(record: AttachmentRecord): Promise<Buffer> {
-  return await readFile(record.storagePath);
+  return await readRegularFile(record.storagePath);
 }
 
 /** Why an assignment was refused. These strings are part of the tool contract. */

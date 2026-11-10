@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -364,6 +364,31 @@ describe("serving routes", () => {
     const missing = await fetch(`${f.origin}/api/share/not-there.png`);
     expect(missing.status).toBe(404);
     expect(((await missing.json()) as { error: { code: string } }).error.code).toBe("not_found");
+  });
+
+  it("does not follow a symbolic link in the share root", async () => {
+    const f = await boot();
+    await writeFile(join(f.base, "leak-target.png"), "LINK-MARKER-OUTSIDE", "utf8");
+    await symlink(join(f.base, "leak-target.png"), join(f.roots.share, "leak.png"));
+    const response = await fetch(`${f.origin}/api/share/leak.png`);
+    expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain("LINK-MARKER-OUTSIDE");
+  });
+
+  it("does not serve a stored file that was replaced by a link", async () => {
+    const f = await boot();
+    const image = await createAttachment(f.ctx(), {
+      kind: "share",
+      name: "swap.png",
+      mime: "image/png",
+      data: pngBytes(32, 32),
+    });
+    await writeFile(join(f.base, "swap-target.txt"), "LINK-MARKER-OUTSIDE", "utf8");
+    await rm(image.storagePath);
+    await symlink(join(f.base, "swap-target.txt"), image.storagePath);
+    const response = await fetch(`${f.origin}/api/attachments/${image.id}`);
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(await response.text()).not.toContain("LINK-MARKER-OUTSIDE");
   });
 
   it("will not follow a name out of the share root even if the root holds one", async () => {
