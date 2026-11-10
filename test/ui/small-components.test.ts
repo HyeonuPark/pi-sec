@@ -437,6 +437,8 @@ describe("common-theme.test.ts", () => {
       expect(document.documentElement.dataset.theme).toBe("light");
       await tick();
       expect(button.textContent).toBe("◐ light");
+      // The press redraws the element in place, so a shell button mounted over stays the one on the page.
+      expect(document.querySelector("#theme-toggle")).toBe(button);
 
       button.click();
       expect(document.documentElement.dataset.theme).toBe("dark");

@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountSideParts, startSidePanels } from "../../src/ui/chat/SideParts.tsx";
 import { FOLDS_KEY } from "../../src/ui/state/folds.ts";
 import { fakePreferences, type FakePreferences } from "./preferences-fake.ts";
-import { applyJobEvent, resetJobsState } from "../../src/ui/state/jobs.ts";
+import { applyJobEvent, JOBS_REFRESH_WINDOW_MS, resetJobsState } from "../../src/ui/state/jobs.ts";
 import { applyInboxFrame, resetInboxState } from "../../src/ui/state/inbox.ts";
 import { resetMachinesState } from "../../src/ui/state/machines.ts";
 import { resetNotesState } from "../../src/ui/state/notes.ts";
@@ -331,9 +331,11 @@ describe("what a folded heading still says", () => {
       node("job-2", { working: [] }),
       node("job-3", { working: [] }, [node("job-4", { working: [] })]),
     ]);
+    vi.useFakeTimers();
     applyJobEvent("job_updated");
+    await vi.advanceTimersByTimeAsync(JOBS_REFRESH_WINDOW_MS);
+    vi.useRealTimers();
     await settle();
-    await new Promise((resolve) => setTimeout(resolve, 1100));
 
     expect(workingBadge().className).toContain("hidden");
     expect(workingBadge().textContent).toBe("");

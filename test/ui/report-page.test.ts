@@ -830,9 +830,6 @@ describe("report page shell", () => {
     try {
       const toggle = page.document.getElementById("theme-toggle") as HTMLButtonElement;
       expect(toggle.textContent).toBe("◐ auto");
-      toggle.dispatchEvent(new page.window.Event("click"));
-      await settle();
-      expect(page.document.getElementById("theme-toggle")?.textContent).toBe("◐ light");
       expect(page.document.getElementById("toast")?.getAttribute("role")).toBe("alert");
     } finally {
       page.close();

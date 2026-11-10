@@ -640,11 +640,6 @@ describe("the page around the panels", () => {
     const theme = byId(ui, "theme-toggle");
     expect(byId(ui, "sidebar").contains(theme)).toBe(true);
     expect(theme.textContent).toContain("auto");
-
-    press(ui, theme);
-    await more(2);
-    expect(ui.document.documentElement.dataset.theme).toBe("light");
-    expect(byId(ui, "theme-toggle").textContent).toContain("light");
   });
 
   it("stacks the panels in the order the operator reads them", async () => {

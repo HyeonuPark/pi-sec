@@ -96,37 +96,27 @@ describe("the no-response marker in the transcript", () => {
     expect(ui.rows().map((row) => row.key)).toEqual(["writing"]);
   });
 
-  it("draws a turn that says something else next to the marker", async () => {
+  it.each([
+    [
+      "a turn that says something else next to the marker",
+      [`${MARKER}\nHere is the answer after all.`, `${MARKER} because there is nothing to add`, "A plain answer."],
+      ["Here is the answer after all.", "because there is nothing to add", "A plain answer."],
+    ],
+    ["a marker that is not the whole answer", [`before ${MARKER} after`, `\`${MARKER}\``], ["before", "after", "no-response"]],
+    [
+      "every copy of the marker that is not the whole answer",
+      [`\`${MARKER}\``, "[]", "[ ]", `표지는 ${MARKER} 입니다.`],
+      ["no-response"],
+    ],
+  ])("draws %s", async (_name, texts, fragments) => {
     const ui = await page();
-    ui.emit("snapshot", {
-      entries: [
-        assistant(1, `${MARKER}\nHere is the answer after all.`),
-        assistant(2, `${MARKER} because there is nothing to add`),
-        assistant(3, "A plain answer."),
-      ],
-    });
+    ui.emit("snapshot", { entries: texts.map((text, index) => assistant(index + 1, text)) });
     await flush();
 
     const html = ui.document.getElementById("transcript")?.innerHTML ?? "";
-    expect(html).toContain("Here is the answer after all.");
-    expect(html).toContain("because there is nothing to add");
-    expect(html).toContain("A plain answer.");
-    // Three answers drawn. The hidden writing row that always ends the list is not one of them.
-    expect(ui.document.querySelectorAll(".message.assistant:not(.writing)")).toHaveLength(3);
-  });
-
-  it("draws a marker that is not the whole answer", async () => {
-    const ui = await page();
-    ui.emit("snapshot", {
-      entries: [assistant(1, `before ${MARKER} after`), assistant(2, `\`${MARKER}\``)],
-    });
-    await flush();
-
-    const html = ui.document.getElementById("transcript")?.innerHTML ?? "";
-    expect(html).toContain("before");
-    expect(html).toContain("after");
-    expect(html).toContain("no-response");
-    expect(ui.document.querySelectorAll(".message.assistant:not(.writing)")).toHaveLength(2);
+    for (const fragment of fragments) expect(html).toContain(fragment);
+    // The hidden writing row that always ends the list is not an answer.
+    expect(ui.document.querySelectorAll(".message.assistant:not(.writing)")).toHaveLength(texts.length);
   });
 
   it("keeps one card when a silent turn sits between two tool calls", async () => {
@@ -167,23 +157,6 @@ describe("the no-response marker in the transcript", () => {
     await flush();
     expect(ui.document.getElementById("transcript")?.innerHTML ?? "").not.toContain("no-response");
     expect(ui.document.querySelector("#transcript .writing")).not.toBeNull();
-  });
-
-  it("draws every copy of the marker that is not the whole answer", async () => {
-    const ui = await page();
-    ui.emit("snapshot", {
-      entries: [
-        assistant(1, `\`${MARKER}\``),
-        assistant(2, "[]"),
-        assistant(3, "[ ]"),
-        assistant(4, `표지는 ${MARKER} 입니다.`),
-      ],
-    });
-    await flush();
-
-    const html = ui.document.getElementById("transcript")?.innerHTML ?? "";
-    expect(html).toContain("no-response");
-    expect(ui.document.querySelectorAll(".message.assistant:not(.writing)")).toHaveLength(4);
   });
 });
 

@@ -21,6 +21,7 @@ import { resetQueriesState } from "../../src/ui/state/queries.ts";
 import { resetNotesState } from "../../src/ui/state/notes.ts";
 import {
   applyMachineEvent,
+  MACHINES_REFRESH_WINDOW_MS,
   applyMachinesAnswer,
   machines,
   markedLevel,
@@ -297,10 +298,12 @@ describe("the Machines panel", () => {
     // The server must not refresh the panel on `extension_reloaded`: that frame
     // goes out before the new config is in place. This frame comes after it.
     setList([machine({ level: "on" })]);
+    vi.useFakeTimers();
     applyJobEvent("job_updated");
     applyMachineEvent();
+    await vi.advanceTimersByTimeAsync(MACHINES_REFRESH_WINDOW_MS);
+    vi.useRealTimers();
     await settle();
-    await new Promise((resolve) => setTimeout(resolve, 600));
 
     expect(calls.filter((call) => call.url === "/api/remote-machines").length).toBeGreaterThan(readsAfterMount);
     const marked = [...panel().querySelectorAll<HTMLElement>(".machine-level-button.marked")];
@@ -400,9 +403,11 @@ describe("the wait a tightening spends", () => {
     // The core clears the wait and says so on the stream; the same read that
     // follows any machine change clears the line and the colour.
     setList([machine({ level: "off", pending: null })]);
+    vi.useFakeTimers();
     applyMachineEvent();
+    await vi.advanceTimersByTimeAsync(MACHINES_REFRESH_WINDOW_MS);
+    vi.useRealTimers();
     await settle();
-    await new Promise((resolve) => setTimeout(resolve, 600));
 
     expect(panel().querySelector(".machine-pending")).toBeNull();
     const marked = panel().querySelector<HTMLElement>('[data-machine-level="off"]')!;

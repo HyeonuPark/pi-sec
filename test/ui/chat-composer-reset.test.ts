@@ -40,57 +40,60 @@ async function typeIntoTheField(ui: ComposerPage, text = "a half-written message
 }
 
 describe("the field", () => {
-  it("keeps the text, the caret and the focus across a live entry", async () => {
-    const ui = await page();
+  it.each([
+    [
+      // Was the case "keeps the text, the caret and the focus across a live entry".
+      "a live entry",
+      {},
+      async (ui: ComposerPage) => {
+        ui.emit("entry_appended", { entry: operatorMessage(2, "something else") });
+        ui.emit("message_end", { entry: { id: 3, kind: "pi.assistant", model: [{ role: "assistant", content: "an answer" }] } });
+      },
+    ],
+    [
+      // Was the case "keeps them across the whole state a reconnect brings".
+      "the whole state a reconnect brings",
+      {},
+      async (ui: ComposerPage) => {
+        // A second snapshot is what a reconnected stream opens with: the transcript is
+        // drawn again from it, and the field is not part of it.
+        ui.emit("snapshot", { entries: [operatorMessage(1, "earlier"), { id: 2, kind: "pi.assistant", model: [] }], run: null });
+      },
+    ],
+    [
+      // Was the case "keeps them while the ring turns and stops".
+      "the ring turning and stopping",
+      {},
+      async (ui: ComposerPage) => {
+        ui.emit("run_start", {});
+        await ui.settle();
+        ui.emit("run_end", {});
+      },
+    ],
+    [
+      // Was the case "keeps them while the context bar reads again".
+      "the context bar reading again",
+      { fetch: { "/basic-chat/context": { body: { used: 100, max: 1000 } } } },
+      async (ui: ComposerPage) => {
+        ui.respond("/basic-chat/context", { body: { used: 900, max: 1000 } });
+        ui.emit("message_end", { entry: { id: 4, kind: "pi.assistant", model: [] } });
+      },
+      (ui: ComposerPage) => {
+        // The bar it was read for did move, so the comparison is not vacuous.
+        expect((ui.document.getElementById("context-fill") as HTMLElement).style.width).toBe("90%");
+      },
+    ],
+  ] as const)("keeps the text, the caret and the focus across %s", async (_name, options, act, after) => {
+    const ui = await page(options);
     await typeIntoTheField(ui);
     const before = ui.capture("#message");
     expect(before.focused).toBe(true);
 
-    ui.emit("entry_appended", { entry: operatorMessage(2, "something else") });
-    ui.emit("message_end", { entry: { id: 3, kind: "pi.assistant", model: [{ role: "assistant", content: "an answer" }] } });
+    await act(ui);
     await ui.settle();
 
     ui.expectUntouched(before);
-  });
-
-  it("keeps them across the whole state a reconnect brings", async () => {
-    const ui = await page();
-    await typeIntoTheField(ui);
-    const before = ui.capture("#message");
-
-    // A second snapshot is what a reconnected stream opens with: the transcript is
-    // drawn again from it, and the field is not part of it.
-    ui.emit("snapshot", { entries: [operatorMessage(1, "earlier"), { id: 2, kind: "pi.assistant", model: [] }], run: null });
-    await ui.settle();
-
-    ui.expectUntouched(before);
-  });
-
-  it("keeps them while the ring turns and stops", async () => {
-    const ui = await page();
-    await typeIntoTheField(ui);
-    const before = ui.capture("#message");
-
-    ui.emit("run_start", {});
-    await ui.settle();
-    ui.emit("run_end", {});
-    await ui.settle();
-
-    ui.expectUntouched(before);
-  });
-
-  it("keeps them while the context bar reads again", async () => {
-    const ui = await page({ fetch: { "/basic-chat/context": { body: { used: 100, max: 1000 } } } });
-    await typeIntoTheField(ui);
-    const before = ui.capture("#message");
-
-    ui.respond("/basic-chat/context", { body: { used: 900, max: 1000 } });
-    ui.emit("message_end", { entry: { id: 4, kind: "pi.assistant", model: [] } });
-    await ui.settle();
-
-    ui.expectUntouched(before);
-    // And the bar it was read for did move, so the comparison above is not vacuous.
-    expect((ui.document.getElementById("context-fill") as HTMLElement).style.width).toBe("90%");
+    after?.(ui);
   });
 
   it("keeps a draft the operator restored while the stream draws the transcript", async () => {

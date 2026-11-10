@@ -85,14 +85,6 @@ describe("the chats page's chrome", () => {
       expect(button?.textContent).toBe("◐ auto");
       expect(page.document.querySelectorAll("#theme-toggle")).toHaveLength(1);
       expect(page.document.documentElement.dataset.theme).toBe("auto");
-
-      button?.dispatchEvent(new page.window.MouseEvent("click", { bubbles: true }));
-      // A signal's reader is drawn again in the microtask after the write.
-      await settle();
-      expect(page.document.getElementById("theme-toggle")).toBe(button);
-      expect(button?.textContent).toBe("◐ light");
-      expect(page.document.documentElement.dataset.theme).toBe("light");
-      expect(page.window.localStorage.getItem("pi-sec-theme")).toBe("light");
     } finally {
       page.close();
     }

@@ -12,7 +12,9 @@
  * test here holds.
  */
 import { describe, expect, it } from "vitest";
-import { loadUiPage, settle, type UiPageHandle } from "./harness.ts";
+import { loadUiPage, type UiPageHandle } from "./harness.ts";
+import { quotaNote } from "../../src/ui/usage/values.tsx";
+import type { UsageQuota } from "../../src/shared/wire/usage.ts";
 
 const SYNTHETIC_BILLING = { label: "synthetic.new billing page", url: "https://synthetic.new/billing" };
 
@@ -23,12 +25,6 @@ function answer(card: Record<string, unknown>) {
     timezone: "Asia/Tokyo",
     cards: [{ provider: "card", name: "Card", shape: "subscription", receivedAt: { at: 1, label: "2026-10-25 07:30" }, ...card }],
   };
-}
-
-/** The sentence beside a card's first quota percentage. */
-function noteOf(page: UiPageHandle, index = 0): string | null | undefined {
-  const notes = [...page.document.querySelectorAll(".usage-quota .usage-small")];
-  return notes[index]?.textContent;
 }
 
 /** Load the page with one card whose fields the test states. */
@@ -46,57 +42,18 @@ function credits(amounts: { used: unknown; limit: unknown; balance: unknown }) {
 
 const RESET_AT = { at: 1_790_000_000_000, label: "2026-10-28 04:56" };
 
+/** One quota value: the reset moment, and optionally the share that returns. */
+const quota = (extra: Record<string, unknown>, at = RESET_AT) => ({ utilization: 0, resetsAt: at, ...extra }) as UsageQuota;
+
 describe("a quota that comes back a little at a time", () => {
-  it("writes the share that returns and the moment, instead of the plain reset time", async () => {
-    const page = await open({
-      weekly: { state: "value", value: { utilization: 0, resetsAt: RESET_AT, regenPercent: 2 } },
-      credits: credits({ used: null, limit: null, balance: null }),
-    });
-    try {
-      expect(noteOf(page)).toBe("next +2% at 2026-10-28 04:56");
-      expect(page.document.body.textContent).not.toContain("resets 2026-10-28 04:56");
-    } finally {
-      page.close();
-    }
-  });
-
-  it("writes the moment alone when the share is stated but could not be read", async () => {
-    const page = await open({
-      weekly: { state: "value", value: { utilization: 40, resetsAt: RESET_AT, regenPercent: null } },
-      credits: { state: "wip" },
-    });
-    try {
-      expect(noteOf(page)).toBe("next regeneration at 2026-10-28 04:56");
-    } finally {
-      page.close();
-    }
-  });
-
-  it("writes the plain reset time when the value states no such share at all", async () => {
-    const page = await open({
-      fiveHour: { state: "value", value: { utilization: 28, resetsAt: RESET_AT } },
-      weekly: { state: "value", value: { utilization: 72, resetsAt: { at: 2, label: "2026-10-31 05:59" } } },
-      credits: { state: "wip" },
-    });
-    try {
-      expect(noteOf(page, 0)).toBe("resets 2026-10-28 04:56");
-      expect(noteOf(page, 1)).toBe("resets 2026-10-31 05:59");
-    } finally {
-      page.close();
-    }
-  });
-
-  it("reads the share on a five-hour window too, because the shape is the window's", async () => {
-    const page = await open({
-      fiveHour: { state: "value", value: { utilization: 10, resetsAt: RESET_AT, regenPercent: 1 } },
-      weekly: { state: "wip" },
-      credits: { state: "wip" },
-    });
-    try {
-      expect(noteOf(page, 0)).toBe("next +1% at 2026-10-28 04:56");
-    } finally {
-      page.close();
-    }
+  it.each([
+    ["writes the share that returns and the moment, instead of the plain reset time", quota({ regenPercent: 2 }), "next +2% at 2026-10-28 04:56"],
+    ["writes the moment alone when the share is stated but could not be read", quota({ utilization: 40, regenPercent: null }), "next regeneration at 2026-10-28 04:56"],
+    ["writes the plain reset time when the value states no such share at all", quota({ utilization: 28 }), "resets 2026-10-28 04:56"],
+    ["writes the plain reset time of a second window the same way", quota({ utilization: 72 }, { at: 2, label: "2026-10-31 05:59" }), "resets 2026-10-31 05:59"],
+    ["reads the share on a five-hour window too, because the shape is the window's", quota({ utilization: 10, regenPercent: 1 }), "next +1% at 2026-10-28 04:56"],
+  ])("%s", (_name, value, expected) => {
+    expect(quotaNote(value)).toBe(expected);
   });
 });
 

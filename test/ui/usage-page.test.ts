@@ -193,6 +193,20 @@ describe("the cards of a usage page", () => {
     } finally {
       page.close();
     }
+
+    // A weekly value that states a regeneration share reaches the sentence beside its bar.
+    const regen = structuredClone(ANTHROPIC);
+    regen.cards[0].fields.weekly.value = {
+      utilization: 72,
+      resetsAt: { at: 3, label: "2026-10-28 04:56" },
+      regenPercent: 2,
+    } as never;
+    const regenPage = await open(regen);
+    try {
+      expect(cardOf(regenPage, "anthropic").textContent).toContain("next +2% at 2026-10-28 04:56");
+    } finally {
+      regenPage.close();
+    }
   });
 
   it("reads a bar's level as ok under 70, warn from 70 to 89, danger from 90", async () => {
@@ -646,14 +660,12 @@ describe("the two controls of the usage page", () => {
       expect(page.document.documentElement.dataset.theme).toBe("light");
       expect(toggle.textContent).toBe("◐ light");
       expect(page.window.localStorage.getItem("pi-sec-theme")).toBe("light");
-
-      toggle.click();
-      await settle();
-      expect(page.document.documentElement.dataset.theme).toBe("dark");
+      // The shell's own element survives the press: the page mounted the button over it.
+      expect(page.document.getElementById("theme-toggle")).toBe(toggle);
       // The page reads the usage once at load and never polls, and it opens no
-      // stream. The two presses are saves of the shared theme, the only other calls.
+      // stream. The press is a save of the shared theme, the only other call.
       expect(page.fetchCalls.filter((call) => call.path === "/api/usage")).toHaveLength(1);
-      expect(page.fetchCalls.filter((call) => call.method === "PATCH")).toHaveLength(2);
+      expect(page.fetchCalls.filter((call) => call.method === "PATCH")).toHaveLength(1);
       expect(page.streams()).toEqual([]);
     } finally {
       page.close();

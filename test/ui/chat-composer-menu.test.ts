@@ -120,44 +120,45 @@ describe("Compact", () => {
   });
 });
 
+const TWO_AGENTS = [
+  { conversationId: "12", name: "orch-example" },
+  { conversationId: "14", name: "worker-example" },
+];
+
+/** A 409 refusal whose body, when one is given, is the parsed JSON the server sent. */
+const refusal = (body?: unknown) => new ApiError(409, "agents_working", "x", body === undefined ? undefined : { body });
+
 describe("the agents a refusal names", () => {
-  it("reads the list the refusal carries beside its error envelope", () => {
-    const error = new ApiError(409, "agents_working", "2 sub-agents are working", {
-      requestId: "r1",
-      body: {
-        error: { code: "agents_working", message: "2 sub-agents are working", requestId: "r1" },
-        agents: [
-          { conversationId: "12", name: "orch-example" },
-          { conversationId: "14", name: "worker-example" },
-        ],
-      },
-    });
-
-    expect(workingAgentsOf(error)).toEqual([
-      { conversationId: "12", name: "orch-example" },
-      { conversationId: "14", name: "worker-example" },
-    ]);
-  });
-
-  it("names nobody when the body is missing, of another shape, or nameless", () => {
+  it.each([
+    [
+      "reads the list the refusal carries beside its error envelope",
+      new ApiError(409, "agents_working", "2 sub-agents are working", {
+        requestId: "r1",
+        body: {
+          error: { code: "agents_working", message: "2 sub-agents are working", requestId: "r1" },
+          agents: TWO_AGENTS,
+        },
+      }),
+      TWO_AGENTS,
+    ],
     // A refusal this page cannot read says nothing about who is working, which is
     // what the question falls back on.
-    expect(workingAgentsOf(new ApiError(409, "agents_working", "2 sub-agents are working"))).toEqual([]);
-    expect(workingAgentsOf(new ApiError(409, "agents_working", "x", { body: { agents: "two" } }))).toEqual([]);
-    expect(workingAgentsOf(new ApiError(409, "agents_working", "x", { body: { agents: [{ conversationId: "12" }, null] } }))).toEqual([]);
-    expect(workingAgentsOf(undefined)).toEqual([]);
-    expect(workingAgentsOf(new Error("not a refusal"))).toEqual([]);
-  });
-
-  it("keeps only the entries that name a person", () => {
-    const error = new ApiError(409, "agents_working", "x", {
-      body: { agents: [{ conversationId: "12", name: "a" }, { conversationId: "14" }, { name: "b" }] },
-    });
-    // An entry with no conversation is still a person the operator loses track of.
-    expect(workingAgentsOf(error)).toEqual([
-      { conversationId: "12", name: "a" },
-      { conversationId: undefined, name: "b" },
-    ]);
+    ["names nobody when the body is missing", new ApiError(409, "agents_working", "2 sub-agents are working"), []],
+    ["names nobody when the agents are not a list", refusal({ agents: "two" }), []],
+    ["names nobody when the only entries are nameless or null", refusal({ agents: [{ conversationId: "12" }, null] }), []],
+    ["names nobody when the error is undefined", undefined, []],
+    ["names nobody when the error is not a refusal", new Error("not a refusal"), []],
+    [
+      // An entry with no conversation is still a person the operator loses track of.
+      "keeps only the entries that name a person",
+      refusal({ agents: [{ conversationId: "12", name: "a" }, { conversationId: "14" }, { name: "b" }] }),
+      [
+        { conversationId: "12", name: "a" },
+        { conversationId: undefined, name: "b" },
+      ],
+    ],
+  ])("%s", (_name, error, expected) => {
+    expect(workingAgentsOf(error)).toEqual(expected);
   });
 });
 
