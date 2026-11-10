@@ -271,6 +271,15 @@ describe("errors and the key", () => {
     expect((await rig.call("linear_status", {})).text).toContain("Linear refused the key.");
   });
 
+  it("says a read with an HTTP 500 and no JSON got no data, and adds no warning about a write", async () => {
+    rig = await createRig();
+    rig.linear.on("LinearStatus", new Response("<html>bad gateway</html>", { status: 500, headers: { "content-type": "text/html" } }));
+    const result = await rig.call("linear_status", {});
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("Linear answered HTTP 500 with no data.");
+    expect(result.text).not.toContain("may or may not have happened");
+  });
+
   it("shows the data and then the errors when an answer holds both", async () => {
     rig = await createRig();
     rig.linear.on(

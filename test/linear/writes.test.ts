@@ -263,6 +263,54 @@ describe("a write that fails", () => {
     expect(rig.rows[0]).toMatchObject({ type: "linear_write", outcome: "unknown" });
   });
 
+  const UNSURE_WARNING = "The write may or may not have happened. Read the issue before you try again.";
+
+  it("records an HTTP 502 with a body that is not JSON as unknown, with the warning", async () => {
+    rig = await createRig();
+    const { reportId } = await approvedReport(rig, GRANT_ENG_123);
+    rig.linear.on("LinearIssueForWrite", reply({ data: { issue: issueNode() } }));
+    rig.linear.on("LinearCommentCreate", new Response("<html>bad gateway</html>", { status: 502, headers: { "content-type": "text/html" } }));
+    const result = await rig.call("linear_add_comment", { report_id: reportId, id: "ENG-123", body: COMMENT_BODY });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("Linear answered HTTP 502 with no data.");
+    expect(result.text).toContain(UNSURE_WARNING);
+    expect(rig.rows[0]).toMatchObject({ type: "linear_write", outcome: "unknown" });
+  });
+
+  it("records an HTTP 500 with an error list and no data as unknown", async () => {
+    rig = await createRig();
+    const { reportId } = await approvedReport(rig, GRANT_ENG_123);
+    rig.linear.on("LinearIssueForWrite", reply({ data: { issue: issueNode() } }));
+    rig.linear.on("LinearCommentCreate", reply({ errors: [{ message: "internal error" }] }, { status: 500 }));
+    const result = await rig.call("linear_add_comment", { report_id: reportId, id: "ENG-123", body: COMMENT_BODY });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(UNSURE_WARNING);
+    expect(result.text).not.toContain("The write was not applied.");
+    expect(rig.rows[0]).toMatchObject({ type: "linear_write", outcome: "unknown" });
+  });
+
+  it("records a 200 answer with no data and no error as unknown", async () => {
+    rig = await createRig();
+    const { reportId } = await approvedReport(rig, GRANT_ENG_123);
+    rig.linear.on("LinearIssueForWrite", reply({ data: { issue: issueNode() } }));
+    rig.linear.on("LinearCommentCreate", reply({}));
+    const result = await rig.call("linear_add_comment", { report_id: reportId, id: "ENG-123", body: COMMENT_BODY });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(UNSURE_WARNING);
+    expect(rig.rows[0]).toMatchObject({ type: "linear_write", outcome: "unknown" });
+  });
+
+  it("still refuses a 400 answer with a GraphQL error and no data, and records step 7", async () => {
+    rig = await createRig();
+    const { reportId } = await approvedReport(rig, GRANT_ENG_123);
+    rig.linear.on("LinearIssueForWrite", reply({ data: { issue: issueNode() } }));
+    rig.linear.on("LinearCommentCreate", reply({ errors: [{ message: "bad input" }] }, { status: 400 }));
+    const result = await rig.call("linear_add_comment", { report_id: reportId, id: "ENG-123", body: COMMENT_BODY });
+    expect(result.text).toContain("The write was not applied.");
+    expect(result.text).not.toContain("may or may not have happened");
+    expect(rig.rows[0]).toMatchObject({ type: "linear_write_refused", step: 7 });
+  });
+
   it("refuses the key's denial with the plain text, and the audit row says step 7", async () => {
     rig = await createRig();
     const { reportId } = await approvedReport(rig, GRANT_ENG_123);

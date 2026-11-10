@@ -1899,7 +1899,8 @@ with `No write was sent to Linear. One read was sent.`
 
 Every write call leaves one audit row in the audit log, of type `linear_write`
 for a write that was sent (with `outcome` `sent`, or `unknown` after a network
-failure) and `linear_write_refused` for a refusal (with the step). A row holds
+failure, a timeout, or an answer that does not show whether the write happened:
+HTTP 5xx with no data, or no data and no error) and `linear_write_refused` for a refusal (with the step). A row holds
 the conversation id, the tool, the report id and revision, the target, the names
 of the fields, and the length of a title, description or comment, and never their
 text.

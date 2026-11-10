@@ -213,8 +213,11 @@ export class LinearClient {
     if (response.status === 403 || errors.some((e) => e.type === "forbidden")) throw new LinearError(FORBIDDEN_TEXT);
 
     const data = body !== null && typeof body === "object" ? ((body as { data?: unknown }).data ?? null) : null;
-    if (data === null && errors.length === 0) {
-      throw new LinearError(`Linear answered HTTP ${String(response.status)} with no data.`);
+    if (data === null && (errors.length === 0 || (write && response.status >= 500))) {
+      const text = `Linear answered HTTP ${String(response.status)} with no data.`;
+      // For a write, an answer without data does not show whether Linear ran it:
+      // a gateway can answer 5xx after Linear committed. So it is unsure, like a timeout.
+      throw new LinearError(write ? text + WRITE_UNSURE : text, write);
     }
     return { kind: "result", result: { data, errors } };
   }
