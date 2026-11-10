@@ -61,8 +61,23 @@ export const creatingChat = signal(false);
 /** One read or write at a time. */
 let busy = false;
 
-/** A change the stream reported while a read or a write was in flight. */
+/** A request that arrived while a read or a write was in flight: one read follows it. */
 let queued = false;
+
+/** Raised by each new search term, so a read of the old term writes nothing. */
+let termSerial = 0;
+
+/**
+ * End the work that owns `busy`. A request that arrived meanwhile is answered
+ * by one read of both lists, which clears the flag first, so it cannot loop.
+ */
+function release(): void {
+  busy = false;
+  if (queued) {
+    queued = false;
+    void reload();
+  }
+}
 
 /** The list key: the number the server gave a chat is the whole of which chat it is. */
 function keyOf(item: ChatsListItem): string {
@@ -130,7 +145,9 @@ async function readArchived(
  * starts at one page, because the term names a different list.
  */
 async function reloadArchived(): Promise<void> {
+  const mine = termSerial;
   const page = await readArchived(undefined, Math.max(1, archivedPages.value));
+  if (mine !== termSerial) return;
   archivedChats.value = reconcileById(archivedChats.value, page.items, keyOf);
   archivedNext.value = page.next;
   archivedPages.value = page.read;
@@ -140,7 +157,9 @@ async function reloadArchived(): Promise<void> {
 async function loadMoreArchived(): Promise<void> {
   const cursor = archivedNext.value;
   if (cursor === undefined) return;
+  const mine = termSerial;
   const page = await readArchived(cursor, 1);
+  if (mine !== termSerial) return;
   archivedChats.value = reconcileById(archivedChats.value, [...archivedChats.value, ...page.items], keyOf);
   archivedNext.value = page.next;
   archivedPages.value += page.read;
@@ -148,7 +167,10 @@ async function loadMoreArchived(): Promise<void> {
 
 /** Read both lists. */
 export async function reload(): Promise<void> {
-  if (busy) return;
+  if (busy) {
+    queued = true;
+    return;
+  }
   busy = true;
   try {
     activeChats.value = reconcileById(activeChats.value, await readActive(), keyOf);
@@ -156,10 +178,7 @@ export async function reload(): Promise<void> {
   } catch (error) {
     showError(`Could not load the chats: ${messageOf(error)}`);
   } finally {
-    busy = false;
-    // Both lists were just read in full, so a change the stream reported while
-    // this ran is already in what was drawn.
-    queued = false;
+    release();
   }
 }
 
@@ -172,7 +191,7 @@ export async function loadMore(): Promise<void> {
   } catch (error) {
     showError(`Could not load more chats: ${messageOf(error)}`);
   } finally {
-    busy = false;
+    release();
   }
 }
 
@@ -185,6 +204,7 @@ export async function loadMore(): Promise<void> {
 export async function searchArchived(term: string): Promise<void> {
   if (term === archivedTerm.value) return;
   archivedTerm.value = term;
+  termSerial += 1;
   archivedNext.value = undefined;
   archivedPages.value = 0;
   await reload();
@@ -247,8 +267,8 @@ export async function newChat(): Promise<void> {
   } catch (error) {
     showError(`Could not open a chat: ${messageOf(error)}`);
   } finally {
-    busy = false;
     creatingChat.value = false;
+    release();
   }
 }
 
@@ -281,14 +301,16 @@ export async function renameChat(id: number): Promise<void> {
     if (error instanceof ApiError && error.code === "chat_archived") {
       showError("This chat is archived, so its title can no longer change.");
       busy = false;
+      queued = false;
       await reload();
       return;
     }
-    busy = false;
     showError(`Could not rename the chat: ${messageOf(error)}`);
+    release();
     return;
   }
   busy = false;
+  queued = false;
   await reload();
 }
 
@@ -314,11 +336,7 @@ export async function refreshFromStream(change?: string): Promise<void> {
   } catch (error) {
     showError(`Could not load the chats: ${messageOf(error)}`);
   } finally {
-    busy = false;
-  }
-  if (queued) {
-    queued = false;
-    await refreshFromStream();
+    release();
   }
 }
 

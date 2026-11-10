@@ -1051,7 +1051,8 @@ place a chat is opened from, because the top bar carries no chat picker.
   `deleted` it reads both lists, because those move a row between them. The search
   term and the number of archived pages already loaded are kept. A change that
   arrives during a read is answered by one read after it, so a burst costs one read
-  per burst. Window focus, `pageshow` and the `↻ reload` button stay as the
+  per burst. A search, a `↻ reload` press or a change that arrives during a read is
+  answered the same way, and a page read with an older term is not drawn. Window focus, `pageshow` and the `↻ reload` button stay as the
   fallback for a stream that was down, and a reconnection that arrives as a
   `snapshot` reads both lists again. A tab hidden for one minute closes the
   stream, and the return opens a new one and reads both lists.

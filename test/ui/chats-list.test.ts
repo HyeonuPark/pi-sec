@@ -9,7 +9,10 @@
  * opened with `{"test": true}` go to `Test`, which starts closed.
  */
 import { describe, expect, it } from "vitest";
+import type { ChatsServer } from "./chats-fixtures.ts";
 import {
+  activeReads,
+  answerFrom,
   archivedChat,
   archivedReads,
   chatsPage,
@@ -20,7 +23,7 @@ import {
   testRows,
   testToggle,
 } from "./chats-fixtures.ts";
-import { settle } from "./harness.ts";
+import { settle, type UiPageHandle } from "./harness.ts";
 
 /** Whether the `Test` section says it is open. */
 function testIsOpen(toggle: HTMLElement): boolean {
@@ -317,6 +320,107 @@ describe("Load more (2.3-7)", () => {
       expect(last).toContain("q=release");
       expect(last).toContain("cursor=plan-2");
       expect(rows(page)).toHaveLength(2);
+    } finally {
+      page.close();
+    }
+  });
+});
+
+describe("a press that meets a read in flight", () => {
+  /**
+   * Hold the next archived read that `when` accepts until the test calls the
+   * returned function. A read with a `q` term answers the release list, so the
+   * term decides the rows, as it does on the server.
+   */
+  function hold(page: UiPageHandle, server: ChatsServer, when: (url: URL) => boolean): () => void {
+    const inner = answerFrom(server);
+    let gate: (() => void) | undefined;
+    let armed = true;
+    page.respond("/api/focused-chats", async (request) => {
+      const url = new URL(request.url, "http://localhost");
+      const archived = request.method === "GET" && url.searchParams.get("state") === "archived";
+      const held = archived && armed && when(url);
+      if (held) {
+        armed = false;
+        const answered = await inner(request);
+        await new Promise<void>((resolve) => {
+          gate = resolve;
+        });
+        return answered;
+      }
+      if (archived && url.searchParams.get("q") === "release") {
+        return { body: { items: [archivedChat(7, "Release notes")] } };
+      }
+      return inner(request);
+    });
+    return () => gate?.();
+  }
+
+  const lists = (): ChatsServer => ({
+    active: [],
+    archived: {
+      "": { items: [archivedChat(1, "One")], next: "page-2" },
+      "page-2": { items: [archivedChat(2, "Two")] },
+    },
+  });
+
+  it("reads the new term when it is submitted while a stream read runs", async () => {
+    const server = lists();
+    const page = await chatsPage(server);
+    try {
+      const release = hold(page, server, () => true);
+      page.emit("focused_chat_updated", { conversationId: 1, title: "One", change: "archived" });
+      await settle();
+      search(page, "release");
+      await settle();
+      release();
+      await settle();
+      await settle();
+
+      expect(archivedReads(page).some((each) => each.url.includes("q=release"))).toBe(true);
+      expect(rows(page).map((row) => row.getAttribute("data-id"))).toEqual(["7"]);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("drops a page read with the old term when a new term is submitted", async () => {
+    const server = lists();
+    const page = await chatsPage(server);
+    try {
+      const release = hold(page, server, (url) => url.searchParams.get("cursor") === "page-2");
+      click(page, page.document.getElementById("load-more") as HTMLElement);
+      await settle();
+      search(page, "release");
+      await settle();
+      release();
+      await settle();
+      await settle();
+
+      expect(rows(page).map((row) => row.getAttribute("data-id"))).toEqual(["7"]);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("reads the open list again for a title that changes while the archived list is read", async () => {
+    const server = lists();
+    server.active = [openChat(3, "Old title")];
+    const page = await chatsPage(server);
+    try {
+      const release = hold(page, server, () => true);
+      click(page, page.document.getElementById("reload") as HTMLElement);
+      await settle();
+      const before = activeReads(page).length;
+      server.active = [openChat(3, "New title")];
+      page.emit("focused_chat_updated", { conversationId: 3, title: "New title", change: "titled" });
+      await settle();
+      release();
+      await settle();
+      await settle();
+
+      expect(activeReads(page).length).toBeGreaterThan(before);
+      expect(page.document.getElementById("view")?.textContent).toContain("New title");
     } finally {
       page.close();
     }
