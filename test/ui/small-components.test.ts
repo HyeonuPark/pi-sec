@@ -890,3 +890,23 @@ describe("request.test.ts", () => {
     });
   });
 });
+
+describe("format-bytes.ts", () => {
+  it("says a size the way a chip does, for every range", async () => {
+    const { formatBytes } = await import("../../src/ui/components/format-bytes.ts");
+    const table: readonly (readonly [number | undefined, string])[] = [
+      [undefined, ""],
+      [Number.NaN, ""],
+      [-1, ""],
+      [0, "0 B"],
+      [999, "999 B"],
+      [1200, "1.2 KB"],
+      [12345, "12 KB"],
+      [1_000_000, "1.0 MB"],
+      [1_500_000_000, "1.5 GB"],
+      // Above a thousand GB the unit stays GB, because there is no larger one.
+      [2_000_000_000_000, "2000 GB"],
+    ];
+    expect(table.map(([bytes]) => formatBytes(bytes))).toEqual(table.map(([, said]) => said));
+  });
+});
