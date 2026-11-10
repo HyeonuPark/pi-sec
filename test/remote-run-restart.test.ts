@@ -35,7 +35,7 @@ describe("the daemon comes back", { timeout: 30_000 }, () => {
 
       // The daemon is down for longer than one interval, which is exactly a missed
       // check: the promise is a message every interval, so the boot reads the run.
-      fixture.clock.advanceTo(fixture.clock.now() + 2 * 1_800 * 1_000);
+      fixture.clock.jump(2 * 1_800 * 1_000);
       second = await fixture.restart();
       await second.pinHostKey();
       // The boot resumes the checks; the message is what says it did, so the test
@@ -85,7 +85,7 @@ describe("the daemon comes back", { timeout: 30_000 }, () => {
       expect(started.kind).toBe("running");
 
       // A restart one minute later is before the first check is due.
-      fixture.clock.advanceTo(fixture.clock.now() + 60_000);
+      fixture.clock.jump(60_000);
       second = await fixture.restart();
       await second.pinHostKey();
       await settle();
