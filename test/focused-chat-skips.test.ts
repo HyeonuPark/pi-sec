@@ -51,7 +51,7 @@ describe("the harness and a focused chat", () => {
   it("lists an open chat by kind and title, and drops it once it is archived or deleted", async () => {
     const h = await boot();
     const titled = await openChat(h, "Chat about the trip");
-    const untitled = await openChat(h);
+    const untitled = await openChat(h, undefined, { test: true });
 
     const listed = await runTool(h, ROOT, "background_list", {});
     expect(listed).toContain('kind="focused"');

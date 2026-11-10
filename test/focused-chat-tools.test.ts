@@ -159,7 +159,7 @@ describe("focused chat tools", () => {
 
   it("refuses a delete whose report the user did not approve", async () => {
     harness = await focusedHarness();
-    const row = await openChat(harness, "a test chat");
+    const row = await openChat(harness, "a test chat", { test: true });
     const reportId = await reportNaming(row.conversationId, false);
 
     const refused = await runTool(harness, Number(ROOT_CONVERSATION_ID), "focused_chat_delete", {
@@ -173,8 +173,8 @@ describe("focused chat tools", () => {
 
   it("refuses a delete whose approved report names another conversation", async () => {
     harness = await focusedHarness();
-    const row = await openChat(harness, "a test chat");
-    const other = await openChat(harness, "another chat");
+    const row = await openChat(harness, "a test chat", { test: true });
+    const other = await openChat(harness, "another chat", { test: true });
     const reportId = await reportNaming(other.conversationId, true);
 
     const refused = await runTool(harness, Number(ROOT_CONVERSATION_ID), "focused_chat_delete", {
@@ -185,9 +185,39 @@ describe("focused chat tools", () => {
     expect(harness.runtime.focusedChats.get(row.conversationId)).toBeDefined();
   });
 
+  it("refuses a delete whose approved report names a longer number", async () => {
+    harness = await focusedHarness();
+    const row = await openChat(harness, "a test chat", { test: true });
+    for (const text of [`Chat ${row.conversationId}7 is the one.\n`, `Chat 9${row.conversationId} is the one.\n`]) {
+      const job = await harness.runtime.jobs.create(CTX, { title: "chat test" });
+      const report = await harness.runtime.reports.create(CTX, { jobId: job.id, title: "Chat test", content: text });
+      expect(await harness.runtime.reports.approve(CTX, report.id, 1, { via: "panel" })).toMatchObject({ ok: true });
+      const refused = await runTool(harness, Number(ROOT_CONVERSATION_ID), "focused_chat_delete", {
+        conversationId: row.conversationId,
+        reportId: report.id,
+      });
+      expect(refused).toContain("does not name conversation");
+    }
+    expect(harness.runtime.focusedChats.get(row.conversationId)).toBeDefined();
+  });
+
+  it("refuses to delete a chat that was not opened for a test", async () => {
+    harness = await focusedHarness();
+    const row = await openChat(harness, "the user's chat");
+    const reportId = await reportNaming(row.conversationId, true);
+
+    const refused = await runTool(harness, Number(ROOT_CONVERSATION_ID), "focused_chat_delete", {
+      conversationId: row.conversationId,
+      reportId,
+    });
+    expect(refused).toContain("was not opened for a test");
+    expect(harness.runtime.focusedChats.get(row.conversationId)).toBeDefined();
+    expect(harness.runtime.focusedChats.isDeleted(row.conversationId)).toBe(false);
+  });
+
   it("deletes a test chat once the approved report names it", async () => {
     harness = await focusedHarness();
-    const row = await openChat(harness, "a test chat");
+    const row = await openChat(harness, "a test chat", { test: true });
     const reportId = await reportNaming(row.conversationId, true);
 
     const deleted = await runTool(harness, Number(ROOT_CONVERSATION_ID), "focused_chat_delete", {
@@ -217,7 +247,7 @@ describe("focused chat tools", () => {
 
   it("refuses an approval of a revision the text has moved past", async () => {
     harness = await focusedHarness();
-    const row = await openChat(harness, "a test chat");
+    const row = await openChat(harness, "a test chat", { test: true });
     const reportId = await reportNaming(row.conversationId, true);
     // A newer revision has no approval, so the approval on the older one no longer
     // speaks for what the report says now.
@@ -292,7 +322,7 @@ describe("focused_chat_delete and a Done", () => {
 
   it("reads a Done on a result report as the approval it is", async () => {
     harness = await focusedHarness();
-    const row = await openChat(harness, "a test chat");
+    const row = await openChat(harness, "a test chat", { test: true });
     const job = await harness.runtime.jobs.create(CTX, { title: "chat test" });
     const report = await harness.runtime.reports.create(CTX, {
       jobId: job.id,

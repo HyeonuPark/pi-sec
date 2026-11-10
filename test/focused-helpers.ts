@@ -50,8 +50,16 @@ export async function focusedHarness(
 }
 
 /** Open one focused chat, or fail with the refusal's own words. */
-export async function openChat(test: TestHarness, title?: string): Promise<FocusedChatRow> {
-  return await openFocusedChat(depsOf(test), title === undefined ? {} : { title }, CTX);
+export async function openChat(
+  test: TestHarness,
+  title?: string,
+  options: { readonly test?: boolean } = {},
+): Promise<FocusedChatRow> {
+  const input = {
+    ...(title === undefined ? {} : { title }),
+    ...(options.test === undefined ? {} : { test: options.test }),
+  };
+  return await openFocusedChat(depsOf(test), input, CTX);
 }
 
 /** A conversation handle by id. */

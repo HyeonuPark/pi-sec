@@ -85,6 +85,43 @@ describe("opening a focused chat", () => {
     expect(focusedChatTools(["read", "read"])).toEqual([...FOCUSED_CHAT_TOOLS]);
   });
 
+  it("opens the chat when the inbox notice fails", async () => {
+    harness = await focusedHarness();
+    const seen: PiSecEvent[] = [];
+    const unsubscribe = harness.events.subscribe((event) => seen.push(event));
+    const audited: Array<Record<string, unknown>> = [];
+    const base = depsOf(harness);
+    const deps = {
+      ...base,
+      events: {
+        ...base.events,
+        emit: (type: string, data: Record<string, unknown>) => {
+          if (type === "inbox_item") throw new Error("inbox is down");
+          base.events.emit(type as never, data as never);
+        },
+      },
+      audit: {
+        ...base.audit,
+        append: (event: Record<string, unknown>) => {
+          audited.push(event);
+          base.audit.append(event as never);
+        },
+      },
+    } as unknown as typeof base;
+    try {
+      const row = await openFocusedChat(deps, { title: "notice fails" }, CTX);
+      expect(row.title).toBe("notice fails");
+      expect(harness.runtime.focusedChats.get(row.conversationId)).toBeDefined();
+      expect(seen.filter((event) => event.type === "focused_chat_updated")).toHaveLength(1);
+      expect(audited.map((event) => event.type)).toContain("focused_chat_opened");
+      const failed = audited.find((event) => event.type === "focused_chat_open_notice_failed");
+      expect(failed).toMatchObject({ conversationId: String(row.conversationId) });
+      expect(String(failed?.error)).toContain("inbox is down");
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("writes one inbox notice and publishes one event", async () => {
     harness = await focusedHarness();
     const seen: PiSecEvent[] = [];

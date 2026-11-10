@@ -2503,7 +2503,7 @@ change reaches the next chat and not one that is already open.
 |------|------|--------------|
 | `focused_chat_title` | focused | Sets this chat's title, once, while it has none. A second call is refused, and after the first one only the user renames the chat. |
 | `focused_chat_archive` | root | Ends an open chat: the run in flight stops, the record and the transcript stay, the slot and the parent's name index go, and every focused chat write route answers `409 chat_archived`. The user's permission is the prompt's rule, so the root asks before it calls this. |
-| `focused_chat_delete` | root | Removes a chat that an agent opened for a test. It needs `reportId`: the newest revision of that report carries the user's approval of that revision's own sha256, and the revision's text names the chat's conversation id. The transcript entries stay in the state database. |
+| `focused_chat_delete` | root | Removes a chat that an agent opened for a test. It needs `reportId`: the newest revision of that report carries the user's approval of that revision's own sha256, and the revision's text names the chat's conversation id as a whole number. A chat that was not opened with the test flag is refused with `not_test_chat`. The transcript entries stay in the state database. |
 
 The kinds are enforced twice. The stored tool filter decides what is offered,
 and `TOOL_KINDS` in `src/extensions/subagents.ts` is the live gate, which is what

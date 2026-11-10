@@ -338,7 +338,7 @@ describe("focused chat routes", () => {
 
   it("stops showing a deleted chat, and answers chat_deleted for it", async () => {
     const origin = await boot();
-    const row = await openChat(harness!, "a test chat");
+    const row = await openChat(harness!, "a test chat", { test: true });
     const reportId = await approvedReport(origin, row.conversationId);
 
     await deleteFocusedChat(depsOf(harness!), { conversationId: row.conversationId, reportId }, CTX);

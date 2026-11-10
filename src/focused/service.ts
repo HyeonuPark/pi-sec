@@ -48,7 +48,8 @@ export type FocusedErrorCode =
   | "not_found"
   | "chat_deleted"
   | "chat_archived"
-  | "report_refused";
+  | "report_refused"
+  | "not_test_chat";
 
 /** A refusal with a code the routes and the tools can tell apart. */
 export class FocusedChatError extends Error {
@@ -76,6 +77,7 @@ export function focusedStatusOf(code: FocusedErrorCode): number {
     case "capacity":
     case "chat_archived":
     case "report_refused":
+    case "not_test_chat":
       return 409;
     case "not_found":
     case "chat_deleted":
@@ -266,7 +268,14 @@ export async function openFocusedChat(
     // handed never names a file that is not there yet. A failed file does not lose
     // a chat the user asked for: the chat is alive and can rewrite its notebook.
     await ensureContextFile(deps.paths, String(created.conversationId)).catch(() => undefined);
-    await announceOpened(deps, row, ctx);
+    // A failed notice does not undo a chat that exists and holds a slot.
+    await announceOpened(deps, row, ctx).catch((error: unknown) => {
+      deps.audit.append({
+        type: "focused_chat_open_notice_failed",
+        conversationId: String(row.conversationId),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     deps.audit.append({
       type: "focused_chat_opened",
       conversationId: String(row.conversationId),
@@ -456,6 +465,11 @@ export async function archiveFocusedChat(
   return row;
 }
 
+/** Whether the text holds the number as a whole number: no digit touches it. */
+function namesNumber(text: string, conversationId: number): boolean {
+  return new RegExp(`(?<![0-9])${conversationId}(?![0-9])`).test(text);
+}
+
 /**
  * The approval a delete needs, checked against the report itself.
  *
@@ -493,7 +507,7 @@ async function requireApprovalNaming(
   if (text === undefined) {
     throw new FocusedChatError("report_refused", `the body of report ${reportId} v${newest.n} could not be read`);
   }
-  if (!text.includes(String(conversationId))) {
+  if (!namesNumber(text, conversationId)) {
     throw new FocusedChatError(
       "report_refused",
       `the approved revision of report ${reportId} does not name conversation ${conversationId}`,
@@ -524,6 +538,10 @@ export async function deleteFocusedChat(
   const found = lookupFocusedChat(deps.store, conversationId);
   if (found.state === "deleted") throw new FocusedChatError("chat_deleted", "this focused chat was deleted");
   if (found.state === "none") throw new FocusedChatError("not_found", "this conversation is not a focused chat");
+
+  if (!found.row.test) {
+    throw new FocusedChatError("not_test_chat", "this focused chat was not opened for a test, so it cannot be deleted");
+  }
 
   await requireApprovalNaming(deps, conversationId, reportId, ctx);
 
