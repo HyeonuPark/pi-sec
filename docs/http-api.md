@@ -498,7 +498,7 @@ not move the API revision (§13).
 | `GET` | `/api/conversations` | List (`?cursor=`). |
 | `POST` | `/api/conversations` | Create. |
 | `GET` | `/api/conversations/:id` | Structural snapshot (`?cursor=`, `?limit=` for older entries). |
-| `GET` | `/api/conversations/:id/events` | SSE stream. |
+| `GET` | `/api/conversations/:id/events` | SSE stream. A conversation that does not exist answers 404 `not_found`, as the other conversation routes do. |
 | `GET` | `/api/conversations/:id/history` | One earlier session (`?before=`). Same answer as `/basic-chat/history` (§5.9). |
 | `POST` | `/api/conversations/:id/messages` | Submit input. `attachmentIds` can ride beside `content`. |
 | `POST` | `/api/conversations/:id/abort` | Abort current work. |
@@ -2894,9 +2894,10 @@ uncompressed, framing unchanged.
 
 ### 12.2 Envelope
 
-`event` + `id` + `data` (JSON). `id` increases monotonically **per stream** (per
-endpoint, and per conversation for conversation streams); `Last-Event-ID` resume
-is scoped to the same stream URL.
+`event` + `id` + `data` (JSON). `id` increases monotonically within each stream
+(per endpoint, and per conversation for conversation streams), and an id is
+unique in one server process: every stream draws its ids from one counter, so no
+id repeats across streams. `Last-Event-ID` resume is scoped to the same stream URL.
 
 ```
 id: 42
@@ -2953,6 +2954,9 @@ mechanical.
 - If `Last-Event-ID` is still buffered for this stream, replay events after it.
 - Otherwise send a fresh `snapshot`. A `snapshot` always supersedes partial
   deltas, so clients never reconcile.
+- The endpoint of a conversation that has no client is dropped with its buffered
+  frames. A client that comes back after that, with any `Last-Event-ID`, gets a
+  `snapshot`.
 - `retry:` is set to 3s.
 
 ### 12.5 Backpressure

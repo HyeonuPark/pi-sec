@@ -21,7 +21,7 @@ import {
   type AttachmentDescriptors,
   type AttachmentLookup,
 } from "./routes/basic-chat.ts";
-import type { RouteContext } from "./router.ts";
+import { apiError, type RouteContext } from "./router.ts";
 import { refuseStream, type SseChannel, type SseHub } from "./sse.ts";
 import { slimAgentEvent, slimSnapshot } from "./stream-entries.ts";
 import { hasEntriesBefore } from "./routes/history.ts";
@@ -421,15 +421,29 @@ class ConversationStream {
   #paused = false;
   #held: (() => void)[] = [];
   #attaching: Promise<unknown> = Promise.resolve();
+  #queued = 0;
 
   private readonly deps: StreamDeps;
   readonly channel: SseChannel;
   private readonly conversationId: number;
+  /** Called when the last client left and the upstream watch has stopped. */
+  private readonly onIdle: (stream: ConversationStream) => void;
 
-  constructor(deps: StreamDeps, channel: SseChannel, conversationId: number) {
+  constructor(
+    deps: StreamDeps,
+    channel: SseChannel,
+    conversationId: number,
+    onIdle: (stream: ConversationStream) => void,
+  ) {
     this.deps = deps;
     this.channel = channel;
     this.conversationId = conversationId;
+    this.onIdle = onIdle;
+  }
+
+  /** The tasks that wait in the attach queue or run in it. */
+  get queued(): number {
+    return this.#queued;
   }
 
   get attached(): number {
@@ -442,7 +456,10 @@ class ConversationStream {
 
   /** Attaches are serialized, so two windows opening at once cannot snapshot at once. */
   exclusive<T>(task: () => Promise<T>): Promise<T> {
-    const next = this.#attaching.then(task, task);
+    this.#queued += 1;
+    const next = this.#attaching.then(task, task).finally(() => {
+      this.#queued -= 1;
+    });
     this.#attaching = next.catch(() => undefined);
     return next;
   }
@@ -478,7 +495,11 @@ class ConversationStream {
 
   release(): void {
     if (this.#refs > 0) this.#refs -= 1;
-    if (this.#refs === 0) void this.#stop();
+    if (this.#refs === 0) {
+      void this.#stop()
+        .catch(() => undefined)
+        .then(() => this.onIdle(this));
+    }
   }
 
   /** Start the single upstream watch, or return the snapshot it started with. */
@@ -668,6 +689,17 @@ export class StreamHub {
   /** Attach one more client to a conversation's events. */
   async attachConversation(route: RouteContext, conversationId: number): Promise<void> {
     if (this.#closed) return refuseStream(route.res);
+    // A conversation that does not exist gets the same 404 as every other
+    // conversation route, before any stream or channel is made for its id.
+    const conversation = await this.deps.runtime.harness.conversation(
+      conversationId as ConversationId,
+      BACKGROUND_CONTEXT,
+    );
+    if (conversation === undefined) {
+      apiError(route.res, 404, "not_found", "conversation not found", route.requestId);
+      return;
+    }
+    if (this.#closed) return refuseStream(route.res);
     const stream = this.#conversation(conversationId);
     await stream.exclusive(async () => {
       stream.pause();
@@ -785,11 +817,33 @@ export class StreamHub {
     this.#conversations.clear();
   }
 
+  /** How many conversation endpoints the hub holds. */
+  get conversationCount(): number {
+    return this.#conversations.size;
+  }
+
+  /**
+   * Remove the endpoint of a conversation that has no client left, with its
+   * channel and buffered frames. It runs in the stream's attach queue, so it sees
+   * every attach that came before it, and it skips when another attach waits
+   * behind it, when a client is attached, or when the map holds another stream.
+   */
+  #dropIfIdle(stream: ConversationStream, conversationId: number): void {
+    void stream.exclusive(async () => {
+      if (stream.attached > 0 || stream.running || stream.queued > 1 || stream.channel.size > 0) return;
+      if (this.#conversations.get(conversationId) !== stream) return;
+      this.#conversations.delete(conversationId);
+      this.deps.sse.remove(`conversation:${conversationId}`);
+    });
+  }
+
   #conversation(conversationId: number): ConversationStream {
     const existing = this.#conversations.get(conversationId);
     if (existing !== undefined) return existing;
     const channel = this.deps.sse.channel(`conversation:${conversationId}`);
-    const stream = new ConversationStream(this.deps, channel, conversationId);
+    const stream = new ConversationStream(this.deps, channel, conversationId, (idle) =>
+      this.#dropIfIdle(idle, conversationId),
+    );
     this.#conversations.set(conversationId, stream);
     return stream;
   }

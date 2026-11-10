@@ -41,6 +41,11 @@ export class SseBuffer {
     this.byKey.set(key, list);
   }
 
+  /** Forget one key's frames. */
+  remove(key: string): void {
+    this.byKey.delete(key);
+  }
+
   /** Frames after `lastId`, or undefined when it is no longer buffered. */
   since(key: string, lastId: number): SseFrame[] | undefined {
     const list = this.byKey.get(key);
@@ -225,16 +230,18 @@ export function refuseStream(res: ServerResponse): void {
 export class SseChannel {
   private readonly writers = new Set<SseWriter>();
   private closed = false;
-  private nextId = 1;
 
   readonly key: string;
   private readonly options: SseOptions;
   private readonly buffer: SseBuffer;
+  /** The next frame id of the hub, shared by every channel. */
+  private readonly nextId: () => number;
 
-  constructor(key: string, options: SseOptions, buffer: SseBuffer) {
+  constructor(key: string, options: SseOptions, buffer: SseBuffer, nextId: () => number) {
     this.key = key;
     this.options = options;
     this.buffer = buffer;
+    this.nextId = nextId;
   }
 
   /**
@@ -272,8 +279,7 @@ export class SseChannel {
 
   /** Publish an event to every attached client and to the resume buffer. */
   publish(event: string, data: unknown): void {
-    const frame: SseFrame = { id: this.nextId, event, data: JSON.stringify(data ?? {}) };
-    this.nextId += 1;
+    const frame: SseFrame = { id: this.nextId(), event, data: JSON.stringify(data ?? {}) };
     this.buffer.append(this.key, frame);
     for (const writer of this.writers) writer.sendFrame(frame);
   }
@@ -295,16 +301,33 @@ export class SseHub {
 
   private readonly options: SseOptions;
   private closed = false;
+  /** One counter for every channel, so a frame id never repeats in this process. */
+  private frameId = 0;
 
   constructor(options: SseOptions) {
     this.options = options;
     this.buffer = new SseBuffer(options);
   }
 
+  /** Whether a channel with this key exists. */
+  has(key: string): boolean {
+    return this.channels.has(key);
+  }
+
+  /**
+   * Remove a channel and its buffered frames. A client that still holds an id of
+   * the removed channel matches no frame later, because ids never repeat, so it
+   * gets a snapshot.
+   */
+  remove(key: string): void {
+    this.channels.delete(key);
+    this.buffer.remove(key);
+  }
+
   channel(key: string): SseChannel {
     const existing = this.channels.get(key);
     if (existing !== undefined) return existing;
-    const channel = new SseChannel(key, this.options, this.buffer);
+    const channel = new SseChannel(key, this.options, this.buffer, () => (this.frameId += 1));
     // A channel made after the close refuses its first client.
     if (this.closed) channel.closeAll();
     this.channels.set(key, channel);

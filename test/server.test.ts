@@ -1064,6 +1064,75 @@ describe("with more than one client attached", () => {
     expect(events.filter((event) => event !== "notice")).toEqual(["snapshot", "job_updated"]);
   });
 
+  it("answers 404 to an event stream of a conversation that does not exist", async () => {
+    const { origin, deps } = await boot();
+    const controller = new AbortController();
+    try {
+      const response = await fetch(`${origin}/api/conversations/987654/events`, { signal: controller.signal });
+      expect(response.status).toBe(404);
+      const body = (await response.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("not_found");
+      expect(deps.streams.conversationCount).toBe(0);
+    } finally {
+      controller.abort();
+    }
+  });
+
+  it("drops the endpoint of a conversation when its last client leaves", async () => {
+    const { origin, deps } = await boot();
+    const created = (await (await fetch(`${origin}/api/conversations`, { method: "POST" })).json()) as { id: number };
+    const client = await ChatClient.open(origin, `/api/conversations/${created.id}/events`);
+    await client.waitFor(sawSnapshot, "the snapshot");
+    expect(deps.streams.conversationCount).toBe(1);
+    expect(deps.sse.has(`conversation:${created.id}`)).toBe(true);
+
+    client.close();
+    const deadline = Date.now() + 3000;
+    while (deps.streams.conversationCount !== 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(deps.streams.conversationCount).toBe(0);
+    expect(deps.sse.has(`conversation:${created.id}`)).toBe(false);
+  });
+
+  it("keeps one stream for clients that attach while the endpoint is being dropped", async () => {
+    const { origin, deps } = await boot();
+    const first = await ChatClient.open(origin, "/basic-chat/events");
+    await first.waitFor(sawSnapshot, "the snapshot");
+    first.close();
+
+    const clients = await Promise.all([
+      ChatClient.open(origin, "/basic-chat/events"),
+      ChatClient.open(origin, "/basic-chat/events"),
+    ]);
+    await Promise.all(clients.map((client) => client.waitFor(sawSnapshot, "the snapshot")));
+    deps.bus.sink.emit("inbox_item", { id: "after-drop" });
+    await Promise.all(clients.map((client) => client.waitFor((text) => inboxItems(text) >= 1, "the control event")));
+    await Promise.all(clients.map((client) => client.settle()));
+    clients.forEach((client) => client.close());
+    for (const client of clients) expect(inboxItems(client.text)).toBe(1);
+  });
+
+  it("snapshots a client whose last event id comes from before the endpoint went idle, while another client is attached", async () => {
+    const { origin, deps } = await boot();
+    const first = await ChatClient.open(origin, "/basic-chat/events");
+    await first.waitFor(sawSnapshot, "the snapshot");
+    deps.bus.sink.emit("inbox_item", { id: "seen" });
+    await first.waitFor((text) => inboxItems(text) === 1, "the control event");
+    const lastId = Math.max(...parseFrames(first.text).map((frame) => frame.id));
+    first.close();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const second = await ChatClient.open(origin, "/basic-chat/events");
+    await second.waitFor(sawSnapshot, "the snapshot");
+    const third = await ChatClient.open(origin, "/basic-chat/events", { "last-event-id": String(lastId) });
+    await third.settle(300);
+    second.close();
+    third.close();
+    // Commits made while nothing watched are in no buffer, so the old id must not resume.
+    expect(third.text).toContain("event: snapshot");
+  });
+
   it("snapshots a client that reconnects after the endpoint went idle", async () => {
     const { origin, deps } = await boot();
     const first = await ChatClient.open(origin, "/basic-chat/events");
