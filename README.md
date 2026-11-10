@@ -45,9 +45,13 @@ The script refuses to run as root. It creates `~/.pi/sec`, fills the snapshot an
 workspace trees, copies a `models.json` file or a provider extension, and writes a
 systemd user unit. It signs no provider in and it writes no first model: the
 daemon starts in setup mode, and the chat page signs a provider in and writes the
-first model in three steps, with no restart. A headless install writes the first
-model with `--provider` and `--model`. `--run manual` prints the command for
-`user-tools/run` instead of writing the unit.
+first model in three steps, with no restart. A model login starts only when the
+browser reaches the daemon on a loopback address, or when `server.publicUrl` is an
+`https:` address that a proxy serves.
+[`docs/install.md`](./docs/install.md#model-login-and-https) shows both
+arrangements. A headless install writes the first model with `--provider` and
+`--model`. `--run manual` prints the command for `user-tools/run` instead of
+writing the unit.
 
 The same steps by hand:
 

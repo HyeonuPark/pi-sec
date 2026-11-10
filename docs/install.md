@@ -88,9 +88,8 @@ names it. The daemon will not find that command.
 
 Run `user-tools/install --check-deps` at any time to see the same block again. It
 creates and changes nothing, takes no other option, and never downloads the
-browser. If the browser is missing, it prints the download command. This is also
-the way to get that command when a rerun stops at step 8 because the unit file
-already exists, and after a Playwright update.
+browser. If the browser is missing, it prints the download command. That download
+command is also the one to run after a Playwright update.
 
 ---
 
