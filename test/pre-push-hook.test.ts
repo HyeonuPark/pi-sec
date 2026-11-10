@@ -56,6 +56,9 @@ async function fixture(): Promise<Fixture> {
   await mkdir(piHome, { recursive: true });
   await mkdir(join(dir, "home"), { recursive: true });
   await copyFile(join(REPO, "scripts", "scan-tree.mjs"), join(repo, "scripts", "scan-tree.mjs"));
+  // The scan imports the env file parser from src/secrets, so the copy holds it too.
+  await mkdir(join(repo, "src", "secrets"), { recursive: true });
+  await copyFile(join(REPO, "src", "secrets", "env-file.ts"), join(repo, "src", "secrets", "env-file.ts"));
   await copyFile(join(REPO, "scripts", "scan-allow.txt"), join(repo, "scripts", "scan-allow.txt"));
   await copyFile(join(REPO, "scripts", "check-identity.mjs"), join(repo, "scripts", "check-identity.mjs"));
   await writeFile(join(piHome, "scan-words.txt"), `# test list\n${WORD}\n`);
@@ -78,7 +81,7 @@ async function fixture(): Promise<Fixture> {
   git(f, ["remote", "add", "origin", remote]);
   await commit(f, "a.txt", "plain text\n");
   await commit(f, "scripts-note.txt", "scripts are tracked\n");
-  git(f, ["add", "scripts"]);
+  git(f, ["add", "scripts", "src"]);
   git(f, ["commit", "--quiet", "-m", "add the scan"]);
   const out = spawnSync("sh", [INSTALLER, repo], { env, cwd: repo, encoding: "utf8" });
   expect(out.status, out.stderr).toBe(0);

@@ -44,6 +44,9 @@ async function fixture(extra: Record<string, string> = {}): Promise<Fixture> {
   for (const file of ["scan-tree.mjs", "scan-allow.txt", "check-identity.mjs"]) {
     await cp(join(REPO, "scripts", file), join(source, "scripts", file));
   }
+  // The scan imports the env file parser from src/secrets, so the copy holds it too.
+  await mkdir(join(source, "src", "secrets"), { recursive: true });
+  await cp(join(REPO, "src", "secrets", "env-file.ts"), join(source, "src", "secrets", "env-file.ts"));
   await cp(join(REPO, "user-tools"), join(source, "user-tools"), { recursive: true });
   await writeFile(join(source, "README.txt"), "plain text\n");
   for (const [path, text] of Object.entries(extra)) await writeFile(join(source, path), text);

@@ -54,6 +54,9 @@ async function fixture(): Promise<Fixture> {
   await mkdir(join(repo, "scripts"), { recursive: true });
   await mkdir(piHome, { recursive: true });
   await copyFile(join(REPO, "scripts", "scan-tree.mjs"), join(repo, "scripts", "scan-tree.mjs"));
+  // The scan imports the env file parser from src/secrets, so the copy holds it too.
+  await mkdir(join(repo, "src", "secrets"), { recursive: true });
+  await copyFile(join(REPO, "src", "secrets", "env-file.ts"), join(repo, "src", "secrets", "env-file.ts"));
   await copyFile(join(REPO, "scripts", "scan-allow.txt"), join(repo, "scripts", "scan-allow.txt"));
   await copyFile(join(REPO, "scripts", "check-identity.mjs"), join(repo, "scripts", "check-identity.mjs"));
   const env: NodeJS.ProcessEnv = {
@@ -158,7 +161,7 @@ describe("the installed hooks", () => {
   it("accept a clean commit", async () => {
     const f = await installed(await fixture());
     await writeFile(join(f.repo, "a.txt"), "plain text\n");
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     const out = git(f, ["commit", "-m", "plain message"]);
     expect(out.code, out.stdout + out.stderr).toBe(0);
   });
@@ -166,7 +169,7 @@ describe("the installed hooks", () => {
   it("refuse a staged file that holds a listed word, and name the word", async () => {
     const f = await installed(await fixture());
     await writeFile(join(f.repo, "a.txt"), `a line with ${WORD} inside\n`);
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     const out = git(f, ["commit", "-m", "plain message"]);
     expect(out.code).not.toBe(0);
     expect(out.stdout + out.stderr).toContain(WORD);
@@ -176,7 +179,7 @@ describe("the installed hooks", () => {
   it("refuse a commit message that holds a listed word", async () => {
     const f = await installed(await fixture());
     await writeFile(join(f.repo, "a.txt"), "plain text\n");
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     const out = git(f, ["commit", "-m", `message about ${WORD}`]);
     expect(out.code).not.toBe(0);
     expect(out.stdout + out.stderr).toContain(WORD);
@@ -185,7 +188,7 @@ describe("the installed hooks", () => {
   it("check the index and not the work tree", async () => {
     const f = await installed(await fixture());
     await writeFile(join(f.repo, "a.txt"), `leak ${WORD}\n`);
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     await writeFile(join(f.repo, "a.txt"), "clean again\n");
     expect(git(f, ["commit", "-m", "plain message"]).code).not.toBe(0);
   });
@@ -193,7 +196,7 @@ describe("the installed hooks", () => {
   it("run in a linked worktree", async () => {
     const f = await installed(await fixture());
     await writeFile(join(f.repo, "a.txt"), "plain text\n");
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     expect(git(f, ["commit", "-m", "first"]).code).toBe(0);
     const wt = join(root, `wt-${counter}`);
     expect(git(f, ["worktree", "add", "--quiet", "--detach", wt, "main"]).code).toBe(0);
@@ -210,7 +213,7 @@ describe("the installed hooks", () => {
     const f = await installed(await fixture());
     await rm(f.words);
     await writeFile(join(f.repo, "a.txt"), "plain text\n");
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     const out = git(f, ["commit", "-m", "plain message"]);
     expect(out.code).not.toBe(0);
     expect(out.stderr).toContain("cannot read the word list");
@@ -270,7 +273,7 @@ describe("the identity check of pre-commit", () => {
   it("accepts a commit by a listed identity", async () => {
     const f = await installed(await fixture());
     await writeFile(join(f.repo, "a.txt"), "plain text\n");
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     const out = git(f, ["commit", "-m", "plain message"]);
     expect(out.code, out.stdout + out.stderr).toBe(0);
   });
@@ -278,7 +281,7 @@ describe("the identity check of pre-commit", () => {
   it("refuses a commit with an author that is not listed, without printing the identity", async () => {
     const f = await installed(await fixture());
     await writeFile(join(f.repo, "a.txt"), "plain text\n");
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     const out = git(f, ["commit", "-m", "plain message", `--author=${UNLISTED_IDENTITY}`]);
     expect(out.code).not.toBe(0);
     expect(out.stderr).toContain("author is not in");
@@ -289,7 +292,7 @@ describe("the identity check of pre-commit", () => {
   it("refuses a commit with a committer that is not listed", async () => {
     const f = await installed(await fixture());
     await writeFile(join(f.repo, "a.txt"), "plain text\n");
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     const out = git(f, ["-c", "user.name=zebra", "-c", "user.email=zebra@example.com", "commit", "-m", "plain message"]);
     // The environment names the committer, so the config does not change it: this one passes.
     expect(out.code, out.stdout + out.stderr).toBe(0);
@@ -305,7 +308,7 @@ describe("the identity check of pre-commit", () => {
     const f = await installed(await fixture());
     await rm(f.identities);
     await writeFile(join(f.repo, "a.txt"), "plain text\n");
-    git(f, ["add", "a.txt", "scripts"]);
+    git(f, ["add", "a.txt", "scripts", "src"]);
     const out = git(f, ["commit", "-m", "plain message"]);
     expect(out.code).not.toBe(0);
     expect(out.stderr).toContain("cannot read the identity list");
@@ -315,7 +318,7 @@ describe("the identity check of pre-commit", () => {
     const f = await installed(await fixture());
     for (const value of mustFail()) {
       await writeFile(join(f.repo, "a.txt"), `${value}\n`);
-      git(f, ["add", "a.txt", "scripts"]);
+      git(f, ["add", "a.txt", "scripts", "src"]);
       const out = git(f, ["commit", "-m", "plain message"]);
       expect(out.code, value.length.toString()).not.toBe(0);
       expect(out.stdout + out.stderr).toContain("shape");
