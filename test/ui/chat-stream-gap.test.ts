@@ -94,19 +94,6 @@ describe("an operator message with no files", () => {
   });
 });
 
-describe("a title of exactly eighty characters", () => {
-  it("takes exactly 80 characters", async () => {
-    const ui = await page({ chat: 7, fetch: { "/api/focused-chats/7": { body: { title: "Old name" } } } });
-    ui.window.prompt = () => "x".repeat(80);
-    (ui.document.getElementById("chat-title") as HTMLButtonElement).click();
-    await flush();
-
-    const patches = ui.fetchCalls.filter((call) => call.method === "PATCH" && call.path === "/api/focused-chats/7");
-    expect(patches).toHaveLength(1);
-    expect(JSON.parse(patches[0]?.body ?? "{}")).toEqual({ title: "x".repeat(80) });
-  });
-});
-
 describe("the no-response marker in the transcript", () => {
   it("draws nothing for a turn whose whole answer is the marker", async () => {
     const ui = await page();

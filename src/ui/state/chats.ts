@@ -26,11 +26,9 @@ import { signal } from "@preact/signals";
 import type { ChatsListAnswer, ChatsListItem, FocusedChatFrame, NewChatAnswer } from "../../shared/wire/chats.ts";
 import { ApiError, request } from "../api/request.ts";
 import { at } from "../mount.ts";
+import { checkTitle } from "./chat-title.ts";
 import { reconcileById } from "./keyed.ts";
 import { showError } from "./toast.ts";
-
-/** The longest title the server takes. The page refuses a longer one first. */
-export const TITLE_MAX = 80;
 
 /** The open chats, test ones included, as `GET /api/focused-chats?state=active` answers. */
 export const activeChats = signal<readonly ChatsListItem[]>([]);
@@ -285,15 +283,12 @@ export async function renameChat(id: number): Promise<void> {
   const item = activeChats.value.find((each) => Number(each.conversationId) === id);
   const answer = window.prompt("New title (1 to 80 characters)", item === undefined ? "" : (item.title ?? ""));
   if (answer === null) return;
-  const title = answer.trim();
-  if (title === "") {
-    showError("A title cannot be empty.");
+  const checked = checkTitle(answer);
+  if ("refusal" in checked) {
+    showError(checked.refusal);
     return;
   }
-  if (title.length > TITLE_MAX) {
-    showError(`A title holds at most ${TITLE_MAX} characters.`);
-    return;
-  }
+  const { title } = checked;
   busy = true;
   try {
     await request(`/api/focused-chats/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });

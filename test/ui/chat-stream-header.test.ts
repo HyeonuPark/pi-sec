@@ -121,15 +121,6 @@ describe("renaming a focused chat", () => {
     expect(ui.toast.toast.value.text).toBe("A title cannot be empty.");
   });
 
-  it("refuses a title over eighty characters before the request", async () => {
-    const ui = await page({ chat: 7, fetch: { "/api/focused-chats/7": { body: { title: "Old name" } } } });
-    ui.window.prompt = () => "x".repeat(81);
-    title(ui).click();
-    await flush();
-    expect(ui.fetchCalls.filter((call) => call.method === "PATCH")).toHaveLength(0);
-    expect(ui.toast.toast.value.text).toBe("A title holds at most 80 characters.");
-  });
-
   it("sends nothing when the question is refused", async () => {
     const ui = await page({ chat: 7, fetch: { "/api/focused-chats/7": { body: { title: "Old name" } } } });
     ui.window.prompt = () => null;

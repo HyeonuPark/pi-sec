@@ -17,10 +17,8 @@ import { computed, signal } from "@preact/signals";
 import { ApiError, request } from "../api/request.ts";
 import { installName, mount } from "../mount.ts";
 import type { ChatState, ConversationRoutes, FocusedChatRecord } from "../../shared/wire/conversation.ts";
+import { checkTitle } from "./chat-title.ts";
 import { showError } from "./toast.ts";
-
-/** The longest title the server takes. */
-export const TITLE_MAX = 80;
 
 /** The chat number in the address, or `null` for the root conversation. */
 export function readChatId(search: string): number | null {
@@ -166,15 +164,12 @@ export async function renameChat(): Promise<void> {
   if (routes.info === null) return;
   const answer = typeof window === "undefined" ? null : window.prompt("New title (1 to 80 characters)", current.title ?? "");
   if (answer === null) return;
-  const title = answer.trim();
-  if (title === "") {
-    showError("A title cannot be empty.");
+  const checked = checkTitle(answer);
+  if ("refusal" in checked) {
+    showError(checked.refusal);
     return;
   }
-  if (title.length > TITLE_MAX) {
-    showError(`A title holds at most ${TITLE_MAX} characters.`);
-    return;
-  }
+  const { title } = checked;
   try {
     applyChatRecord(await request<FocusedChatRecord>(routes.info, { method: "PATCH", body: JSON.stringify({ title }) }));
   } catch (error) {

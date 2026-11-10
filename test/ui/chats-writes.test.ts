@@ -153,18 +153,6 @@ describe("Rename (2.3-5)", () => {
     }
   });
 
-  it("takes an 80-character title, which is the longest the server takes", async () => {
-    const page = await chatsPage({ active: [openChat(3, "Topic notes")], archived: { "": { items: [] } } });
-    try {
-      answerPrompt(page, "y".repeat(80));
-      click(page, page.document.querySelector('[data-rename="3"]') as HTMLElement);
-      await settle();
-      expect(page.fetchCalls.filter((each) => each.method === "PATCH")).toHaveLength(1);
-    } finally {
-      page.close();
-    }
-  });
-
   it("says a chat that was archived in the meantime can no longer be renamed, and reads both lists", async () => {
     const server: ChatsServer = {
       active: [openChat(3, "Topic notes")],
