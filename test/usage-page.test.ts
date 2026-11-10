@@ -19,17 +19,14 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Models } from "@earendil-works/pi-ai";
 import { defaultConfig } from "../src/config/schema.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { ANTHROPIC_USAGE_URL } from "../src/server/usage/fetchers.ts";
 import type { UsageAnswer, UsageRefreshAnswer } from "../src/server/usage/values.ts";
 import { withFirstPaint } from "../src/server/routes/usage.ts";
 import type { UsageLedger } from "../src/server/usage/records.ts";
 import type { UsageRouteOptions } from "../src/server/routes/usage.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 /** The policy a page with no card carries. */
 const CSP_BASE = "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'";
@@ -149,23 +146,12 @@ async function boot(options: BootOptions): Promise<string> {
     expect(loaded.errors).toEqual([]);
   }
   const runtime = { ...harness.runtime, models: modelsOf(options.catalog) };
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime,
-    bus: harness.events,
-    sse,
-    streams: new StreamHub({ runtime, bus: harness.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-  };
-  started = await startServer(deps, {
-    webDir: defaultWebDir(),
+  started = await startTestServer(harness, {
     ui: { renderTimeoutMs: 50 },
     // The made-up catalog is handed to the route's own service as well, so a card
     // of this page is drawn from the catalog and the ledger this test built.
     usage: { models: () => modelsOf(options.catalog), ...(options.usage ?? {}) },
+    deps: { runtime },
   });
   return started.origin;
 }
@@ -703,18 +689,7 @@ describe("the OpenAI card and the decision models card", () => {
       // A judge the config names, so the card has a row even before a call.
       getConfig: () => ({ ...harness!.config, judges: { "report-check": { provider: "openai", modelId: "gpt-6-luna" } } }),
     };
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime, bus: harness.events, sse }),
-      startedAt: now,
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir(), ui: { renderTimeoutMs: 50 }, usage: { prefetch: false } });
+    started = await startTestServer(harness, { ui: { renderTimeoutMs: 50 }, usage: { prefetch: false }, deps: { runtime, startedAt: now } });
 
     const answer = (await (await fetch(`${started.origin}/api/usage`)).json()) as UsageAnswer;
     expect(answer.judges).toBeDefined();

@@ -21,14 +21,11 @@ import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { Browser, BrowserContext, Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
-import { AdminNotes } from "../../src/runtime/notes.ts";
-import { SseHub } from "../../src/server/sse.ts";
-import { StreamHub } from "../../src/server/streams.ts";
-import { startServer, type StartedServer } from "../../src/server/server.ts";
+import type { StartedServer } from "../../src/server/server.ts";
 import { builtWebDir } from "./web-dir.ts";
-import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { launchChromium } from "./chromium.ts";
+import { startTestServer } from "../server-helpers.ts";
 
 /** The card's script, served from the extension's `ui/` directory. */
 const PROBE_JS = `window.__probeRuns = (window.__probeRuns ?? 0) + 1;
@@ -134,18 +131,7 @@ beforeAll(async () => {
   // A fixture that did not load would turn every assertion below into a puzzle.
   if (loaded.errors.length > 0) throw new Error(`the fixture extension did not load: ${loaded.errors.join("; ")}`);
 
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: harness.runtime,
-    bus: harness.events,
-    sse,
-    streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: builtWebDir(),
-    adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-  };
-  started = await startServer(deps, { webDir: builtWebDir() });
+  started = await startTestServer(harness, { webDir: builtWebDir() });
   origin = started.origin;
 
   browser = await launchChromium();

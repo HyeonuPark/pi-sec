@@ -24,14 +24,11 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import type { Browser, BrowserContext, Page } from "playwright";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { defaultConfig } from "../../src/config/schema.ts";
-import { AdminNotes } from "../../src/runtime/notes.ts";
-import { SseHub } from "../../src/server/sse.ts";
-import { StreamHub } from "../../src/server/streams.ts";
-import { startServer, type StartedServer } from "../../src/server/server.ts";
-import type { AppDeps } from "../../src/server/deps.ts";
+import type { StartedServer } from "../../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
 import { launchChromium } from "./chromium.ts";
+import { startTestServer } from "../server-helpers.ts";
 
 /** The widths the app switches layout at, one on each side and one exactly on it. */
 const PHONE = { width: 390, height: 844 } as const;
@@ -57,18 +54,7 @@ beforeAll(async () => {
   if (vmodel === undefined) throw new Error("the test config declares no `faux` vmodel");
   modelText = `${vmodel.provider}/${vmodel.modelId}`;
 
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: harness.runtime,
-    bus: harness.events,
-    sse,
-    streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: builtWebDir(),
-    adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-  };
-  started = await startServer(deps, { webDir: builtWebDir() });
+  started = await startTestServer(harness, { webDir: builtWebDir() });
   origin = started.origin;
 
   // One message in the root conversation, so the page has a snapshot to draw the

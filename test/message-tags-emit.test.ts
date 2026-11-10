@@ -12,12 +12,9 @@ import { defaultConfig } from "../src/config/schema.ts";
 import { SecAgentChild } from "../src/documents.ts";
 import { ENVELOPE_CLOSE, ENVELOPE_OPEN, readMessage, wrapMessage } from "../src/message-envelope.ts";
 import { appendEnveloped, submitEnveloped } from "../src/submit-envelope.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 /**
  * Every door that puts text into a conversation has to say where the text came
@@ -155,18 +152,7 @@ describe("the envelope at every producer", () => {
         server: { ...defaultConfig().server, ...(options.config?.server ?? {}), port: 0 },
       },
     });
-    const sse = new SseHub({ heartbeatMs: 15_000, queueBytes: 1_000_000, bufferMs: 60_000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(harness);
     return { origin: started.origin };
   }
 

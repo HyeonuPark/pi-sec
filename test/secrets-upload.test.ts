@@ -3,12 +3,9 @@ import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultConfig } from "../src/config/schema.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 // Everything here writes into the harness home, whose `secrets` directory is
 // created by `createTestHarness`. The operator's own store is never touched:
@@ -34,18 +31,7 @@ async function boot(): Promise<Fixture> {
   const h = await createTestHarness({
     config: { server: { ...defaultConfig().server, port: 0 } },
   });
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: h.runtime,
-    bus: h.events,
-    sse,
-    streams: new StreamHub({ runtime: h.runtime, bus: h.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: h.runtime.restart, notes: new AdminNotes() },
-  };
-  const started = await startServer(deps, { webDir: defaultWebDir() });
+  const started = await startTestServer(h);
   const fixture: Fixture = { h, origin: started.origin, started, secretsDir: h.paths.secretsDir };
   open = fixture;
   return fixture;

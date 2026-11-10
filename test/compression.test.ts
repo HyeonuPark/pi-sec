@@ -1,14 +1,11 @@
 import { createGunzip, gunzipSync, constants as zlibConstants } from "node:zlib";
 import { request as httpRequest, type IncomingMessage, type IncomingHttpHeaders } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { defaultConfig } from "../src/config/schema.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
 import { acceptsGzip, GZIP_MIN_BYTES, isCompressibleType } from "../src/server/compress.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
 import type { AppDeps } from "../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer, type TestServer } from "./server-helpers.ts";
 
 /**
  * Gzip on the surfaces a page load touches.
@@ -90,7 +87,7 @@ describe("acceptsGzip", () => {
 
 describe("gzip on the wire", () => {
   let harness: TestHarness | undefined;
-  let started: StartedServer | undefined;
+  let started: TestServer | undefined;
   let deps: AppDeps | undefined;
 
   afterEach(async () => {
@@ -104,18 +101,8 @@ describe("gzip on the wire", () => {
   /** A daemon with one job, so `GET /api/jobs` answers more than a kilobyte. */
   async function boot(): Promise<string> {
     harness = await createTestHarness({ config: { server: { ...defaultConfig().server, port: 0 } } });
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    deps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(harness);
+    deps = started.deps;
     const created = await fetch(`${started.origin}/api/jobs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

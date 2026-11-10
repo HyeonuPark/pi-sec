@@ -25,15 +25,12 @@ import { dirname, join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { Browser, BrowserContext, Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
-import { AdminNotes } from "../../src/runtime/notes.ts";
-import { SseHub } from "../../src/server/sse.ts";
-import { StreamHub } from "../../src/server/streams.ts";
-import { startServer, type StartedServer } from "../../src/server/server.ts";
-import type { AppDeps } from "../../src/server/deps.ts";
+import type { StartedServer } from "../../src/server/server.ts";
 import { fakeGhFixture, type FakeGhFixture } from "../github-pr/fake-gh-helpers.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
 import { launchChromium } from "./chromium.ts";
+import { startTestServer } from "../server-helpers.ts";
 
 /** How long the chat tab gets to put the press behind it before the test fails. */
 const CLOSED_TIMEOUT_MS = 10000;
@@ -115,18 +112,7 @@ async function boot(options: { readonly enabled: boolean; readonly basePath: str
     },
   });
   const repoRoot = await tempRoot("pages-pr-link-repo-");
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: harness.runtime,
-    bus: harness.events,
-    sse,
-    streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: builtWebDir(),
-    adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-  };
-  const started: StartedServer = await startServer(deps, {
+  const started: StartedServer = await startTestServer(harness, {
     webDir: builtWebDir(),
     extensionRoutes: options.enabled
       ? {

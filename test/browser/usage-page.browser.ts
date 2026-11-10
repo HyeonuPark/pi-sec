@@ -26,15 +26,12 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import type { Models } from "@earendil-works/pi-ai";
 import type { Browser, BrowserContext, Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
-import { AdminNotes } from "../../src/runtime/notes.ts";
-import { SseHub } from "../../src/server/sse.ts";
-import { StreamHub } from "../../src/server/streams.ts";
-import { startServer, type StartedServer } from "../../src/server/server.ts";
+import type { StartedServer } from "../../src/server/server.ts";
 import { builtWebDir } from "./web-dir.ts";
-import type { AppDeps } from "../../src/server/deps.ts";
 import { ANTHROPIC_USAGE_URL, DEEPSEEK_BALANCE_URL, SYNTHETIC_QUOTAS_URL } from "../../src/server/usage/fetchers.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { launchChromium } from "./chromium.ts";
+import { startTestServer } from "../server-helpers.ts";
 
 /** The two widths every condition is checked at: a desktop and a phone. */
 const VIEWPORTS = [
@@ -337,18 +334,7 @@ beforeAll(async () => {
     models: modelsOf(catalog),
     getConfig: () => ({ ...harness!.config, judges: { "report-check": { provider: "openai", modelId: "gpt-6-luna" } } }),
   };
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime,
-    bus: harness.events,
-    sse,
-    streams: new StreamHub({ runtime, bus: harness.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: builtWebDir(),
-    adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-  };
-  started = await startServer(deps, { webDir: builtWebDir(), ui: { renderTimeoutMs: 2000 }, usage: { models: () => runtime.models as never, fetch: fakeFetch } });
+  started = await startTestServer(harness, { webDir: builtWebDir(), ui: { renderTimeoutMs: 2000 }, usage: { models: () => runtime.models as never, fetch: fakeFetch }, deps: { runtime } });
   origin = started.origin;
 
   browser = await launchChromium();

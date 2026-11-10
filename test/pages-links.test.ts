@@ -16,15 +16,12 @@
 import { readFile, rm } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultConfig } from "../src/config/schema.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
 import { BUNDLED_EXTENSIONS, bundledExtension, type BundledExtension } from "../src/extensions/index.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { withPageLinks } from "../src/server/routes/basic-chat.ts";
-import type { AppDeps } from "../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 import { installHostStatus } from "./ext-pages-helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 let harness: TestHarness | undefined;
 let started: StartedServer | undefined;
@@ -64,18 +61,7 @@ async function boot(
     },
   });
   harness = created;
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: created.runtime,
-    bus: created.events,
-    sse,
-    streams: new StreamHub({ runtime: created.runtime, bus: created.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: created.runtime.restart, notes: new AdminNotes() },
-  };
-  started = await startServer(deps, { webDir: defaultWebDir(), catalog });
+  started = await startTestServer(created, { catalog });
   return { origin: started.origin, harness: created };
 }
 

@@ -8,12 +8,9 @@ import { syncRootRecord } from "../src/agent/root-record.ts";
 import { rootContextPath } from "../src/agent/context-file.ts";
 import { defaultConfig, type Config } from "../src/config/schema.ts";
 import { SecAgent } from "../src/documents.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
 import type { AppDeps } from "../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer, type TestServer } from "./server-helpers.ts";
 
 /**
  * The read-only side of the root conversation.
@@ -26,7 +23,7 @@ import { createTestHarness, type TestHarness } from "./helpers.ts";
 
 describe("root preparation at boot", () => {
   let harness: TestHarness | undefined;
-  let started: StartedServer | undefined;
+  let started: TestServer | undefined;
 
   afterEach(async () => {
     await started?.close();
@@ -47,20 +44,8 @@ describe("root preparation at boot", () => {
         server: { ...defaultConfig().server, ...(options.config?.server ?? {}), port: 0 },
       },
     });
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-      ...(extra.reloadConfig === undefined ? {} : { reloadConfig: extra.reloadConfig }),
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
-    return { origin: started.origin, deps };
+    started = await startTestServer(harness, { deps: { reloadConfig: extra.reloadConfig } });
+    return { origin: started.origin, deps: started.deps };
   }
 
   function rootConversation(): Promise<Conversation | undefined> {

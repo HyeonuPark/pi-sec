@@ -8,15 +8,13 @@ import {
   type EntryDraft,
   type EntryRecord,
 } from "@earendil-works/pi-durable";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { defaultConfig } from "../src/config/schema.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { CONTROL_EVENTS, StreamHub } from "../src/server/streams.ts";
+import { CONTROL_EVENTS } from "../src/server/streams.ts";
 import { slimAgentEvent, slimEntries, slimEntry, slimSnapshot } from "../src/server/stream-entries.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 import { fullEntries } from "./stream-entries-fixture.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 
@@ -291,18 +289,7 @@ describe("the conversation stream", () => {
       config: { server: { ...defaultConfig().server, port: 0 } },
     });
     harness = created;
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: created.runtime,
-      bus: created.events,
-      sse,
-      streams: new StreamHub({ runtime: created.runtime, bus: created.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: created.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(created);
     return { origin: started.origin, harness: created };
   }
 

@@ -12,12 +12,9 @@ import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultConfig, type Config } from "../src/config/schema.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type ServerOptions, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
+import type { ServerOptions, StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 const CAPTURE_KEY = "__piSecUiRouteTest";
 
@@ -134,19 +131,7 @@ async function boot(options: BootOptions = {}): Promise<string> {
   const loaded = await harness.runtime.loader.loadAll();
   expect(loaded.errors).toEqual([]);
 
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: harness.runtime,
-    bus: harness.events,
-    sse,
-    streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-  };
-  started = await startServer(deps, {
-    webDir: defaultWebDir(),
+  started = await startTestServer(harness, {
     ui: options.ui ?? { renderTimeoutMs: 50, actionTimeoutMs: 100 },
   });
   return started.origin;

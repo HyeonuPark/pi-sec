@@ -6,13 +6,10 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";
 import { defaultConfig } from "../src/config/schema.ts";
 import { SecAgent, type AgentKind } from "../src/documents.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { RestartLauncher } from "../src/runtime/restart-helper.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
 import type { AppDeps } from "../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer, type TestServer } from "./server-helpers.ts";
 
 /**
  * A reset empties the context its sub-agents report into, so both reset routes
@@ -34,7 +31,7 @@ interface Booted {
 
 describe("a reset while sub-agents are working", () => {
   let harness: TestHarness | undefined;
-  let started: StartedServer | undefined;
+  let started: TestServer | undefined;
   let held: { readonly opened: Promise<void>; open(): void } | undefined;
 
   afterEach(async () => {
@@ -66,25 +63,14 @@ describe("a reset while sub-agents are working", () => {
       return fauxAssistantMessage([fauxText("done")]);
     };
     harness.faux.setResponses(Array.from({ length: 20 }, () => answer));
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(harness);
     const conversation = await resolveDefaultConversation(
       harness.runtime.harness,
       harness.config,
       harness.runtime.paths,
       CTX,
     );
-    return { origin: started.origin, deps, root: String(conversation.id) };
+    return { origin: started.origin, deps: started.deps, root: String(conversation.id) };
   }
 
   /** One agent record in a conversation of its own, as the harness would write it. */

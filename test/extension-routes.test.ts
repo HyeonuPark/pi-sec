@@ -5,15 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultConfig, type Config } from "../src/config/schema.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type ServerOptions, type StartedServer } from "../src/server/server.ts";
+import type { ServerOptions } from "../src/server/server.ts";
 import { json } from "../src/server/router.ts";
 import type { AppDeps } from "../src/server/deps.ts";
 import { BUNDLED_EXTENSIONS, type BundledExtension, type ExtensionRouteContext } from "../src/extensions/index.ts";
 import { fakeGhFixture } from "./github-pr/fake-gh-helpers.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer, type TestServer } from "./server-helpers.ts";
 
 /**
  * Web routes that a bundled extension registers.
@@ -91,7 +89,7 @@ function fixtureCatalog(state: FixtureState): BundledExtension[] {
 
 describe("extension web routes", () => {
   let harness: TestHarness | undefined;
-  let started: StartedServer | undefined;
+  let started: TestServer | undefined;
   /** Directories this file made for a boot, removed when the case ends. */
   const temporaries: string[] = [];
 
@@ -122,19 +120,8 @@ describe("extension web routes", () => {
       },
     });
     harness = created;
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: created.runtime,
-      bus: created.events,
-      sse,
-      streams: new StreamHub({ runtime: created.runtime, bus: created.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: created.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir(), ...options });
-    return { origin: started.origin, deps };
+    started = await startTestServer(created, { ...options });
+    return { origin: started.origin, deps: started.deps };
   }
 
   /** Close the running server so the next `boot` starts from a clean harness. */

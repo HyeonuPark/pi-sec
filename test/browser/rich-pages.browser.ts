@@ -22,14 +22,11 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import type { Browser, BrowserContext, Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { createAttachment, type AttachmentContext } from "../../src/attachments/store.ts";
-import { AdminNotes } from "../../src/runtime/notes.ts";
-import { SseHub } from "../../src/server/sse.ts";
-import { StreamHub } from "../../src/server/streams.ts";
-import { startServer, type StartedServer } from "../../src/server/server.ts";
+import type { StartedServer } from "../../src/server/server.ts";
 import { builtWebDir } from "./web-dir.ts";
-import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { launchChromium } from "./chromium.ts";
+import { startTestServer } from "../server-helpers.ts";
 
 let harness: TestHarness | undefined;
 let started: StartedServer | undefined;
@@ -83,18 +80,7 @@ beforeAll(async () => {
   await mkdir(roots.share, { recursive: true });
   harness = await createTestHarness({ config: { server: { ...defaultConfig().server, port: 0 } } });
   store = { storage: harness.runtime.storage, harness: harness.runtime.harness, audit: harness.runtime.audit, roots };
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: harness.runtime,
-    bus: harness.events,
-    sse,
-    streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: builtWebDir(),
-    adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-  };
-  started = await startServer(deps, { webDir: builtWebDir(), attachmentRoots: roots });
+  started = await startTestServer(harness, { webDir: builtWebDir(), attachmentRoots: roots });
   origin = started.origin;
   port = Number(new URL(origin).port);
   started.server.on("request", (request) => {

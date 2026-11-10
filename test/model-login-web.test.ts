@@ -30,13 +30,10 @@ import { createAuditLog } from "../src/runtime/audit.ts";
 import { createEventBus } from "../src/runtime/event-bus.ts";
 import { createLogger } from "../src/runtime/logger.ts";
 import { readOrCreateDeviceId } from "../src/runtime/model-login.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { buildPaths, ensureLayout, type Paths } from "../src/runtime/paths.ts";
 import { SecretRegistry } from "../src/secrets/registry.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
+import type { StartedServer } from "../src/server/server.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/extensions/acme/", import.meta.url));
 
@@ -357,18 +354,7 @@ async function boot(options: BootOptions = {}): Promise<Boot> {
 
   if (options.record !== undefined) await writeFile(paths.modelLoginsFile, options.record, "utf8");
 
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime,
-    bus,
-    sse,
-    streams: new StreamHub({ runtime, bus, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: runtime.restart, notes: new AdminNotes() },
-  };
-  const started = await startServer(deps, { webDir: defaultWebDir() });
+  const started = await startTestServer({ runtime, events: bus });
 
   return {
     origin: started.origin,

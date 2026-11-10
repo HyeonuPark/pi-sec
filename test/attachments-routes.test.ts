@@ -7,11 +7,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";
 import { submitEnveloped } from "../src/submit-envelope.ts";
 import { defaultConfig } from "../src/config/schema.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { ulid } from "../src/runtime/ids.ts";
 import * as store from "../src/attachments/store.ts";
 import {
@@ -22,6 +18,7 @@ import {
   type AttachmentRoots,
 } from "../src/attachments/store.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures: the smallest header each reader accepts, written by hand so a
@@ -86,23 +83,7 @@ async function boot(options: { fromConfig?: boolean } = {}): Promise<Fixture> {
     },
   });
 
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: h.runtime,
-    bus: h.events,
-    sse,
-    streams: new StreamHub({ runtime: h.runtime, bus: h.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: h.runtime.restart, notes: new AdminNotes() },
-  };
-  const started = await startServer(
-    deps,
-    options.fromConfig === true
-      ? { webDir: defaultWebDir() }
-      : { webDir: defaultWebDir(), attachmentRoots: roots },
-  );
+  const started = await startTestServer(h, options.fromConfig === true ? {} : { attachmentRoots: roots });
   const fixture: Fixture = {
     h,
     origin: started.origin,

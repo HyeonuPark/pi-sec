@@ -7,14 +7,11 @@ import type { ToolExecutionApi, ToolRegistration } from "@earendil-works/pi-dura
 import { defaultConfig } from "../src/config/schema.ts";
 import { SecReportDraft } from "../src/documents.ts";
 import { DraftStore } from "../src/reports/drafts.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { Janitor } from "../src/runtime/janitor.ts";
 import { readAuditTail } from "../src/runtime/audit.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 /**
  * A draft report is open work of its job, from the moment a subagent writes it
@@ -66,18 +63,7 @@ describe("a draft report is open work of its job", () => {
 
   /** One server over the harness; the caller closes it. */
   async function serve(h: TestHarness): Promise<StartedServer> {
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: h.runtime,
-      bus: h.events,
-      sse,
-      streams: new StreamHub({ runtime: h.runtime, bus: h.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: h.runtime.restart, notes: new AdminNotes() },
-    };
-    return await startServer(deps, { webDir: defaultWebDir() });
+    return await startTestServer(h);
   }
 
   /** Every installed tool, whatever the calling conversation is offered. */

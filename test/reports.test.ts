@@ -7,20 +7,17 @@ import type { ConversationId, ToolExecutionApi, ToolRegistration } from "@earend
 import { SecAgent, SecAgentChild, SecReport, SecReportDraft, type ReportFeedback, type ReportRecord, type ReportVersion } from "../src/documents.ts";
 import { readAuditTail } from "../src/runtime/audit.ts";
 import { DraftStore, type CreateDraftInput } from "../src/reports/drafts.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { defaultConfig } from "../src/config/schema.ts";
 import { diffLines } from "../src/reports/diff.ts";
 import { ReportStore, awaitingAnswer, reportKind, reportName, reportStanding, slugify, type ReportApprovalOutcome, type StandingRecord } from "../src/reports/store.ts";
 import { reportNotice } from "../src/reports/notice.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 import { readMessage } from "../src/message-envelope.ts";
 import { parseReview } from "../src/review.ts";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";
 import { toolFilterFor } from "../src/agent/tool-profile.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 
@@ -1933,18 +1930,7 @@ describe("report routes", () => {
     harness = await createTestHarness({
       config: { server: { ...defaultConfig().server, port: 0 } },
     });
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(harness);
     return started.origin;
   }
 

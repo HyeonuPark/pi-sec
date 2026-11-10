@@ -16,12 +16,9 @@ import { describe, expect, it, afterEach, beforeEach } from "vitest";
 import { tmpdir } from "node:os";
 import { request as httpRequest, type IncomingHttpHeaders, createServer, get as httpGet, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { gunzipSync } from "node:zlib";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { defaultConfig } from "../src/config/schema.ts";
-import { SseHub, SseWriter } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
+import { SseWriter } from "../src/server/sse.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 import { injectName, jsonDataBlock } from "../src/server/static.ts";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
@@ -33,6 +30,7 @@ import { createAttachmentsExtension, urlOf } from "../src/extensions/attachments
 import type { ExtensionContext } from "../src/extensions/context.ts";
 import { describeBasePathProblem, effectivePrefix, isTrustedPeer, normalizePrefix, proxyContext, resolveMount, trustedProxyProblems } from "../src/server/proxy.ts";
 import { checkCardMarkup, UI_MARKUP_MAX_BYTES } from "../src/server/ui-markup.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 describe("base-mount.test.ts", () => {
   /**
@@ -126,18 +124,7 @@ describe("static-etag.test.ts", () => {
 
     async function boot(): Promise<string> {
       harness = await createTestHarness({ config: { server: { ...defaultConfig().server, port: 0 } } });
-      const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-      const deps: AppDeps = {
-        runtime: harness.runtime,
-        bus: harness.events,
-        sse,
-        streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-        startedAt: Date.now(),
-        version: "test",
-        webDir: webDir!,
-        adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-      };
-      started = await startServer(deps, { webDir: webDir! });
+      started = await startTestServer(harness, { webDir: webDir! });
       return started.origin;
     }
 
@@ -413,18 +400,7 @@ describe("personality-name-page.test.ts", () => {
       harness = await createTestHarness({ config: { server: { ...defaultConfig().server, port: 0 } } });
       const webDir = await mkdtemp(join(tmpdir(), "pi-sec-name-page-"));
       await writeFile(join(webDir, "index.html"), page, "utf8");
-      const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-      const deps: AppDeps = {
-        runtime: harness.runtime,
-        bus: harness.events,
-        sse,
-        streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-        startedAt: Date.now(),
-        version: "test",
-        webDir,
-        adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-      };
-      started = await startServer(deps, { webDir });
+      started = await startTestServer(harness, { webDir });
       return started.origin;
     }
 
@@ -489,18 +465,7 @@ describe("personality-name-page.test.ts", () => {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, "---\nlanguage: en\nname: Alice\n---\n# Persona\n\nWarm.\n", "utf8");
 
-      const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-      const deps: AppDeps = {
-        runtime: harness.runtime,
-        bus: harness.events,
-        sse,
-        streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-        startedAt: Date.now(),
-        version: "test",
-        webDir,
-        adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-      };
-      started = await startServer(deps, { webDir });
+      started = await startTestServer(harness, { webDir });
 
       expect(await pageOf(started.origin)).toContain('<meta name="pi-sec-name" content="Alice" />');
     });

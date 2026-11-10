@@ -1,22 +1,19 @@
 import { commitWrites } from "@earendil-works/pi-durable/testing";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { defaultConfig, type Config } from "../src/config/schema.ts";
 import { loadConfig } from "../src/config/load.ts";
-import { SseHub } from "../src/server/sse.ts";
 import { RestartLauncher } from "../src/runtime/restart-helper.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
 import type { AppDeps, UiRestartOutcome } from "../src/server/deps.ts";
 import { createInboxItemTx } from "../src/extensions/notify.ts";
 import { SecAgent, SecUserQueryList } from "../src/documents.ts";
 import { resolveRoutineApproval } from "../src/jobs/registry.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer, type TestServer } from "./server-helpers.ts";
 
 async function readUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,
@@ -65,7 +62,7 @@ function countOf(text: string, needle: string): number {
 
 describe("http server", () => {
   let harness: TestHarness | undefined;
-  let started: StartedServer | undefined;
+  let started: TestServer | undefined;
 
   afterEach(async () => {
     await started?.close();
@@ -85,20 +82,8 @@ describe("http server", () => {
         server: { ...defaultConfig().server, ...(options.config?.server ?? {}), port: 0 },
       },
     });
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-      ...(extra.reloadConfig === undefined ? {} : { reloadConfig: extra.reloadConfig }),
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
-    return { origin: started.origin, deps };
+    started = await startTestServer(harness, { deps: { reloadConfig: extra.reloadConfig } });
+    return { origin: started.origin, deps: started.deps };
   }
 
   it("reports health", async () => {
@@ -1185,7 +1170,7 @@ describe("with more than one client attached", () => {
 
 describe("shared files", () => {
   let harness: TestHarness | undefined;
-  let started: StartedServer | undefined;
+  let started: TestServer | undefined;
 
   afterEach(async () => {
     await started?.close();
@@ -1196,18 +1181,7 @@ describe("shared files", () => {
 
   async function boot(): Promise<{ origin: string }> {
     harness = await createTestHarness({ config: { server: { ...defaultConfig().server, port: 0 } } });
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(harness);
     return { origin: started.origin };
   }
 
@@ -1219,7 +1193,7 @@ describe("shared files", () => {
 
 describe("restart from the web UI", () => {
   let harness: TestHarness | undefined;
-  let started: StartedServer | undefined;
+  let started: TestServer | undefined;
 
   afterEach(async () => {
     await started?.close();
@@ -1279,19 +1253,7 @@ describe("restart from the web UI", () => {
       },
     });
 
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-      restart: launcher,
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(harness, { deps: { restart: launcher } });
     return { origin: started.origin, probes, launched, marker: join(harness.paths.runDir, "restart-pending") };
   }
 
@@ -1418,7 +1380,7 @@ describe("restart from the web UI", () => {
 
 describe("ui restart from the web UI", () => {
   let harness: TestHarness | undefined;
-  let started: StartedServer | undefined;
+  let started: TestServer | undefined;
 
   afterEach(async () => {
     await started?.close();
@@ -1434,19 +1396,7 @@ describe("ui restart from the web UI", () => {
    */
   async function boot(uiRestart?: AppDeps["uiRestart"]): Promise<{ origin: string }> {
     harness = await createTestHarness({ config: { server: { ...defaultConfig().server, port: 0 } } });
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-      ...(uiRestart === undefined ? {} : { uiRestart }),
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(harness, { deps: { uiRestart } });
     return { origin: started.origin };
   }
 

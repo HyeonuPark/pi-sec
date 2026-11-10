@@ -17,12 +17,9 @@ import type { ExtensionContext } from "../src/extensions/context.ts";
 import { wrapMessage } from "../src/message-envelope.ts";
 import { attachmentAttrs } from "../src/server/routes/basic-chat.ts";
 import { submitEnveloped } from "../src/submit-envelope.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -652,18 +649,7 @@ describe("a live turn", () => {
 
 /** Start the HTTP server over the current harness, the way the daemon does. */
 async function bootServer(h: TestHarness): Promise<string> {
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: h.runtime,
-    bus: h.events,
-    sse,
-    streams: new StreamHub({ runtime: h.runtime, bus: h.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: h.runtime.restart, notes: new AdminNotes() },
-  };
-  server = await startServer(deps, { webDir: defaultWebDir() });
+  server = await startTestServer(h);
   return server.origin;
 }
 

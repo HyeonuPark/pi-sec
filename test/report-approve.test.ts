@@ -2,16 +2,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import { defaultConfig } from "../src/config/schema.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { APPROVAL_MARKER, approvalInput, approvalRequestId, parseApproval } from "../src/approvals/input.ts";
 import { readMessage, wrapMessage } from "../src/message-envelope.ts";
 import { parseReview } from "../src/review.ts";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 
@@ -98,18 +95,7 @@ describe("approve route", () => {
 
   async function boot(): Promise<string> {
     harness = await createTestHarness({ config: { server: { ...defaultConfig().server, port: 0 } } });
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(harness);
     return started.origin;
   }
 
@@ -495,18 +481,7 @@ describe("done route", () => {
 
   async function boot(): Promise<string> {
     harness = await createTestHarness({ config: { server: { ...defaultConfig().server, port: 0 } } });
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir() });
+    started = await startTestServer(harness);
     return started.origin;
   }
 

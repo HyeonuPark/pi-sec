@@ -2,14 +2,13 @@ import { createServer, request, type IncomingMessage, type Server, type ServerRe
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultConfig } from "../src/config/schema.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { SseHub } from "../src/server/sse.ts";
 import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
+import { startServer, type StartedServer } from "../src/server/server.ts";
 import type { RouteContext } from "../src/server/router.ts";
-import type { AppDeps } from "../src/server/deps.ts";
 import type { BundledExtension, ExtensionRouteContext } from "../src/extensions/index.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 /**
  * What a server does with event streams once its shutdown began.
@@ -141,18 +140,7 @@ describe("startServer close", () => {
         agent: { ...defaultConfig().agent, extensions: { enabled: ["close-fixture"] } },
       },
     });
-    const sse = new SseHub(OPTIONS);
-    const deps: AppDeps = {
-      runtime: harness.runtime,
-      bus: harness.events,
-      sse,
-      streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-    };
-    started = await startServer(deps, { webDir: defaultWebDir(), catalog, closeGraceMs: 200 });
+    started = await startTestServer(harness, { catalog, closeGraceMs: 200 });
     const port = Number(new URL(started.origin).port);
 
     // The client holds an open response of its own, outside the hub's reach.

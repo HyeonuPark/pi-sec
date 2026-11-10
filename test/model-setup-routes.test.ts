@@ -21,14 +21,11 @@ import { ProviderRegistry, preloadExtensionProviders } from "../src/registry/pro
 import { createAuditLog } from "../src/runtime/audit.ts";
 import { createEventBus } from "../src/runtime/event-bus.ts";
 import { createLogger } from "../src/runtime/logger.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import { buildPaths, ensureLayout, type Paths } from "../src/runtime/paths.ts";
 import { SecretRegistry } from "../src/secrets/registry.ts";
 import { createConfigReloader } from "../src/server/config-reload.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
+import type { StartedServer } from "../src/server/server.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const FIXTURE = fileURLToPath(new URL("./fixtures/extensions/acme/", import.meta.url));
@@ -132,19 +129,7 @@ async function boot(startingConfig = "{}\n", options: { prompts?: boolean } = {}
     watchExtensions: false,
     providers,
   });
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime,
-    bus,
-    sse,
-    streams: new StreamHub({ runtime, bus, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: runtime.restart, notes: new AdminNotes() },
-    reloadConfig: createConfigReloader({ home: paths.home, runtime }),
-  };
-  const started: StartedServer = await startServer(deps, { webDir: defaultWebDir() });
+  const started: StartedServer = await startTestServer({ runtime, events: bus }, { deps: { reloadConfig: createConfigReloader({ home: paths.home, runtime }) } });
   closers.push(async () => {
     await started.close();
     await runtime.close();

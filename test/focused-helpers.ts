@@ -9,12 +9,10 @@ import type { Conversation } from "@earendil-works/pi-durable";
 import { defaultConfig } from "../src/config/schema.ts";
 import { openFocusedChat, type FocusedDeps } from "../src/focused/service.ts";
 import type { FocusedChatRow } from "../src/focused/store.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
 import type { AppDeps } from "../src/server/deps.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 /**
  * The focused chat tests' shared parts.
@@ -179,20 +177,8 @@ export async function bootServer(
   test: TestHarness,
   reloadConfig?: () => Promise<void>,
 ): Promise<BootedServer> {
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: test.runtime,
-    bus: test.events,
-    sse,
-    streams: new StreamHub({ runtime: test.runtime, bus: test.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: test.runtime.restart, notes: new AdminNotes() },
-    ...(reloadConfig === undefined ? {} : { reloadConfig }),
-  };
-  const started = await startServer(deps, { webDir: defaultWebDir() });
-  return { origin: started.origin, deps, started };
+  const started = await startTestServer(test, { deps: { reloadConfig } });
+  return { origin: started.origin, deps: started.deps, started };
 }
 
 /** A test harness whose HTTP port the kernel picks, the way the server tests do it. */

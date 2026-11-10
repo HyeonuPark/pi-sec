@@ -1,11 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { defaultConfig } from "../src/config/schema.ts";
 import { createRemoteFixture, type RemoteFixture } from "./remote-helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 /**
  * The two routes.
@@ -40,22 +37,11 @@ async function boot(options: Parameters<typeof createRemoteFixture>[0] = {}): Pr
     config: { ...options.config, server: { ...defaultConfig().server, port: 0 } },
   });
   fixture = created;
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: created.runtime,
-    bus: created.events,
-    sse,
-    streams: new StreamHub({ runtime: created.runtime, bus: created.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: created.runtime.restart, notes: new AdminNotes() },
-  };
   const seen: Record<string, unknown>[] = [];
   created.events.subscribe((event) => {
     if (event.type === "remote_machine_updated") seen.push(event.data);
   });
-  started = await startServer(deps, { webDir: defaultWebDir() });
+  started = await startTestServer(created);
   return { origin: started.origin, fixture: created, events: { seen } };
 }
 

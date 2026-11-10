@@ -1008,7 +1008,7 @@ describe("the edit buttons", () => {
       press(page, thread?.querySelector(".edit-save"));
       await page.settle();
 
-      const posts = page.calls.filter((call) => call.method === "POST").map((call) => JSON.parse(call.body));
+      const posts = page.calls.filter((call) => call.method === "POST").map((call) => JSON.parse(call.body ?? ""));
       expect(posts).toEqual([
         { body: "edited", baseBody: "First comment", commentId: "c1" },
         { body: "edited line note", baseBody: "This line is gone", commentId: "t2c1" },

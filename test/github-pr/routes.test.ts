@@ -6,13 +6,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultConfig, type Config } from "../../src/config/schema.ts";
 import { fillMarker } from "../../src/extensions/github-pr/routes.ts";
-import { AdminNotes } from "../../src/runtime/notes.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
-import { defaultWebDir, startServer, type ServerOptions, type StartedServer } from "../../src/server/server.ts";
-import { SseHub } from "../../src/server/sse.ts";
-import { StreamHub } from "../../src/server/streams.ts";
+import type { ServerOptions } from "../../src/server/server.ts";
 import { fakeGhFixture, writeResponses, type FakeGhFixture } from "./fake-gh-helpers.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
+import { startTestServer, type TestServer } from "../server-helpers.ts";
 
 /**
  * The dashboard's web routes, end to end over HTTP.
@@ -110,19 +108,7 @@ describe("github-pr routes", () => {
           : { githubPr: options.githubPr as NonNullable<Config["githubPr"]> }),
       },
     });
-    const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-    const deps: AppDeps = {
-      runtime: created.runtime,
-      bus: created.events,
-      sse,
-      streams: new StreamHub({ runtime: created.runtime, bus: created.events, sse }),
-      startedAt: Date.now(),
-      version: "test",
-      webDir: defaultWebDir(),
-      adminState: { restart: created.runtime.restart, notes: new AdminNotes() },
-    };
-    const started: StartedServer = await startServer(deps, {
-      webDir: defaultWebDir(),
+    const started: TestServer = await startTestServer(created, {
       extensionRoutes: {
         "github-pr": {
           ghPath: found.clientOptions.ghPath,
@@ -137,7 +123,7 @@ describe("github-pr routes", () => {
     closures.push(() => {
       void started.close();
     });
-    booted = { origin: started.origin, deps, harness: created };
+    booted = { origin: started.origin, deps: started.deps, harness: created };
     return booted;
   }
 

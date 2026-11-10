@@ -12,12 +12,9 @@ import { defaultConfig } from "../src/config/schema.ts";
 import { createAttachmentsExtension } from "../src/extensions/attachments.ts";
 import type { ExtensionContext } from "../src/extensions/context.ts";
 import type { AttachmentContext, AttachmentRoots } from "../src/attachments/store.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 export interface RichPagesFixture {
   readonly h: TestHarness;
@@ -58,18 +55,7 @@ export async function bootRichPages(): Promise<RichPagesFixture> {
   await mkdir(roots.attachments, { recursive: true, mode: 0o700 });
   await mkdir(roots.share, { recursive: true, mode: 0o700 });
   const h = await createTestHarness({ config: { server: { ...defaultConfig().server, port: 0, trustedProxies: ["127.0.0.1/32", "::1/128"] } } });
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: h.runtime,
-    bus: h.events,
-    sse,
-    streams: new StreamHub({ runtime: h.runtime, bus: h.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: h.runtime.restart, notes: new AdminNotes() },
-  };
-  const started = await startServer(deps, { webDir: defaultWebDir(), attachmentRoots: roots });
+  const started = await startTestServer(h, { attachmentRoots: roots });
   const ctx = (): AttachmentContext => ({
     storage: h.runtime.storage,
     harness: h.runtime.harness,

@@ -8,15 +8,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ModelCallsStore, type ModelCallInput } from "../src/agent/model-calls-store.ts";
 import { defaultConfig } from "../src/config/schema.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { MAX_REQUEST_SPEED, bucketIndex, computeCallStats, percentiles, slotEdges } from "../src/server/usage/call-stats.ts";
 import type { UsageStatsAnswer } from "../src/shared/wire/usage-stats.ts";
 import type { UsageStatsRouteOptions } from "../src/server/routes/usage-stats.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 const TZ = "Asia/Tokyo";
 /** 2026-11-06 16:30 +09:00. */
@@ -213,22 +210,11 @@ async function boot(
     config: { timezone: TZ, server: { ...defaultConfig().server, port: 0, ...(basePath === undefined ? {} : { basePath }) } },
   });
   const runtime = harness.runtime;
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime,
-    bus: harness.events,
-    sse,
-    streams: new StreamHub({ runtime, bus: harness.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-  };
   if (path !== undefined) await fixture(harness.paths.modelCallsDb, []);
-  started = await startServer(deps, {
-    webDir: defaultWebDir(),
+  started = await startTestServer(harness, {
     usage: { prefetch: false },
     usageStats: { now: () => NOW, ...usageStats },
+    deps: { runtime },
   });
   return { origin: started.origin, paths: harness.paths };
 }

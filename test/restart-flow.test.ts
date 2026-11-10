@@ -23,10 +23,7 @@ import { readMessage } from "../src/message-envelope.ts";
 import type { AgentKind, AgentRecord, AgentStatus, JobRecord } from "../src/documents.ts";
 import { NOTICE_LIST_LIMIT, NOTICE_SUPPRESS_MS, collectWaitingWork, notifyRestartNotice, zoneIso, type RestartNoticeDeps, type WaitingSubagent, type WaitingWork, type WaitingWorkSources } from "../src/runtime/restart-notice.ts";
 import { existsSync } from "node:fs";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
+import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 import type { ToolExecutionApi, ToolRegistration } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
@@ -37,6 +34,7 @@ import type { SubagentHub } from "../src/extensions/subagents.ts";
 import { readAuditTail, type AuditEvent } from "../src/runtime/audit.ts";
 import type { RestartOutcome } from "../src/runtime/restart-helper.ts";
 import { defaultConfig } from "../src/config/schema.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 describe("restart.test.ts", () => {
   /**
@@ -1019,19 +1017,7 @@ describe("restart-runner-route.test.ts", () => {
         },
       });
 
-      const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-      const deps: AppDeps = {
-        runtime: harness.runtime,
-        bus: harness.events,
-        sse,
-        streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-        startedAt: Date.now(),
-        version: "test",
-        webDir: defaultWebDir(),
-        adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-        restart: launcher,
-      };
-      started = await startServer(deps, { webDir: defaultWebDir() });
+      started = await startTestServer(harness, { deps: { restart: launcher } });
       return { origin: started.origin, probes, exits, markerPath: join(harness.paths.runDir, "restart-pending") };
     }
 
@@ -1244,19 +1230,7 @@ describe("p3-restart-refused-audit.test.ts", () => {
     };
 
     async function serve(h: TestHarness): Promise<string> {
-      const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-      const deps: AppDeps = {
-        runtime: h.runtime,
-        bus: h.events,
-        sse,
-        streams: new StreamHub({ runtime: h.runtime, bus: h.events, sse }),
-        startedAt: Date.now(),
-        version: "test",
-        webDir: defaultWebDir(),
-        adminState: { restart: h.runtime.restart, notes: new AdminNotes() },
-        restart: { launch: async () => LAUNCH_REFUSAL },
-      };
-      started = await startServer(deps, { webDir: defaultWebDir() });
+      started = await startTestServer(h, { deps: { restart: { launch: async () => LAUNCH_REFUSAL } } });
       return started.origin;
     }
 

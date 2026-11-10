@@ -23,14 +23,11 @@ import { fauxAssistantMessage, fauxText, type FauxResponseFactory } from "@earen
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { SecAgent } from "../../src/documents.ts";
-import { AdminNotes } from "../../src/runtime/notes.ts";
-import { SseHub } from "../../src/server/sse.ts";
-import { StreamHub } from "../../src/server/streams.ts";
-import { startServer, type StartedServer } from "../../src/server/server.ts";
-import type { AppDeps } from "../../src/server/deps.ts";
+import type { StartedServer } from "../../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
 import { launchChromium } from "./chromium.ts";
+import { startTestServer } from "../server-helpers.ts";
 
 const CTX = BACKGROUND_CONTEXT;
 
@@ -109,18 +106,7 @@ beforeAll(async () => {
   );
   void conversation.submit({ type: "input", content: "work" }, CTX);
 
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: h.runtime,
-    bus: h.events,
-    sse,
-    streams: new StreamHub({ runtime: h.runtime, bus: h.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: builtWebDir(),
-    adminState: { restart: h.runtime.restart, notes: new AdminNotes() },
-  };
-  started = await startServer(deps, { webDir: builtWebDir() });
+  started = await startTestServer(h, { webDir: builtWebDir() });
   origin = started.origin;
 
   browser = await launchChromium();

@@ -7,12 +7,9 @@ import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultConfig, type Config } from "../src/config/schema.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { defaultWebDir, startServer, type ServerOptions, type StartedServer } from "../src/server/server.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
+import { defaultWebDir, type ServerOptions, type StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
+import { startTestServer } from "./server-helpers.ts";
 
 /** The example extension, which the loader, route and browser tests load. */
 export const HOST_STATUS_DIR = fileURLToPath(new URL("./fixtures/extensions/host-status", import.meta.url));
@@ -71,18 +68,7 @@ export async function bootServer(options: BootOptions = {}): Promise<BootedPages
     },
   });
   const webDir = options.server?.webDir ?? defaultWebDir();
-  const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
-  const deps: AppDeps = {
-    runtime: harness.runtime,
-    bus: harness.events,
-    sse,
-    streams: new StreamHub({ runtime: harness.runtime, bus: harness.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir,
-    adminState: { restart: harness.runtime.restart, notes: new AdminNotes() },
-  };
-  const started = await startServer(deps, { ...(options.server ?? {}), webDir });
+  const started = await startTestServer(harness, { ...(options.server ?? {}), webDir });
   return {
     harness,
     origin: started.origin,
