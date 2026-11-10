@@ -477,6 +477,30 @@ describe("ui-probe-writes.test.ts", () => {
     });
   });
 
+  describe("ui-probe focused chat check", () => {
+    type FocusedRefusal = (body: unknown, focusedId: number) => string | undefined;
+    const refusal = () => pureFunction<FocusedRefusal>("focusedRefusal");
+    const chat = { conversationId: 42, archived: false, test: true };
+
+    it("lets an open test chat with the same id through", async () => {
+      expect((await refusal())(chat, 42)).toBeUndefined();
+    });
+
+    it("refuses a chat that was not opened for a test", async () => {
+      const refuse = await refusal();
+      expect(refuse({ ...chat, test: false }, 42)).toBeDefined();
+      expect(refuse({ conversationId: 42, archived: false }, 42)).toBeDefined();
+    });
+
+    it("refuses an archived chat, another id and a body that is not an object", async () => {
+      const refuse = await refusal();
+      expect(refuse({ ...chat, archived: true }, 42)).toBeDefined();
+      expect(refuse({ ...chat, conversationId: 43 }, 42)).toBeDefined();
+      expect(refuse(null, 42)).toBeDefined();
+      expect(refuse("chat", 42)).toBeDefined();
+    });
+  });
+
   describe("ui-probe mount prefix", () => {
     it("finds the prefix in front of a page path", async () => {
       const derive = await prefixOf();

@@ -109,7 +109,7 @@ GET, HEAD or OPTIONS before the request reaches the daemon, prints each blocked
 request under "blocked writes", and exits with code 1 when it blocked one.
 `--focused <id>` lets writes through to one open focused chat and to attachment
 uploads, and to nothing else. The probe refuses to start unless that id names an
-open focused chat.
+open focused chat that an agent opened for a test.
 
 ## Features
 

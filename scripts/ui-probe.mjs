@@ -20,11 +20,13 @@
 // makes that is not a GET, HEAD or OPTIONS is blocked before it leaves the
 // browser, printed under "blocked writes", and turns the exit code to 1. That
 // guard exists because this script once sent messages and an attachment into
-// a live root conversation. A click that writes has to land in a
-// focused chat (a session opened for tests), and `--focused <id>` is how the
-// caller names it: writes to that conversation and attachment uploads pass, and
-// nothing else does. The id is checked against the server before the browser
-// starts, so the root conversation's id cannot be passed by mistake.
+// a live root conversation. A click that writes has to land in an open focused
+// chat that an agent opened for a test, and `--focused <id>` is how the caller
+// names it: writes to that conversation and attachment uploads pass, and nothing
+// else does. The id is checked against the server before the browser starts. The
+// server must answer for that id, and the chat must be open and flagged as a
+// test chat, so neither the root conversation nor a chat the user opened can be
+// passed by mistake.
 //
 // Use the prefix the daemon serves: the page's `pi-sec-base` meta tag, or the
 // path of `server.publicUrl`. A proxy either strips its prefix or the daemon
@@ -147,6 +149,24 @@ function writeDecision({ method, url, prefix = "", focusedId = null }) {
   return "block";
 }
 
+/**
+ * Why the answer of the server does not allow writes to a focused chat, or
+ * `undefined` when it does. The body must be an object for the same id, the chat
+ * must be open, and it must carry the test flag: only a chat that an agent
+ * opened for a test takes writes.
+ *
+ * Pure and self-contained: the test lifts it out of the file.
+ */
+function focusedRefusal(body, focusedId) {
+  if (body === null || typeof body !== "object") return "answered 200 with no focused chat in the body";
+  if (body.conversationId !== focusedId) {
+    return `answered 200 for conversation ${JSON.stringify(body.conversationId)}, not ${focusedId}`;
+  }
+  if (body.archived !== false) return `answered 200 with archived: ${JSON.stringify(body.archived)}`;
+  if (body.test !== true) return `answered 200 with test: ${JSON.stringify(body.test)}`;
+  return undefined;
+}
+
 // Writes are the thing this tool must not do, so the one chat whose writes may
 // pass is checked with the server before a browser exists. A wrong id, the root
 // conversation's id, or an archived chat ends the run here: no page is loaded
@@ -154,7 +174,7 @@ function writeDecision({ method, url, prefix = "", focusedId = null }) {
 const focusedIndex = argv.indexOf("--focused");
 const focusedId = focusedIndex === -1 ? null : Number(argv[focusedIndex + 1]);
 if (focusedId !== null && (!Number.isInteger(focusedId) || focusedId <= 0)) {
-  console.error("--focused takes a positive integer: the number of an open focused chat");
+  console.error("--focused takes a positive integer: the number of an open focused chat that an agent opened for a test");
   process.exit(2);
 }
 const mountPrefix = prefixOf(url);
@@ -179,18 +199,14 @@ if (focusedId !== null) {
       refusal = `answered ${response.status}`;
     } else {
       const body = await response.json().catch(() => null);
-      if (body === null || typeof body !== "object") {
-        refusal = "answered 200 with no focused chat in the body";
-      } else if (body.archived !== false) {
-        refusal = `answered 200 with archived: ${JSON.stringify(body.archived)}`;
-      }
+      refusal = focusedRefusal(body, focusedId);
     }
   } catch (error) {
     refusal = `could not be reached: ${String(error)}`;
   }
   if (refusal !== undefined) {
     console.error(`--focused ${focusedId}: GET ${checkUrl} ${refusal}`);
-    console.error("Only an open focused chat takes writes; the root conversation and archived chats do not.");
+    console.error("Only an open focused chat that an agent opened for a test takes writes; the root conversation, archived chats and chats the user opened do not.");
     process.exit(2);
   }
 }
