@@ -22,9 +22,9 @@
  * result to the server, which owns markup checking, timeouts and injection.
  */
 import { Buffer } from "node:buffer";
-import { realpath, stat } from "node:fs/promises";
-import { join, sep } from "node:path";
 import type { EventsSink } from "../extensions/context.ts";
+import { join } from "node:path";
+import { uiFileProblem } from "./ui-file.ts";
 
 /** A slot name: lowercase words joined by dots, for example `sidebar.bottom`. */
 export const UI_SLOT_NAME = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)*$/;
@@ -161,48 +161,6 @@ function hasOwn(value: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
-/**
- * The problem with one card script, or `undefined` when it is usable.
- *
- * The rules are the ones the server repeats when it serves the file: a relative
- * path of plain segments under `ui/`, ending in `.js` or `.mjs`, that resolves to
- * a regular file inside the real `ui/` directory. A symlink that leaves `ui/` is
- * refused here, so a static server that re-checks realpath has nothing new to
- * learn.
- */
-async function scriptProblem(uiDir: string, script: unknown): Promise<string | undefined> {
-  if (typeof script !== "string") return "script must be a string";
-  for (const segment of script.split("/")) {
-    if (segment === "." || segment === "..") return `script "${script}" has a "." or ".." segment`;
-    if (!/^[A-Za-z0-9._-]+$/.test(segment)) return `script "${script}" is not a plain path under ui/`;
-  }
-  if (!/\.(?:js|mjs)$/.test(script)) return `script "${script}" must end in .js or .mjs`;
-
-  const path = join(uiDir, script);
-  let info;
-  try {
-    info = await stat(path);
-  } catch {
-    return `script "${script}" is not a file in ui/`;
-  }
-  if (!info.isFile()) return `script "${script}" is not a regular file`;
-
-  let base: string;
-  try {
-    base = await realpath(uiDir);
-  } catch {
-    return `script "${script}" cannot be resolved: ui/ is not a directory`;
-  }
-  let target: string;
-  try {
-    target = await realpath(path);
-  } catch {
-    return `script "${script}" cannot be resolved`;
-  }
-  if (target !== base && !target.startsWith(base + sep)) return `script "${script}" resolves outside ui/`;
-  return undefined;
-}
-
 /** The cards one extension's `ui.cards` array stands for, plus one line per dropped entry. */
 async function readCards(
   extension: string,
@@ -235,7 +193,7 @@ async function readCards(
     }
     let script: string | undefined;
     if (entry.script !== undefined) {
-      const problem = await scriptProblem(uiDir, entry.script);
+      const problem = await uiFileProblem(uiDir, "script", entry.script, /\.(?:js|mjs)$/, ".js or .mjs");
       if (problem !== undefined) {
         errors.push(`${where} ("${name}"): ${problem}`);
         continue;

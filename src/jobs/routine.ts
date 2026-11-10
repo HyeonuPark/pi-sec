@@ -42,28 +42,6 @@ export function isFiringStatus(status: JobStatus): boolean {
 export const CATCH_UP_VALUES: readonly NonNullable<JobRoutineSpec["catchUp"]>[] = ["skip", "once", "all"];
 export const OVERLAP_VALUES: readonly NonNullable<JobRoutineSpec["overlap"]>[] = ["skip", "queue", "allow"];
 
-/** A job that fires on a schedule: it has `routine` or `once`. */
-export type ScheduledJob = JobRecord & ({ routine: JobRoutineSpec } | { once: JobOnceSpec });
-
-export function hasRoutine(job: JobRecord): job is JobRecord & { routine: JobRoutineSpec } {
-  return job.routine !== undefined;
-}
-
-export function hasOnce(job: JobRecord): job is JobRecord & { once: JobOnceSpec } {
-  return job.once !== undefined;
-}
-
-/**
- * Whether the reconciler must look at this job at all.
- *
- * The judgement is the field, never a label. A label filter matches a whole
- * string, so a prefix search is impossible there, and a record an operator
- * relabelled would silently stop firing.
- */
-export function isScheduled(job: JobRecord): job is ScheduledJob {
-  return job.routine !== undefined || job.once !== undefined;
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

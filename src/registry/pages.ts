@@ -17,8 +17,8 @@
  * server fixes every route under `/ext/<name>/`, and this registry only answers
  * which pages and which callbacks the live registration holds.
  */
-import { realpath, stat } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { join } from "node:path";
+import { uiFileProblem } from "./ui-file.ts";
 
 /** A page name: lowercase words joined by hyphens. The empty string is the index page. */
 export const PAGE_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -142,52 +142,6 @@ function describe(value: unknown): string {
   return typeof value;
 }
 
-/**
- * The problem with one declared file, or `undefined` when it is usable.
- *
- * The rules are the card script rules: a relative path of plain segments under
- * `ui/`, with the suffix the field needs, that resolves to a regular file inside
- * the real `ui/` directory. A symlink that leaves `ui/` is refused.
- */
-async function fileProblem(
-  uiDir: string,
-  field: string,
-  value: unknown,
-  suffix: RegExp,
-  suffixText: string,
-): Promise<string | undefined> {
-  if (typeof value !== "string") return `${field} must be a string`;
-  for (const segment of value.split("/")) {
-    if (segment === "." || segment === "..") return `${field} "${value}" has a "." or ".." segment`;
-    if (!/^[A-Za-z0-9._-]+$/.test(segment)) return `${field} "${value}" is not a plain path under ui/`;
-  }
-  if (!suffix.test(value)) return `${field} "${value}" must end in ${suffixText}`;
-
-  const path = join(uiDir, value);
-  let info;
-  try {
-    info = await stat(path);
-  } catch {
-    return `${field} "${value}" is not a file in ui/`;
-  }
-  if (!info.isFile()) return `${field} "${value}" is not a regular file`;
-
-  let base: string;
-  try {
-    base = await realpath(uiDir);
-  } catch {
-    return `${field} "${value}" cannot be resolved: ui/ is not a directory`;
-  }
-  let target: string;
-  try {
-    target = await realpath(path);
-  } catch {
-    return `${field} "${value}" cannot be resolved`;
-  }
-  if (target !== base && !target.startsWith(base + sep)) return `${field} "${value}" resolves outside ui/`;
-  return undefined;
-}
-
 /** The pages one extension's `pages.entries` array stands for, plus one line per dropped entry. */
 async function readEntries(
   extension: string,
@@ -228,7 +182,7 @@ async function readEntries(
     }
     let script: string | undefined;
     if (entry.script !== undefined) {
-      const problem = await fileProblem(uiDir, "script", entry.script, /\.(?:js|mjs)$/, ".js or .mjs");
+      const problem = await uiFileProblem(uiDir, "script", entry.script, /\.(?:js|mjs)$/, ".js or .mjs");
       if (problem !== undefined) {
         errors.push(`${where} (${describe(page)}): ${problem}`);
         continue;
@@ -237,7 +191,7 @@ async function readEntries(
     }
     let style: string | undefined;
     if (entry.style !== undefined) {
-      const problem = await fileProblem(uiDir, "style", entry.style, /\.css$/, ".css");
+      const problem = await uiFileProblem(uiDir, "style", entry.style, /\.css$/, ".css");
       if (problem !== undefined) {
         errors.push(`${where} (${describe(page)}): ${problem}`);
         continue;

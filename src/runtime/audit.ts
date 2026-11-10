@@ -1,6 +1,5 @@
-import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { createHash } from "node:crypto";
 import type { Redactor } from "../secrets/redact.ts";
 import { NULL_REDACTOR } from "../secrets/redact.ts";
 
@@ -19,8 +18,6 @@ export interface AuditLogOptions {
 
 export interface AuditLog {
   append(event: AuditEvent): void;
-  /** Hash of tool arguments; never the raw secret values. */
-  hashArguments(value: unknown): string;
 }
 
 function rotateBySize(file: string, maxBytes: number): void {
@@ -73,10 +70,7 @@ export function createAuditLog(options: AuditLogOptions): AuditLog {
     }
   };
 
-  return {
-    append,
-    hashArguments: (value) => createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex"),
-  };
+  return { append };
 }
 
 /** Read the tail of an audit file, newest last. */
@@ -100,13 +94,4 @@ export async function readAuditTail(file: string, since: number | undefined, lim
     }
   }
   return events.slice(-limit);
-}
-
-/** Exposed for tests: remove rotated files past the retention window. */
-export function auditRotate(file: string): void {
-  try {
-    unlinkSync(file);
-  } catch {
-    /* ignore */
-  }
 }

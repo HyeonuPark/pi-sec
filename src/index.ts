@@ -11,7 +11,7 @@ export { createAuditLog, readAuditTail, type AuditLog } from "./runtime/audit.ts
 export { createEventBus, type EventBus } from "./runtime/event-bus.ts";
 export { openStorage, readSchemaVersion, writeSchemaVersion, type StorageBundle } from "./runtime/storage.ts";
 export { Janitor, hasPrivateTmp, type JanitorOptions, type JanitorReport } from "./runtime/janitor.ts";
-export { Supervisor, readPid, isProcessAlive, writePid, removePid } from "./runtime/supervisor.ts";
+export { readPid, isProcessAlive, writePid, removePid } from "./runtime/supervisor.ts";
 export { ulid, isUlid, dayStamp, jobId, jobIdDay } from "./runtime/ids.ts";
 export { runMigrations, hasDatePrefix, JOB_ID_DATE_PREFIX, type MigrationResult } from "./runtime/migrations.ts";
 export { SecretRegistry, type SecretRegistryOptions } from "./secrets/registry.ts";
