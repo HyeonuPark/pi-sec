@@ -59,6 +59,18 @@ describe("cron.test.ts", () => {
       expect(() => parseCron("not a cron")).toThrow();
       expect(() => parseCron("0 8 * *")).toThrow();
     });
+
+    it("refuses a cron field with text after a number, or a second step or range", () => {
+      expect(() => parseCron("0junk 9 * * *")).toThrow();
+      expect(() => parseCron("*/5/2 * * * *")).toThrow();
+      expect(() => parseCron("1-2-3 * * * *")).toThrow();
+    });
+
+    it("returns the newest occurrence of a window longer than 40 days", () => {
+      const now = Date.parse("2026-10-12T12:00:00Z");
+      const after = now - 50 * 24 * 60 * 60 * 1000;
+      expect(previousOccurrence("0 9 * * *", "UTC", after, now)).toBe(Date.parse("2026-10-12T09:00:00Z"));
+    });
   });
 });
 

@@ -29,24 +29,28 @@ export interface ParsedCron {
   readonly dayOfWeek: CronField;
 }
 
+/** A number in a cron field: digits only, so "0junk" is not read as 0. */
+function parseNumber(text: string | undefined): number {
+  if (text === undefined || !/^\d+$/.test(text)) return Number.NaN;
+  return Number.parseInt(text, 10);
+}
+
 function parseField(text: string, min: number, max: number): CronField {
   const values = new Set<number>();
   let any = false;
   for (const part of text.split(",")) {
-    const [rangePart, stepPart] = part.split("/");
-    const step = stepPart === undefined ? 1 : Number.parseInt(stepPart, 10);
+    const pieces = part.split("/");
+    if (pieces.length > 2) throw new Error(`invalid cron step: ${part}`);
+    const [rangePart, stepPart] = pieces;
+    const step = stepPart === undefined ? 1 : parseNumber(stepPart);
     if (!Number.isFinite(step) || step <= 0) throw new Error(`invalid cron step: ${part}`);
     let start = min;
     let end = max;
     if (rangePart !== "*" && rangePart !== undefined) {
-      if (rangePart.includes("-")) {
-        const [a, b] = rangePart.split("-");
-        start = Number.parseInt(a!, 10);
-        end = Number.parseInt(b!, 10);
-      } else {
-        start = Number.parseInt(rangePart, 10);
-        end = start;
-      }
+      const bounds = rangePart.split("-");
+      if (bounds.length > 2) throw new Error(`invalid cron field: ${part}`);
+      start = parseNumber(bounds[0]);
+      end = bounds.length === 2 ? parseNumber(bounds[1]) : start;
     } else {
       any = step === 1;
     }
@@ -215,29 +219,26 @@ export function nextOccurrence(
   return undefined;
 }
 
-/** Most recent matching minute at or before `now`, after `after`, or undefined. */
+/**
+ * Most recent matching minute at or before `now`, after `after`, or undefined.
+ * It scans backward from `now`, so the first match is the newest one however
+ * long the window is. It stops after `maxMinutes` minutes.
+ */
 export function previousOccurrence(
   expression: string,
   timeZone: string,
   afterMs: number,
   nowMs: number,
-  maxMinutes = 60 * 24 * 40,
+  maxMinutes = 60 * 24 * 80,
 ): number | undefined {
   const cron = parseCron(expression);
   const start = Math.floor(afterMs / 60000) * 60000 + 60000;
   const end = Math.floor(nowMs / 60000) * 60000;
-  let found: number | undefined;
   let steps = 0;
-  for (let ts = start; ts <= end && steps < maxMinutes; ts += 60000, steps += 1) {
-    if (cronMatches(cron, new Date(ts), timeZone)) found = ts;
+  for (let ts = end; ts >= start && steps < maxMinutes; ts -= 60000, steps += 1) {
+    if (cronMatches(cron, new Date(ts), timeZone)) return ts;
   }
-  if (found === undefined && steps >= maxMinutes) {
-    // Fall back to scanning backward from `end`.
-    for (let ts = end; ts > afterMs && steps < maxMinutes * 2; ts -= 60000, steps += 1) {
-      if (cronMatches(cron, new Date(ts), timeZone)) return ts;
-    }
-  }
-  return found;
+  return undefined;
 }
 
 export interface SchedulerOptions {
