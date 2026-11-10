@@ -89,10 +89,11 @@ async function filesUnder(root: string): Promise<string[]> {
 }
 
 describe("secret write route: names", () => {
-  it("refuses six unsafe names and creates no file for any of them", async () => {
+  it("refuses seven unsafe names and creates no file for any of them", async () => {
     const f = await boot();
     // One case per rule: a path separator, `..`, a leading dot, the reserved
-    // bundle name, a control character, and one character past the length cap.
+    // bundle name, a control character, one character past the length cap, and
+    // a trailing dot.
     const refused: Array<[string, string]> = [
       ["path separator", "pass/word"],
       ["parent directory", ".."],
@@ -100,6 +101,7 @@ describe("secret write route: names", () => {
       ["reserved env", "env"],
       ["control character", "bad\u0007name"],
       ["over 64 characters", "a".repeat(65)],
+      ["trailing dot", "token."],
     ];
     const messages = new Set<string>();
     for (const [label, name] of refused) {
@@ -123,14 +125,6 @@ describe("secret write route: names", () => {
     const response = await post(f.origin, ROUTE, { name, text: "value\n" });
     expect(response.status).toBe(200);
     expect(await readdir(f.secretsDir)).toEqual([name]);
-  });
-
-  it("refuses a name with a trailing dot", async () => {
-    const f = await boot();
-    const response = await post(f.origin, ROUTE, { name: "token.", text: "value\n" });
-    expect(response.status).toBe(400);
-    expect((await refusal(response)).code).toBe("invalid_name");
-    expect(await readdir(f.secretsDir)).toEqual([]);
   });
 });
 

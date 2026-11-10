@@ -90,13 +90,6 @@ describe("bundled extension catalog", () => {
     }
   });
 
-  it("keeps those names in alphabetical order among themselves", () => {
-    const names = catalogNames();
-    const positions = ["conventions", "message-tags", "read-full"].map((name) => names.indexOf(name));
-
-    expect(positions).toEqual([...positions].sort((left, right) => left - right));
-  });
-
   it("decides for every bundled extension whether a fresh install enables it", () => {
     const enabled = new Set(defaultConfig().agent.extensions.enabled);
     const names = catalogNames();

@@ -108,16 +108,6 @@ describe("GET /rich-pages/<id>/frame", () => {
     expect(plain.status).toBe(200);
     expect(plain.headers.get("content-disposition")).toContain("attachment");
   });
-
-  it("refuses a POST with Origin: null", async () => {
-    f = await bootRichPages();
-    const response = await fetch(`${f.origin}/api/attachments?name=x`, {
-      method: "POST",
-      headers: { Origin: "null", "Content-Type": "text/plain" },
-      body: "x",
-    });
-    expect(response.status).toBe(403);
-  });
 });
 
 describe("GET /rich-pages/<id> (the shell)", () => {

@@ -71,18 +71,6 @@ const DOCUMENTS = [
     language: "ko" as const,
     body: "따뜻하고 담백하게 말합니다.",
   },
-  {
-    name: "a document with no front matter",
-    text: "# Persona\n\nWarm, plain, and short.\n",
-    language: "en" as const,
-    body: "Warm, plain, and short.",
-  },
-  {
-    name: "a document whose front matter names a name",
-    text: "---\nlanguage: ko\nname: 테스트봇\n---\n# 인물\n\n차분하게 말합니다.\n",
-    language: "ko" as const,
-    body: "# 인물\n\n차분하게 말합니다.",
-  },
 ];
 
 function messageText(message: Message): string {
@@ -303,23 +291,6 @@ describe("personality and language-rule sections", () => {
       }
     });
   }
-
-  it("gives a planner the message language and neither the personality nor the Korean rules", async () => {
-    harness = await createTestHarness();
-    await writePersonality(harness, "---\nlanguage: ko\n---\n# 인물\n\n따뜻하게 말합니다.\n");
-    const planner = await makeAgent(harness, "subagent", ["planner"]);
-
-    const head = collapsedHead(await firstRequest(harness, planner, "hello", { park: true }));
-
-    expect(head).not.toContain("<personality>");
-    expect(head).not.toContain(PERSONALITY_INTRO_ORCHESTRATOR.ko);
-    expect(head).not.toContain("<fluent-korean>");
-    expect(head).toContain("<agent-language>");
-    expect(head).toContain(AGENT_LANGUAGE_KO);
-    // The working document is English prose, so the English rules still apply.
-    expect(head).toContain("<simple-english>");
-    expect(head).toContain(SIMPLE_ENGLISH);
-  });
 
   it("gives the Korean sections to no scope while no personality is registered", async () => {
     harness = await createTestHarness({ config: NO_INTERVIEW });

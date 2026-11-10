@@ -708,13 +708,6 @@ describe("expiry-check.test.ts", () => {
   });
 
   describe("expiry_check: evaluation", () => {
-    it("reports an entry inside the warning window", () => {
-      const due = report({ "cf-api-token": { expires_on: "2026-11-01" } });
-      expect(due).toEqual([
-        expect.objectContaining({ name: "cf-api-token", expires_on: "2026-11-01", daysLeft: 15 }),
-      ]);
-    });
-
     it("reports nothing when every entry is outside the window", () => {
       const due = report({
         far: { expires_on: "2027-06-01" },

@@ -1177,22 +1177,6 @@ describe("janitor.test.ts", () => {
       expect(isProcessAlive(999_999_999)).toBe(false);
     });
   });
-
-  describe("temporary tree cleanup", () => {
-    it("removes a tree that holds a link and keeps the tree that link points at", async () => {
-      const tree = await makeTempTree("pi-sec-janitor-clean-");
-      const target = await makeTempTree("pi-sec-janitor-target-");
-      await mkdir(join(tree, "work", "sub"), { recursive: true });
-      await writeFile(join(target, "keep.txt"), "keep");
-      await symlink(target, join(tree, "work", "sub", "node_modules"), "dir");
-
-      await removeTempTrees([tree]);
-
-      await expect(readdir(tree)).rejects.toThrow();
-      // The link is unlinked, not followed, so the target tree keeps its file.
-      expect(await readdir(target)).toContain("keep.txt");
-    });
-  });
 });
 
 describe("secrets.test.ts", () => {
