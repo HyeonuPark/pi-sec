@@ -4,7 +4,6 @@ import {
   mentionDetailQuery,
   PR_DETAIL_QUERY,
   PR_REFS_QUERY,
-  READ_LIMITS,
   repoInfoEndpoint,
   SEARCH_QUERY,
   VIEWER_QUERY,
@@ -216,22 +215,10 @@ describe("gh subprocess: reads", () => {
 });
 
 describe("queries and read limits", () => {
-  it("declares the read limits", () => {
-    expect(READ_LIMITS).toMatchObject({
-      detailLabels: 30,
-      detailComments: 100,
-      detailReviews: 50,
-      detailThreads: 100,
-      threadComments: 100,
-      checkContexts: 100,
-      detailCommits: 100,
-      search: 50,
-    });
-  });
-
   it("carries each limit into the query text", () => {
     expect(PR_DETAIL_QUERY).toContain("labels(first: 30)");
-    expect(PR_DETAIL_QUERY).toContain("comments(first: 100)");
+    // One limit is for the pull request's comments and one for the comments of a thread.
+    expect(PR_DETAIL_QUERY.split("comments(first: 100)")).toHaveLength(3);
     expect(PR_DETAIL_QUERY).toContain("reviews(first: 50)");
     expect(PR_DETAIL_QUERY).toContain("reviewThreads(first: 100)");
     expect(PR_DETAIL_QUERY).toContain("subjectType");

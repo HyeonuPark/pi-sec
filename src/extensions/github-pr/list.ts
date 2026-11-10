@@ -1,5 +1,5 @@
 import { GhError, type GhReader } from "./gh.ts";
-import { mentionAlias, mentionDetailQuery, READ_LIMITS, SEARCH_QUERY, VIEWER_QUERY } from "./queries.ts";
+import { mentionAlias, mentionDetailQuery, SEARCH_QUERY, VIEWER_QUERY } from "./queries.ts";
 import { splitRepository } from "./settings.ts";
 
 /**
@@ -235,6 +235,9 @@ async function fetchMentionDetails(
   return result;
 }
 
+/** Pull requests whose mention state one detail query reads at once. */
+const MENTION_CHUNK = 20;
+
 /** Keep the mentions that still wait for an answer from the viewer. */
 async function filterPendingMentions(
   reader: GhReader,
@@ -245,8 +248,8 @@ async function filterPendingMentions(
   if (candidates.length === 0) return [];
   const numbers = candidates.map((pr) => pr.number ?? 0);
   const details = new Map<number, MentionSource>();
-  for (let start = 0; start < numbers.length; start += READ_LIMITS.mentionChunk) {
-    const chunk = numbers.slice(start, start + READ_LIMITS.mentionChunk);
+  for (let start = 0; start < numbers.length; start += MENTION_CHUNK) {
+    const chunk = numbers.slice(start, start + MENTION_CHUNK);
     const found = await fetchMentionDetails(reader, repo, chunk);
     for (const [number, source] of found) details.set(number, source);
   }

@@ -24,7 +24,7 @@
  * and a rollup each, a detail with 100 comments and 100 threads of 100 comments,
  * and a search that returns at most 50 pull requests.
  */
-export const READ_LIMITS = {
+const READ_LIMITS = {
   /** Labels on one pull request in a list row. */
   listLabels: 20,
   /** Labels on the pull request detail. */
@@ -43,8 +43,6 @@ export const READ_LIMITS = {
   detailCommits: 100,
   /** Results of one search, which is the page size of every list section. */
   search: 50,
-  /** Pull requests whose mention state one detail query may read at once. */
-  mentionChunk: 20,
   /** Comments and reviews the mention check reads per pull request. */
   mentionComments: 100,
   mentionReviews: 50,
