@@ -9,7 +9,8 @@
  * names its source and submits, which has no extension context to read a
  * document from.
  *
- * So the answer is a set in memory, held by the `usage-freeze` extension: it
+ * So the answer is a set in memory, held by the `usage-freeze` extension, which
+ * is the gate (`UsageFreeze` installs itself): it
  * fills the set from the hold documents when the daemon starts, and writes it
  * again on every hold, retry and resume. The set is a claim that can be wrong in
  * one direction only. A conversation the set does not name is submitted as it
@@ -77,28 +78,4 @@ export function isHeldConversation(conversationId: string | undefined): boolean 
  */
 export function isHeldOperatorInput(conversationId: string | undefined, src: MessageSource): boolean {
   return src === "operator" && isHeldConversation(conversationId);
-}
-
-/**
- * The set the `usage-freeze` extension keeps, as the gate it installs.
- *
- * Reading it returns a copy of nothing: the extension replaces the whole set on
- * every pass, so a reader here never sees a half-built one.
- */
-export class HoldSet implements HoldGate {
-  #held: ReadonlySet<string> = new Set();
-
-  isHeld(conversationId: string): boolean {
-    return this.#held.has(conversationId);
-  }
-
-  /** Replace the whole set: the pass has just read every hold document. */
-  replace(conversationIds: Iterable<string>): void {
-    this.#held = new Set(conversationIds);
-  }
-
-  /** The conversations named right now. */
-  names(): readonly string[] {
-    return [...this.#held];
-  }
 }

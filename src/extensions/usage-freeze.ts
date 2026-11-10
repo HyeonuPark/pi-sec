@@ -62,7 +62,7 @@ import {
   type ToolRegistration,
   type Tx,
 } from "@earendil-works/pi-durable";
-import { HoldSet, setHoldGate } from "../agent/hold-gate.ts";
+import { setHoldGate } from "../agent/hold-gate.ts";
 import {
   DOC_KINDS,
   SecAgent,
@@ -169,7 +169,8 @@ export class UsageFreeze implements UsageFreezeWatch {
    * restart" is checked without waiting ten minutes.
    */
   readonly sources: UsageFreezeSources;
-  readonly #holds = new HoldSet();
+  /** The conversations a hold document names. Replaced whole on every pass, so a reader never sees a half-built set. */
+  #held: ReadonlySet<string> = new Set();
   #timer: ReturnType<typeof setInterval> | undefined;
   #removeGate: (() => void) | undefined;
   /** The provider list an open page last heard about, so one event says one change. */
@@ -189,12 +190,12 @@ export class UsageFreeze implements UsageFreezeWatch {
 
   /** Whether one conversation waits for its provider to accept requests again. */
   isHeld(conversationId: string): boolean {
-    return this.#holds.isHeld(conversationId);
+    return this.#held.has(conversationId);
   }
 
   /** Install the gate `src/submit-envelope.ts` reads. Called once, by the extension. */
   install(): void {
-    this.#removeGate = setHoldGate(this.#holds);
+    this.#removeGate = setHoldGate(this);
   }
 
   /**
@@ -697,7 +698,7 @@ export class UsageFreeze implements UsageFreezeWatch {
     const names = (await this.#allHolds(harness, ctx))
       .filter((record) => record.status === "held")
       .map((record) => record.conversationId);
-    this.#holds.replace(names);
+    this.#held = new Set(names);
   }
 
   /** What one provider's own numbers say, read through the usage service. */
@@ -752,9 +753,9 @@ export class UsageFreeze implements UsageFreezeWatch {
   /** One event per change of the held provider list, so an open page re-reads it. */
   #announce(): void {
     const providers = [...this.#signals.keys()]
-      .filter((provider) => this.#holds.names().some((name) => name !== ""))
+      .filter(() => [...this.#held].some((name) => name !== ""))
       .sort();
-    const key = this.#holds.names().length === 0 ? "" : providers.join(",");
+    const key = this.#held.size === 0 ? "" : providers.join(",");
     if (key === this.#announced) return;
     this.#announced = key;
     this.sources.context.events.emit("usage_hold_changed", { providers: key === "" ? [] : key.split(",") });

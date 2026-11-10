@@ -20,7 +20,7 @@ import {
   type Message,
 } from "@earendil-works/pi-ai";
 import type { ConversationId, Cursor } from "@earendil-works/pi-durable";
-import { getHoldGate, HoldSet, isHeldOperatorInput } from "../src/agent/hold-gate.ts";
+import { getHoldGate, isHeldOperatorInput } from "../src/agent/hold-gate.ts";
 import { defaultConfig } from "../src/config/schema.ts";
 import {
   DOC_KINDS,
@@ -733,6 +733,10 @@ describe("a conversation the provider refused for usage", () => {
   it("takes the banner's value down when the last hold ends", async () => {
     const r = await boot({ faux: { kind: "none" } });
     const id = await seedRefused(r);
+    const announced: unknown[] = [];
+    r.harness.events.subscribe((event) => {
+      if (event.type === "usage_hold_changed") announced.push(event.data["providers"]);
+    });
     r.harness.faux.setResponses([refused()]);
     await r.watch.tick();
 
@@ -748,6 +752,7 @@ describe("a conversation the provider refused for usage", () => {
     await settleRetry(r, id);
     expect(await r.watch.holdView()).toEqual([]);
     expect(await holdOf(r, id)).toBeUndefined();
+    expect(announced).toEqual([["faux"], []]);
   });
 
   it("says a provider an extension declared virtual is not an account's usage limit", async () => {
@@ -829,18 +834,5 @@ describe("a conversation the provider refused for usage", () => {
     await r.watch.tick();
     expect(await holdOf(r, id)).toBeUndefined();
     expect(r.harness.faux.state.callCount).toBe(0);
-  });
-});
-
-describe("the hold gate", () => {
-  it("answers no for a conversation nothing named, and takes the set it is handed", () => {
-    const set = new HoldSet();
-    expect(set.isHeld("1")).toBe(false);
-    set.replace(["1", "2"]);
-    expect(set.isHeld("1")).toBe(true);
-    expect(set.isHeld("3")).toBe(false);
-    expect(set.names().sort()).toEqual(["1", "2"]);
-    set.replace([]);
-    expect(set.isHeld("1")).toBe(false);
   });
 });
