@@ -69,7 +69,7 @@ export const routes: ConversationRoutes = chatRoutes(chatId);
 export const rootName = installName() || "pi-sec";
 
 /** The chat the top bar names. */
-export const chat = signal<ChatState>({ root: chatId === null, title: null, archived: false, missing: false });
+export const chat = signal<ChatState>({ root: chatId === null, title: null, archived: false, missing: false, unreadable: false });
 
 /** What the top bar shows: the install's name, the chat's title, or a refusal. */
 export const chatName = computed<string>(() => {
@@ -78,13 +78,15 @@ export const chatName = computed<string>(() => {
   // A number the server does not know has no name to show; the bar says so rather
   // than inventing the "Untitled" a real chat without a title shows.
   if (current.missing) return "Chat not found";
+  if (current.unreadable) return "Chat could not be read";
   return typeof current.title === "string" && current.title !== "" ? current.title : "Untitled";
 });
 
 /** Why the composer is not there, or `null` when this chat can be written to. */
-export const chatBlocked = computed<"missing" | "archived" | null>(() => {
+export const chatBlocked = computed<"missing" | "unreadable" | "archived" | null>(() => {
   const current = chat.value;
   if (current.missing) return "missing";
+  if (current.unreadable) return "unreadable";
   if (current.archived) return "archived";
   return null;
 });
@@ -106,6 +108,7 @@ export function applyChatRecord(record: FocusedChatRecord | null | undefined): v
     title: typeof record?.title === "string" && record.title !== "" ? record.title : null,
     archived: record?.archived === true || (record?.archivedAt !== null && record?.archivedAt !== undefined),
     missing: false,
+    unreadable: false,
   };
 }
 
@@ -116,7 +119,16 @@ export function applyChatRecord(record: FocusedChatRecord | null | undefined): v
  * same thing.
  */
 export function markChatMissing(): void {
-  chat.value = { ...chat.value, archived: false, missing: true };
+  chat.value = { ...chat.value, archived: false, missing: true, unreadable: false };
+}
+
+/**
+ * Draw the state a chat page shows when its record could not be read for a reason
+ * other than a 404. The chat may exist, so the page does not say it is gone: the
+ * reader reloads the page to try again.
+ */
+export function markChatUnreadable(): void {
+  chat.value = { ...chat.value, archived: false, missing: false, unreadable: true };
 }
 
 /**
@@ -150,7 +162,7 @@ export async function readChatRecord(): Promise<"ok" | "missing"> {
  */
 export async function renameChat(): Promise<void> {
   const current = chat.value;
-  if (current.root || current.archived || current.missing) return;
+  if (current.root || current.archived || current.missing || current.unreadable) return;
   if (routes.info === null) return;
   const answer = typeof window === "undefined" ? null : window.prompt("New title (1 to 80 characters)", current.title ?? "");
   if (answer === null) return;

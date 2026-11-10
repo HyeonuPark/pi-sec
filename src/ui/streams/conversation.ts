@@ -22,7 +22,7 @@
  * snapshot's first entry, so the new session is drawn below the old one.
  */
 import { ApiError } from "../api/request.ts";
-import { applyChatRecord, chatId, markChatMissing, readChatRecord, routes } from "../state/conversation.ts";
+import { applyChatRecord, chatId, markChatMissing, markChatUnreadable, readChatRecord, routes } from "../state/conversation.ts";
 import {
   clearTools,
   compacting,
@@ -396,8 +396,12 @@ export async function openChat(): Promise<void> {
       // number that never existed: the same sentence covers both.
       if (state === "missing") return;
     } catch (error) {
-      markChatMissing();
-      if (!(error instanceof ApiError && error.status === 404)) {
+      if (error instanceof ApiError && error.status === 404) {
+        markChatMissing();
+      } else {
+        // The chat may exist: the page says it could not be read, with the server's
+        // own words in the notice, and a reload is the retry.
+        markChatUnreadable();
         showError(error instanceof Error ? error.message : String(error));
       }
       return;

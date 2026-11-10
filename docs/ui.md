@@ -1017,6 +1017,12 @@ open.
   the composer's place: `This chat is archived.` with an `All chats` link.
 - **A chat that is not there.** One line takes the composer's place as well: `This
   chat does not exist or was deleted.` with the same link.
+- **A chat that cannot be read.** When the read of the chat fails with anything but
+  a 404, such as a server error or a dropped connection, the bar says `Chat could
+  not be read` and the title cannot be pressed. One line takes the composer's place:
+  `This chat could not be read. Reload the page to try again.` with the same link.
+  No stream opens, and the notice shows the server's own words. A reload of the
+  page is the retry.
 - **The New session confirmations name the chat.** Both of them, the first press
   and the second one after the server's `agents_working` refusal, say which chat
   the reset acts on, because one press away from the root looks the same.

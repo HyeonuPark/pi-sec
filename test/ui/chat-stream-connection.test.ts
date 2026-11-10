@@ -53,6 +53,19 @@ describe("one stream per page", () => {
     expect(ui.streams()).toEqual([]);
     expect(element(ui, "chat-title").textContent).toBe("Chat not found");
   });
+
+  it("says a chat that could not be read, and opens no stream", async () => {
+    const ui = await page({
+      chat: 9,
+      fetch: { "/api/focused-chats/9": { status: 500, body: { error: { code: "internal", message: "disk is full" } } } },
+    });
+    expect(ui.streams()).toEqual([]);
+    expect(element(ui, "chat-title").textContent).toBe("Chat could not be read");
+    expect((element(ui, "chat-title") as HTMLButtonElement).disabled).toBe(true);
+    expect(element(ui, "chat-notice").textContent).toContain("This chat could not be read. Reload the page to try again.");
+    expect(element(ui, "chat-notice").textContent).toContain("All chats");
+    expect(ui.toast.toast.value.text).toContain("disk is full");
+  });
 });
 
 describe("the connection pill", () => {

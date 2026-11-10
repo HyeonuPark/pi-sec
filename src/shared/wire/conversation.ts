@@ -136,6 +136,8 @@ export interface ChatState {
   readonly archived: boolean;
   /** True for a chat number the server does not know. */
   readonly missing: boolean;
+  /** True when the chat's record could not be read, for a reason other than a 404. */
+  readonly unreadable: boolean;
 }
 
 /** What `GET /api/admin/status` answers, as this page reads it. */

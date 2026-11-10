@@ -1,7 +1,8 @@
 /**
  * The top bar's name for the conversation: the install's name on the root, the
- * chat's title on a focused chat, `Untitled` before the agent names one, and
- * `Chat not found` for a number the server does not know.
+ * chat's title on a focused chat, `Untitled` before the agent names one,
+ * `Chat not found` for a number the server does not know, and
+ * `Chat could not be read` when the read of its record failed in another way.
  *
  * A press on the title asks for a new one, and only a focused chat takes a press:
  * the root's name is not a title anybody changes here. The same state is what the
@@ -21,7 +22,7 @@ export function ChatTitle() {
   const current = chat.value;
   const focused = !current.root;
   // A focused chat's title is the operator's to change until the chat is archived.
-  const locked = !focused || current.archived || current.missing;
+  const locked = !focused || current.archived || current.missing || current.unreadable;
 
   return (
     <button
@@ -63,6 +64,10 @@ export function ChatNotice() {
       ) : blocked === "missing" ? (
         <>
           This chat does not exist or was deleted. <a href={href}>All chats</a>
+        </>
+      ) : blocked === "unreadable" ? (
+        <>
+          This chat could not be read. Reload the page to try again. <a href={href}>All chats</a>
         </>
       ) : null}
     </div>
