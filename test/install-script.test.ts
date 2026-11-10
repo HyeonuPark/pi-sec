@@ -511,7 +511,7 @@ describe("user-tools/install", () => {
     expect(await exists(join(spaced, "home", ".config", "systemd", "user", "pi-sec.service"))).toBe(false);
   }, 180_000);
 
-  it("writes a systemd user unit with this account's own paths, and never overwrites one", async () => {
+  it("writes a systemd user unit with this account's own paths, and keeps it on a second run that still prints the notice", async () => {
     const home = await makeHome("systemd");
     const homeDir = join(home, "pi-sec");
     const snapshot = join(homeDir, "snapshot");
@@ -560,10 +560,105 @@ describe("user-tools/install", () => {
 
     const wrote = await sha256(unitPath);
     const again = run(env, args);
-    expect(again.code).toBe(1);
+    // A rerun keeps the unit and still ends with the notice: the web address is
+    // what a rerun is for.
+    expect(again.code, again.stdout + again.stderr).toBe(0);
     expect(again.stdout).toContain(`${unitPath} already exists`);
+    expect(again.stdout).toContain("not overwriting it");
+    expect(again.stdout).toContain("to write a new one, move it away");
+    expect(again.stdout).toContain("web UI:");
+    expect(again.stdout).toContain("server.publicUrl");
+    expect(again.stdout).not.toContain("wrote " + unitPath);
     expect(await sha256(unitPath)).toBe(wrote);
   }, 180_000);
+
+  it("writes no first model and asks for none", async () => {
+    // A model chosen before the daemon starts can name a provider this home
+    // holds no credential for. The page writes it after the sign-in instead.
+    const home = await makeHome("no-model");
+    const homeDir = join(home, "pi-sec");
+    const result = run(childEnv(home), ["--yes", "--run", "manual"]);
+    expect(result.stderr, result.stdout).toBe("");
+    expect(result.code, result.stdout).toBe(0);
+
+    const config = JSON.parse(await readFile(join(homeDir, "config.json"), "utf8")) as {
+      agent: { vmodel: string };
+      vmodels: Record<string, unknown>;
+    };
+    expect(config.agent.vmodel).toBe("");
+    expect(config.vmodels).toEqual({});
+    // The CLI was asked for the default config and nothing else.
+    const calls = (await readFile(join(home, "cli.log"), "utf8")).trim().split("\n");
+    expect(calls.filter((line) => line.startsWith("setup-model"))).toEqual([]);
+    expect(calls.filter((line) => line.startsWith("models"))).toEqual([]);
+
+    expect(result.stdout).toContain("not writing the first vmodels");
+    expect(result.stdout).toContain("setup mode");
+    expect(result.stdout).not.toContain("provider:");
+  }, 180_000);
+
+  it("refuses a half model option pair, and an option that needs a model", async () => {
+    const home = await makeHome("half-model");
+    const env = childEnv(home);
+
+    for (const args of [
+      ["--yes", "--run", "manual", "--model", "gpt-4.1-mini"],
+      ["--yes", "--run", "manual", "--provider", "openai"],
+      ["--yes", "--run", "manual", "--thinking", "high"],
+      ["--yes", "--run", "manual", "--worker-model", "gpt-4.1-mini"],
+    ]) {
+      const result = run(env, args);
+      expect(result.code, result.stdout).toBe(1);
+      expect(result.stderr).toMatch(/--provider|--model/);
+    }
+    // The first run stopped in the argument checks, before step 2 made a home.
+    expect(await exists(join(home, "pi-sec"))).toBe(false);
+  }, 120_000);
+
+  it("prints an address a browser can open, for an IPv6 bind, a prefix and a public address", async () => {
+    const home = await makeHome("notice-address");
+    const configPath = join(home, "pi-sec", "config.json");
+    const env = childEnv(home);
+    const args = ["--yes", "--skip-model", "--run", "manual"];
+
+    const first = run(env, args);
+    expect(first.code, first.stdout + first.stderr).toBe(0);
+
+    // One arrangement per run: `config.json` is rewritten, and the notice reads
+    // it. Every other server key stays as the default wrote it.
+    const notice = async (server: Record<string, unknown>): Promise<string> => {
+      const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, Record<string, unknown>>;
+      const merged: Record<string, unknown> = { ...config["server"], bind: "127.0.0.1", basePath: "" };
+      delete merged["publicUrl"];
+      for (const [key, value] of Object.entries(server)) merged[key] = value;
+      config["server"] = merged;
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      const result = run(env, args);
+      expect(result.code, result.stdout + result.stderr).toBe(0);
+      return result.stdout;
+    };
+
+    // An IPv6 literal is written in brackets, or no browser opens it.
+    expect(await notice({ bind: "::1" })).toContain("http://[::1]:8787/");
+    // The mount prefix the daemon puts in its own URLs is in the address too.
+    expect(await notice({ basePath: "/sec" })).toContain("http://127.0.0.1:8787/sec/");
+    // A wildcard bind names no address a browser opens.
+    const wildcard = await notice({ bind: "0.0.0.0" });
+    expect(wildcard).toContain("http://127.0.0.1:8787/");
+    expect(wildcard).not.toContain("http://0.0.0.0");
+    expect(wildcard).toContain("binds to every interface");
+
+    // A public address is the address the browser opens, the local one is named
+    // on its own line, and the paragraph that asks for the setting is gone.
+    const publicUrl = await notice({ publicUrl: "https://pi.example.com/sec" });
+    expect(publicUrl).toContain("web UI:  https://pi.example.com/sec/");
+    // The prefix comes from the path of the public address, so the loopback
+    // address carries it too. A local request to `/sec/basic-chat` is accepted
+    // with an empty `basePath`, because `stripMount` tolerates the prefix.
+    expect(publicUrl).toContain("local:   http://127.0.0.1:8787/sec/");
+    expect(publicUrl).toContain("the address in");
+    expect(publicUrl).not.toContain("needs that address in server.publicUrl");
+  }, 240_000);
 
   it("prints the access notice on real lines, for a loopback and for another bind", async () => {
     const home = await makeHome("notice-lines");

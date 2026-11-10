@@ -24,6 +24,31 @@ asks you to run.
 | `npm` and `git` | `npm ci` and `npm run build` fill both code trees, and the second tree is a git worktree of the first. |
 | `flock` | `user-tools/update-and-restart` takes a lock with it before every update. `flock` is part of `util-linux`, which most distributions install. |
 
+### The account
+
+pi-sec runs as an account of its own. Do not use your login account, and do not
+run the install as root: the script refuses root, and it does not create the
+account, because creating an account needs root and the script has none.
+
+Create the account once, from an account that holds root:
+
+```bash
+# Debian, Ubuntu
+sudo adduser --disabled-password --gecos "" piagent
+
+# other distributions
+sudo useradd --create-home --shell /bin/bash piagent
+```
+
+The account needs a home directory and a shell, and it needs no password. Reach
+it with `sudo -iu piagent`, or log in over ssh with your own key. The account
+needs `node`, `npm`, `git` and `flock` on its `PATH`; a version manager such as
+`fnm` or `nvm` must be loaded by the shell that runs the install.
+
+One account runs one daemon with one home, `~/.pi/sec`. A second account needs a
+second install. `piagent` is an example name: use the name you choose. The
+install prints that name in the `loginctl enable-linger` command it shows.
+
 The install script refuses to run as root. It looks for `node`, `npm`, `git` and
 `flock`, lists every one that is missing or too old with a hint for installing
 it, and stops before it creates anything.
@@ -93,6 +118,37 @@ reaches the daemon by another name or port. Without it, the `Host` check accepts
 loopback names only and the `Origin` check accepts loopback origins only, so that
 page cannot write.
 
+### Model login and HTTPS
+
+A model login can start in two cases only:
+
+- the browser reaches the daemon on this machine, so the request arrives under
+  `127.0.0.1`, `localhost`, `::1` or another loopback name;
+- `server.publicUrl` starts with `https:`.
+
+Every other start is refused with `403 https_required`. The daemon refuses
+because a login returns a sign-in link that carries the proof binding the
+browser's answer to that login, and that proof must not cross a network in the
+clear.
+
+A browser that opens the page at `http://<host>:8787` reads it and cannot start a
+login. Two arrangements work:
+
+- open the page on the host itself, for example through an SSH tunnel:
+  `ssh -L 8787:127.0.0.1:8787 piagent@example.com`, then open
+  `http://127.0.0.1:8787/basic-chat`;
+- serve the page over HTTPS with a proxy, and set `server.publicUrl` to the
+  address that browser opens.
+
+A proxy that serves plain HTTP does not help, because the check reads the scheme
+of `server.publicUrl`.
+
+`server.publicUrl` is the one setting that makes every check accept the same
+address. The `Host` check accepts its hostname, the `Origin` check accepts its
+origin, and the login check accepts its `https:` scheme. The path of the address
+becomes the mount prefix of the URLs the daemon emits, so a proxy that serves the
+daemon under `/sec` needs `https://pi.example.com/sec`.
+
 [security.md](./security.md#network) covers the model in full.
 
 ---
@@ -128,8 +184,11 @@ The script works in eight steps, and every step is safe to repeat:
 6. **Model provider.** If a `models.json` file or a provider extension is named,
    the script copies it. The script signs nothing in: after the daemon starts,
    open the web UI and sign in from "Model login" in the "More actions" menu.
-7. **First model.** `pi-sec models`, then `pi-sec setup-model`, as in
-   [section 5](#first-model).
+7. **First model.** This step writes nothing unless the run names both
+   `--provider` and `--model`. The daemon then starts in setup mode, and the page
+   signs a provider in and writes the first model, as in
+   [section 5](#first-model). A headless install, or a compatible endpoint that
+   needs no API key, writes the vmodels here with the two options.
 8. **Run mode.** A systemd user unit or the runner, as in
    [section 6](#run-modes).
 
@@ -138,9 +197,14 @@ the browser folder yet, and prints the `optional system packages` block from
 [section 1](#1-prerequisites). A failed download does not stop the install: the
 block says so and prints the command to run later.
 
-At the end the script prints the web UI address from the installed config (the
-default is `http://127.0.0.1:8787/`) and one sentence about access, which follows
-the bind address that is really configured.
+At the end the script prints the address a browser opens and the home. The
+address is `server.publicUrl` when the config names one. Otherwise it is built
+from `server.bind`, `server.port` and the mount prefix, which is
+`server.basePath` or the path of `server.publicUrl`. An IPv6 bind is written in
+brackets, and a wildcard bind prints the loopback address. One sentence about
+access follows the bind address that is really configured, and one paragraph
+names `server.publicUrl` as the setting a browser behind a proxy needs, with an
+example. [Section 2](#2-access-premise) says why.
 
 ### Commit hooks <a id="commit-hooks"></a>
 
@@ -203,14 +267,14 @@ makes every later commit fail.
 
 | Option | What it does |
 |--------|--------------|
-| `--provider <id>` | The provider of the first vmodels, which step 7 writes. |
+| `--provider <id>` | The provider of the first vmodels. It goes with `--model`; step 7 writes nothing without both. |
 | `--models-json [file]` | Copy a compatible-endpoint file to `~/.pi/sec/models.json`. Without a file, the script prints where the example is and copies nothing. |
 | `--extension <dir>` | Copy a provider extension to `~/.pi/sec/extensions/<name>`. |
-| `--model <id>` | The model for the root, orchestrator, planner and worker vmodels. |
-| `--thinking <level>` | `off`, `minimal`, `low`, `medium` or `high`. Default `medium`. |
+| `--model <id>` | The model for the root, orchestrator, planner and worker vmodels. It goes with `--provider`. |
+| `--thinking <level>` | `off`, `minimal`, `low`, `medium` or `high`. Default `medium`. Applies to a first model that the run writes. |
 | `--worker-provider <id>` | A provider for the worker vmodel. `--worker-model` goes with it. |
 | `--worker-model <id>` | A model for the worker vmodel. |
-| `--skip-model` | Do not write the first vmodels. |
+| `--skip-model` | Write no first vmodels, even with `--model`. This is the default. |
 | `--run systemd\|manual` | How the daemon runs. The default is `systemd` when the account has a user manager, `manual` otherwise. |
 | `--skip-browser` | Do not download the headless Chromium browser. The block prints the download command instead. |
 | `--check-deps` | Only check the system packages and print what is missing. Creates and changes nothing, and takes no other option. |
@@ -232,9 +296,10 @@ provider in. An automated install command that still names one stops with
 `unknown argument`, so drop the option from that command.
 
 A second run leaves an existing tree, `config.json`, `models.json`, extension
-copy or unit file as it is. A non-interactive run that names no `--model` prints
-that the daemon starts in setup mode, the exact `setup-model` command to run
-later, and exits 0.
+copy or unit file as it is, and it prints the same closing message as the first
+run, so the web address is there again. A kept unit file prints the commands that
+register and start it; move the file away and run again to write a new one. A run
+that names no `--model` prints that the page writes the first model, and exits 0.
 
 ---
 

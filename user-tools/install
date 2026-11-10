@@ -17,7 +17,8 @@
 #   5. config      ~/.pi/sec/config.json from the built CLI's default
 #   6. provider    a models.json endpoint file or a provider extension, copied
 #                  into the home; the web UI signs the provider in later
-#   7. model       the first vmodels, through `models` and `setup-model`
+#   7. model       the first vmodels, only when --provider and --model are given;
+#                  otherwise the page writes them after the daemon starts
 #   8. run mode    a systemd user unit, or the way to run the tree by hand
 #
 # After step 8 it downloads the headless Chromium browser as this account (leave
@@ -160,6 +161,17 @@ fi
 
 if [ "$OPT_MODELS_JSON_SET" = 1 ] && [ -n "$OPT_EXTENSION" ]; then
   die "--models-json and --extension are two ways to the same step; choose one"
+fi
+
+# A first model needs both halves, and the two options that describe it need it.
+if [ -n "$OPT_MODEL" ] && [ -z "$OPT_PROVIDER" ]; then
+  die "--model names a model, and --provider names its provider; give both"
+fi
+if [ -n "$OPT_PROVIDER" ] && [ -z "$OPT_MODEL" ]; then
+  die "--provider names a provider, and --model names its model; give both"
+fi
+if [ -z "$OPT_MODEL" ] && { [ -n "$OPT_THINKING" ] || [ -n "$OPT_WORKER_PROVIDER" ] || [ -n "$OPT_WORKER_MODEL" ]; }; then
+  die "--thinking and --worker-* describe the first vmodels; add --provider and --model"
 fi
 
 # Every path below hangs off the account's home, so a run with no HOME has
@@ -485,35 +497,31 @@ say "the daemon does not sign a provider in"
 say "after the daemon starts, open the web UI and sign in from \"Model login\" in the \"More actions\" menu"
 
 # --- 7. first model ----------------------------------------------------------
+# Nothing asks for a model here. A model can be signed in only through the
+# running daemon, so a model written before step 8 can name a provider this home
+# holds no credential for, and the page then shows a banner instead of the setup
+# card. The page writes the first model instead; the two options stay for a
+# headless install and for an endpoint that needs no key.
 step "[7/8] first model"
 vmodel_now=$(config_value agent.vmodel)
 if [ "$SKIP_MODEL" = 1 ]; then
   say "not writing the first vmodels (--skip-model)"
 elif [ -n "$vmodel_now" ]; then
   say "agent.vmodel is already $vmodel_now; leaving the vmodels as they are"
+elif [ -z "$OPT_MODEL" ] && [ -z "$OPT_PROVIDER" ]; then
+  say "not writing the first vmodels: the web page chooses them"
+  say "the daemon starts in setup mode, and the page then signs a provider in and"
+  say "writes the first model there, with no restart"
+  say "to write them from this script instead, run it again with"
+  say "  --provider <id> --model <id>"
+  say "(pi-sec models lists the provider and model ids this home has)"
 else
-  say "models the catalog offers:"
-  node "$CLI" models || true
-
-  if [ -z "$OPT_MODEL" ] && [ "$INTERACTIVE" = 1 ]; then
-    OPT_PROVIDER=$(ask "provider" "$OPT_PROVIDER")
-    OPT_MODEL=$(ask "model id")
-  fi
-
-  if [ -z "$OPT_MODEL" ] || [ -z "$OPT_PROVIDER" ]; then
-    say "the first vmodels are not written, so the daemon starts in setup mode:"
-    say "the web page then asks for a model, and its model form writes the same vmodels"
-    say "or write them yourself when you have chosen a model:"
-    say "  node $CLI setup-model --provider <id> --model <id>"
-    say "(the list above shows the provider and model ids to use)"
-  else
-    setup_args=(setup-model --provider "$OPT_PROVIDER" --model "$OPT_MODEL")
-    if [ -n "$OPT_THINKING" ]; then setup_args+=(--thinking "$OPT_THINKING"); fi
-    if [ -n "$OPT_WORKER_PROVIDER" ]; then setup_args+=(--worker-provider "$OPT_WORKER_PROVIDER"); fi
-    if [ -n "$OPT_WORKER_MODEL" ]; then setup_args+=(--worker-model "$OPT_WORKER_MODEL"); fi
-    node "$CLI" "${setup_args[@]}"
-    say "wrote vmodels root, orchestrator and worker"
-  fi
+  setup_args=(setup-model --provider "$OPT_PROVIDER" --model "$OPT_MODEL")
+  if [ -n "$OPT_THINKING" ]; then setup_args+=(--thinking "$OPT_THINKING"); fi
+  if [ -n "$OPT_WORKER_PROVIDER" ]; then setup_args+=(--worker-provider "$OPT_WORKER_PROVIDER"); fi
+  if [ -n "$OPT_WORKER_MODEL" ]; then setup_args+=(--worker-model "$OPT_WORKER_MODEL"); fi
+  node "$CLI" "${setup_args[@]}"
+  say "wrote vmodels root, orchestrator and worker"
 fi
 
 # --- 8. run mode -------------------------------------------------------------
@@ -550,32 +558,37 @@ process.stdout.write(text);
 
 if [ "$OPT_RUN" = systemd ]; then
   [ -f "$TEMPLATE" ] || die "no unit template at $TEMPLATE"
-  if [ -e "$UNIT_PATH" ]; then
-    say "$UNIT_PATH already exists; not overwriting it"
-    say "move it away and run this script again to write a new one"
-    exit 1
-  fi
   NODE_BIN=$(command -v node)
   case "$NODE_BIN" in
     /*) ;;
     *) NODE_BIN="$PWD/$NODE_BIN" ;;
   esac
   unit_path_value="$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin"
-  # systemd splits these lines on whitespace and has no escape for it in
-  # Environment= and ReadWritePaths=, so a home with a space would produce a
-  # unit that starts with the wrong values. Say that here, not at the first
-  # failed start.
-  case "$HOME$HOME_DIR$NODE_BIN" in
-    *[[:space:]]*)
-      die "the home or the node path contains a space, and a systemd unit cannot carry one; use --run manual instead"
-      ;;
-  esac
-  mkdir -p "$UNIT_DIR"
-  (umask 077 && render_unit >"$UNIT_PATH")
-  say "wrote $UNIT_PATH"
-  if grep -q '@[A-Z_]*@' "$UNIT_PATH"; then
-    rm -f "$UNIT_PATH"
-    die "the unit template kept a placeholder; nothing was installed"
+
+  if [ -e "$UNIT_PATH" ]; then
+    # The notice below says the install is complete, so this path has to reach
+    # it: an exit here is how a rerun lost the web address and the access
+    # sentence. The unit is still a unit this home may run, so the start logic
+    # below applies to it as well.
+    say "$UNIT_PATH already exists; not overwriting it"
+    say "to write a new one, move it away and run this script again"
+  else
+    # systemd splits these lines on whitespace and has no escape for it in
+    # Environment= and ReadWritePaths=, so a home with a space would produce a
+    # unit that starts with the wrong values. Say that here, not at the first
+    # failed start.
+    case "$HOME$HOME_DIR$NODE_BIN" in
+      *[[:space:]]*)
+        die "the home or the node path contains a space, and a systemd unit cannot carry one; use --run manual instead"
+        ;;
+    esac
+    mkdir -p "$UNIT_DIR"
+    (umask 077 && render_unit >"$UNIT_PATH")
+    say "wrote $UNIT_PATH"
+    if grep -q '@[A-Z_]*@' "$UNIT_PATH"; then
+      rm -f "$UNIT_PATH"
+      die "the unit template kept a placeholder; nothing was installed"
+    fi
   fi
 
   start_unit=0
@@ -634,13 +647,58 @@ node "$OPTIONAL_DEPS" "${deps_args[@]}" || true
 # --- notice ------------------------------------------------------------------
 bind=$(config_value server.bind)
 port=$(config_value server.port)
+base_path=$(config_value server.basePath)
+public_url=$(config_value server.publicUrl)
 [ -n "$bind" ] || bind="127.0.0.1"
 [ -n "$port" ] || port="8787"
+
+# The prefix every URL of this daemon carries. src/server/proxy.ts,
+# effectivePrefix, is the same rule: server.basePath, else the path of
+# server.publicUrl.
+prefix=""
+case "$base_path" in
+  ""|"/") ;;
+  /*) prefix="${base_path%/}" ;;
+esac
+if [ -z "$prefix" ] && [ -n "$public_url" ]; then
+  rest="${public_url#*://}"
+  case "$rest" in
+    */*)
+      rest="/${rest#*/}"
+      while [ "${rest%/}" != "$rest" ]; do rest="${rest%/}"; done
+      # No `a && b` as the last command here: `set -e` ends the script on it.
+      if [ -n "$rest" ] && [ "$rest" != "/" ]; then prefix="$rest"; fi
+      ;;
+  esac
+fi
+
+# An IPv6 literal needs brackets in a URL. A wildcard bind names every interface
+# and no address a browser opens, so the local line shows the loopback one.
+case "$bind" in
+  *:*) local_host="[${bind}]" ;;
+  *) local_host="$bind" ;;
+esac
+case "$bind" in
+  0.0.0.0|::|"[::]") local_host="127.0.0.1" ;;
+esac
+local_url="http://$local_host:$port$prefix/"
+
+web_url="$local_url"
+if [ -n "$public_url" ]; then web_url="${public_url%/}/"; fi
+local_line=""
+if [ -n "$public_url" ] && [ "$web_url" != "$local_url" ]; then
+  local_line="  local:   $local_url
+"
+fi
 
 # The web UI authenticates nobody itself, so the address it listens on is the
 # whole access control it has. Say which of the two safe arrangements is in
 # force, and say it about the address this home really uses.
 case "$bind" in
+  0.0.0.0|::|"[::]")
+    reach="The config binds to every interface, so other machines reach it. Put an
+authenticating proxy in front of the port, or set server.bind to 127.0.0.1."
+    ;;
   127.0.0.1|localhost|::1)
     reach="The config binds to $bind, so only this machine reaches it. If another
 machine must, put an authenticating proxy in front of the port."
@@ -651,16 +709,37 @@ authenticating proxy in front of the port, or set server.bind to 127.0.0.1."
     ;;
 esac
 
+# One setting makes the Host check, the Origin check and the login start accept
+# the same address, so name it here: the operator who reads only this block is
+# the one who meets three refusals and no reason for them.
+if [ -n "$public_url" ]; then
+  access="A browser reaches this daemon at ${public_url%/}, the address in
+server.publicUrl. The daemon accepts that address and the loopback names, and a
+model login starts from it when it starts with https:."
+else
+  access="A browser that reaches this daemon by another name, or through a proxy,
+needs that address in server.publicUrl, in $CONFIG:
+
+  {\"server\": {\"publicUrl\": \"https://pi.example.com\"}}
+
+Without it the daemon accepts loopback names and loopback origins only, so that
+page can read and its writes are refused. A model login from another machine
+needs the same address, and it must start with https:; from this machine a login
+works at http://127.0.0.1:$port/."
+fi
+
 cat <<EOF
 
 pi-sec install is complete.
 
-  web UI:  http://$bind:$port/
-  home:    $HOME_DIR
+  web UI:  $web_url
+$local_line  home:    $HOME_DIR
 
 The install signs no model provider in: after the daemon starts, open the web
 UI and sign in from "Model login" in the "More actions" menu. With no model
 chosen, the daemon runs in setup mode and the chat page shows how to choose one.
 
 The web UI has no login of its own. $reach
+
+$access
 EOF

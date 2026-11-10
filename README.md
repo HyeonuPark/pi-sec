@@ -25,22 +25,29 @@ experimental version, so expect breaking changes before a stable release.
 | Node.js 22.19 or newer | `package.json` requires it. |
 | `npm`, `git` and `flock` | The install fills two code trees, and the second is a git worktree of the first. The update script takes a lock with `flock`. |
 
+Create that account once, from an account that holds root:
+`sudo adduser --disabled-password --gecos "" piagent` on Debian and Ubuntu, and
+`sudo useradd --create-home --shell /bin/bash piagent` on other distributions.
+[`docs/install.md`](./docs/install.md#the-account) has the details.
+
 ## Installation
 
-Clone the repository into the account's home, then run the install script as
-that account:
+Create the account of its own first, as above, and run the install as that
+account:
 
 ```bash
+sudo -iu piagent
 git clone <repository URL> ~/.pi/sec/workspace
 ~/.pi/sec/workspace/user-tools/install
 ```
 
 The script refuses to run as root. It creates `~/.pi/sec`, fills the snapshot and
-workspace trees, copies a `models.json` file or a provider extension, writes the
-first model configuration, and writes a systemd user unit. It signs no provider
-in: sign one in from the web UI, in "Model login" under "More actions".
-`--run manual` prints the command for `user-tools/run` instead of writing the
-unit.
+workspace trees, copies a `models.json` file or a provider extension, and writes a
+systemd user unit. It signs no provider in and it writes no first model: the
+daemon starts in setup mode, and the chat page signs a provider in and writes the
+first model in three steps, with no restart. A headless install writes the first
+model with `--provider` and `--model`. `--run manual` prints the command for
+`user-tools/run` instead of writing the unit.
 
 The same steps by hand:
 
