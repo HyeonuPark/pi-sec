@@ -28,7 +28,9 @@
  * What the reader typed is the component's own state. A target that changes
  * because the page read the report again — a new revision, a recorded approval —
  * leaves the field alone: only another report loads another draft. That is the
- * rule the viewer's reset test holds.
+ * rule the viewer's reset test holds. While a press is sent the field is
+ * read-only, so what a success empties is exactly what was sent, and only the
+ * field of the report that was sent.
  *
  * A refusal is answered from the same place. The server's `code` says what the
  * screen got wrong, and the body it wrote beside the code says what to correct it
@@ -460,10 +462,13 @@ export function FeedbackBar({ target, via, send, onSent, onError }: FeedbackBarP
         method: "POST",
         body: JSON.stringify({ version: requested.version, via: surface, ...(text === "" ? {} : { text }) }),
       });
-      if (live.current.aim === requested) {
-        const approval = readApproval(data, requested.version) ?? { at: undefined, button: "done" as const };
-        setBar((previous) => ({ ...previous, aim: { ...requested, approval }, text: "" }));
-      }
+      const approval = readApproval(data, requested.version) ?? { at: undefined, button: "done" as const };
+      setBar((previous) => {
+        // The field could not change during the press, so what it holds is what
+        // was sent. It is emptied only while the bar still points at this report.
+        if (previous.aim?.id !== requested.id) return previous;
+        return { ...previous, aim: previous.aim === requested ? { ...requested, approval } : previous.aim, text: "" };
+      });
       if (text !== "") clearDraft(draftKey(requested.id));
       onSent?.({ kind: "done", reportId: requested.id, version: requested.version, data });
     } catch (error) {
@@ -481,7 +486,9 @@ export function FeedbackBar({ target, via, send, onSent, onError }: FeedbackBarP
       // The server took the text, so the draft is done. A refused send keeps both
       // the field and the entry, which is what makes a retry possible.
       clearDraft(draftKey(requested.id));
-      setBar((previous) => ({ ...previous, text: "" }));
+      // The field was read-only during the press, so its text is what was sent.
+      // Another report's field is left alone.
+      setBar((previous) => (previous.aim?.id === requested.id ? { ...previous, text: "" } : previous));
       onSent?.({ kind: "feedback", reportId: requested.id, version: requested.version, data });
     } catch (error) {
       failure({ message: `Could not send the feedback: ${messageOf(error)}`, code: codeOf(error) });
@@ -541,6 +548,7 @@ export function FeedbackBar({ target, via, send, onSent, onError }: FeedbackBarP
           placeholder="Leave feedback for pi-sec…"
           aria-label="Feedback"
           value={bar.text}
+          readOnly={bar.busy}
           onInput={(event) => {
             const text = (event.currentTarget as HTMLTextAreaElement).value;
             setBar((previous) => ({ ...previous, text }));

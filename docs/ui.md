@@ -936,8 +936,9 @@ top-level page is sent to the shell.
   chat's report panel read the same entry for one report, so text typed on one
   surface appears on the other. Switching the panel to another report loads that
   report's entry instead of leaving the old text in the field, and switching back
-  brings the first text again. A send the server accepts clears the entry, a send
-  it refuses keeps it, and an entry nobody touched for 14 days is dropped when a
+  brings the first text again. The field cannot be edited while a press is sent,
+  so a send the server accepts clears exactly the text that was sent. A send the
+  server accepts clears the entry, a send it refuses keeps it, and an entry nobody touched for 14 days is dropped when a
   page opens. Restored text is text, so the button reads `Feedback` until the
   field is emptied, and an empty field still approves the revision on screen.
 - **Approve confirms one revision.** A press with the field empty approves the

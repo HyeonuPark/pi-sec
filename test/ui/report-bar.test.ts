@@ -527,6 +527,106 @@ describe("the text nobody sent yet", () => {
     }
   });
 
+  /**
+   * A bar drawn straight from the component, with a send that waits for the test.
+   * The store holds one text per report id given in `stored`.
+   */
+  function heldBar(stored: Readonly<Record<string, string>>) {
+    const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/report/plan" });
+    for (const [id, text] of Object.entries(stored)) {
+      dom.window.localStorage.setItem(`pi-sec:drafts::feedback:${id}`, JSON.stringify({ text, at: Date.now() }));
+    }
+    const host = dom.window.document.createElement("div");
+    dom.window.document.body.appendChild(host);
+    vi.stubGlobal("document", dom.window.document);
+    vi.stubGlobal("window", dom.window);
+    let release: () => void = () => undefined;
+    const open = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const send = async (): Promise<unknown> => {
+      await open;
+      return {};
+    };
+    return {
+      host,
+      release,
+      field: () => host.querySelector("#feedback-body") as HTMLTextAreaElement,
+      draft: (id: string) => dom.window.localStorage.getItem(`pi-sec:drafts::feedback:${id}`),
+      point(id: string, kind: "plan" | "result" = "plan"): void {
+        render(h(FeedbackBar, { target: { id, version: 1, latest: 1, active: true, kind }, send }), host);
+      },
+      close(): void {
+        vi.unstubAllGlobals();
+        dom.window.close();
+      },
+    };
+  }
+
+  it("keeps the field read-only while feedback is sent, and empties it once the server took it", async () => {
+    const bar = heldBar({ r1: "send me" });
+    try {
+      bar.point("r1");
+      await settle();
+      expect(bar.field().value).toBe("send me");
+      (bar.host.querySelector("#feedback-submit") as HTMLButtonElement).click();
+      await settle();
+      expect(bar.field().readOnly).toBe(true);
+
+      bar.release();
+      await settle();
+      await settle();
+      expect(bar.field().value).toBe("");
+      expect(bar.field().readOnly).toBe(false);
+      expect(bar.draft("r1")).toBeNull();
+    } finally {
+      bar.close();
+    }
+  });
+
+  it("leaves another report's field alone when the first report's feedback is taken", async () => {
+    const bar = heldBar({ r1: "about r1", r2: "about r2" });
+    try {
+      bar.point("r1");
+      await settle();
+      (bar.host.querySelector("#feedback-submit") as HTMLButtonElement).click();
+      await settle();
+      bar.point("r2");
+      await settle();
+      expect(bar.field().value).toBe("about r2");
+
+      bar.release();
+      await settle();
+      await settle();
+      expect(bar.field().value).toBe("about r2");
+      expect(bar.draft("r2")).not.toBeNull();
+      expect(bar.draft("r1")).toBeNull();
+    } finally {
+      bar.close();
+    }
+  });
+
+  it("empties the field after Done also when the report was read again during the press", async () => {
+    const bar = heldBar({ r1: "run it again" });
+    try {
+      bar.point("r1", "result");
+      await settle();
+      (bar.host.querySelector("#feedback-done") as HTMLButtonElement).click();
+      await settle();
+      // The same report, handed to the bar again as a new object.
+      bar.point("r1", "result");
+      await settle();
+
+      bar.release();
+      await settle();
+      await settle();
+      expect(bar.field().value).toBe("");
+      expect(bar.draft("r1")).toBeNull();
+    } finally {
+      bar.close();
+    }
+  });
+
   it("forgets the text when the server took it, and keeps it when the send failed", async () => {
     const { page } = await openBar({
       feedback: { status: 500, body: { error: { code: "internal", message: "no room", requestId: "q2" } } },
