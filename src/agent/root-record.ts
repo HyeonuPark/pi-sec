@@ -14,10 +14,11 @@ import { SecAgent } from "../documents.ts";
  * configuration that said one thing and a root agent that did another, with
  * nothing to point at the difference.
  *
- * Syncing at boot rather than on every read keeps the cost off the request path
- * and keeps the record a durable statement of what the session started with.
- * Changing roles still reaches only the next session, because the prompt sections
- * are sealed, but the record is no longer the reason.
+ * The record is synced at boot and after a configuration reload, and never on
+ * a read: each is a single event off the request path, and a read would put a
+ * write on every request. Changing roles still reaches only the next session,
+ * because the prompt sections are sealed, so a reload changes the record under a
+ * running session in the same way a boot does.
  *
  * `absent` is an ordinary answer, not a failure: the daemon prepares the root
  * conversation at boot before this sync runs, so `absent` means that preparation

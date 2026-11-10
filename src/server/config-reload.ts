@@ -8,6 +8,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { checkRootVmodel, isModelSetupMode } from "../agent/model-setup.ts";
 import { resolveDefaultConversation } from "../agent/conversation.ts";
+import { syncRootRecord } from "../agent/root-record.ts";
 import type { AgentRuntime } from "../agent/harness.ts";
 import { ConfigError, loadConfig } from "../config/load.ts";
 import type { AppDeps } from "./deps.ts";
@@ -51,7 +52,7 @@ export type ConfigReloadResult =
  * A failure is recorded (the admin notes, the log, the audit log and the event
  * the page reads) and returned as sentences. The running config is the one that
  * was live before the call. A root that cannot be prepared after the config
- * applied is a note, not a failed reload.
+ * applied, or whose agent record cannot be updated, is a note, not a failed reload.
  */
 export async function reloadConfigAndRoot(deps: AppDeps): Promise<ConfigReloadResult> {
   if (deps.reloadConfig === undefined) return { ok: true };
@@ -79,6 +80,17 @@ export async function reloadConfigAndRoot(deps: AppDeps): Promise<ConfigReloadRe
     const reason = error instanceof Error ? error.message : String(error);
     deps.runtime.logger.warn("root reconfigure after reload failed", { error });
     deps.adminState.notes.add(`root reconfigure after reload failed: ${reason}`);
+    return { ok: true };
+  }
+  // The prompt sections read the root's agent record, not the config, so the
+  // record follows the reload as it follows a boot. A running session keeps its
+  // sealed prompt, and the new roles and vmodel reach the next session.
+  try {
+    await syncRootRecord(deps.runtime.harness, deps.runtime.getConfig(), BACKGROUND_CONTEXT);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    deps.runtime.logger.warn("root record update after reload failed", { error });
+    deps.adminState.notes.add(`root record update after reload failed: ${reason}`);
   }
   return { ok: true };
 }

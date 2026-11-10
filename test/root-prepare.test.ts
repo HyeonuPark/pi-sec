@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, type Conversation } from "@earendil-works/pi-durable";
 import { fauxProvider } from "@earendil-works/pi-ai";
+import { syncRootRecord } from "../src/agent/root-record.ts";
 import { rootContextPath } from "../src/agent/context-file.ts";
 import { defaultConfig, type Config } from "../src/config/schema.ts";
 import { SecAgent } from "../src/documents.ts";
@@ -183,6 +184,38 @@ describe("root preparation at boot", () => {
     const after = await conversation!.agent(BACKGROUND_CONTEXT);
     expect(after.model).toEqual({ provider: "faux-alt", modelId: "faux-alt-model" });
     expect(after.thinkingLevel).toBe("low");
+  });
+
+  it("updates the root agent record's vmodel and roles on a reload", async () => {
+    const alt = fauxProvider({ provider: "faux-alt", models: [{ id: "faux-alt-model" }] });
+    const { origin } = await boot(
+      {},
+      {
+        reloadConfig: async () => {
+          harness!.models.setProvider(alt.provider);
+          const current = harness!.runtime.getConfig();
+          harness!.runtime.setConfig({
+            ...current,
+            vmodels: {
+              ...current.vmodels,
+              alt: { provider: "faux-alt", modelId: "faux-alt-model", thinkingLevel: "low", prompt: "faux" },
+            },
+            agent: { ...current.agent, vmodel: "alt", roles: ["worker"] },
+          });
+        },
+      },
+    );
+    // The boot repair writes this record in the daemon; this test boots without it.
+    await syncRootRecord(harness!.runtime.harness, harness!.runtime.getConfig(), BACKGROUND_CONTEXT);
+    const key = String(ROOT_CONVERSATION_ID);
+    const before = await harness!.runtime.harness.snapshot(SecAgent, key, BACKGROUND_CONTEXT);
+    expect(before?.vmodel).toBe("faux");
+
+    expect((await fetch(`${origin}/api/admin/reload`, { method: "POST" })).status).toBe(200);
+
+    const after = await harness!.runtime.harness.snapshot(SecAgent, key, BACKGROUND_CONTEXT);
+    expect(after?.vmodel).toBe("alt");
+    expect(after?.roles).toEqual(["worker"]);
   });
 });
 
