@@ -60,22 +60,6 @@ function menu(ui: ComposerPage): HTMLElement {
 
 /* ------------------------------------------------------- chat-composer */
 
-describe("chat-composer: an empty Enter sends nothing", () => {
-  it("sends nothing for an Enter with nothing typed", async () => {
-    // `test/attachments-web.test.ts` "sends nothing for an Enter with nothing
-    // typed". Enter reaches the send path without a press on the button, so the
-    // empty draft is refused there too.
-    const ui = await composer();
-    expect(ui.text()).toBe("");
-
-    ui.press({});
-    await ui.settle();
-
-    expect(calls(ui, "/messages")).toHaveLength(0);
-    expect(ui.text()).toBe("");
-  });
-});
-
 describe("chat-composer: the ready ids go out and the tray empties", () => {
   it("puts the ready ids in the message body and empties the tray", async () => {
     // `test/attachments-web.test.ts` "puts the ready ids in the message body and

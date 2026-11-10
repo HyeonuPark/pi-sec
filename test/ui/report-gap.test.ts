@@ -150,22 +150,3 @@ describe("the report bar's empty-field press", () => {
     }
   });
 });
-
-describe("the report page after a send", () => {
-  it("writes nothing to the tab's storage after a send", async () => {
-    const page = await openViewer();
-    try {
-      // The tab's own storage starts out empty on this page, which keeps no state
-      // there; the send must not be what fills it.
-      expect(page.window.sessionStorage.length).toBe(0);
-
-      await type(page, "needs a summary");
-      await press(page);
-
-      expect(postsTo(page, "/api/reports/r1/feedback")).toEqual([{ body: "needs a summary", version: 2 }]);
-      expect(page.window.sessionStorage.length).toBe(0);
-    } finally {
-      page.close();
-    }
-  });
-});

@@ -49,16 +49,6 @@ async function pageWithReport(options: Parameters<typeof loadChatPage>[0] = {}):
 }
 
 describe("the one panel slot", () => {
-  it("holds one panel at a time: the snippet takes the slot from the report", async () => {
-    const ui = await pageWithReport({ fetch: { "/api/inbox": { body: { items: [reportNotice()] } } } });
-    await openReportPanel(ui);
-    expect(ui.document.body.dataset.report).toBe("open");
-
-    await openSnippetPanel(ui);
-    expect(ui.document.body.dataset.snippet).toBe("open");
-    expect(ui.document.body.dataset.report).toBe("closed");
-  });
-
   it("holds one panel at a time: the login panel takes the slot from the snippet", async () => {
     const ui = await open0(await loadChatPage());
     await openSnippetPanel(ui);
@@ -193,15 +183,6 @@ describe("the report panel", () => {
     );
     await more(2);
     expect(ui.document.body.dataset.report).toBe("open");
-  });
-
-  it("closes from its own button", async () => {
-    const ui = await pageWithReport({ fetch: { "/api/inbox": { body: { items: [reportNotice()] } } } });
-    await openReportPanel(ui);
-    press(ui, byId(ui, "report-pane-close"));
-    await more(2);
-    expect(ui.document.body.dataset.report).toBe("closed");
-    expect(byId(ui, "report-pane-title").textContent).toBe("Report");
   });
 
   it("approves the newest revision from the panel, and steps aside for what it wrote", async () => {

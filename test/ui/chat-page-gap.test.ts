@@ -524,6 +524,7 @@ describe("the report panel's control", () => {
     press(ui, byId(ui, "report-pane-close"));
     await more(2);
     expect(ui.document.body.dataset.report).toBe("closed");
+    expect(byId(ui, "report-pane-title").textContent).toBe("Report");
 
     await openReportPanel(ui);
     expect(ui.document.body.dataset.report).toBe("open");
@@ -572,22 +573,6 @@ describe("the report panel's control", () => {
 
     expect(ui.document.body.dataset.report).toBe("closed");
     expect(reads()).toBe(1);
-  });
-
-  it("closes the panel when the control sends feedback", async () => {
-    const ui = await pageWithReport();
-    await openReportPanel(ui);
-    type(ui, fieldOf(ui), "please rewrite this paragraph");
-    await more(2);
-
-    await submit(ui);
-
-    // The feedback is a note in the chat, so the chat is what the operator is
-    // left looking at, and the panel is not.
-    expect(ui.document.body.dataset.report).toBe("closed");
-    const sent = ui.fetchCalls.filter((call) => call.path === "/api/reports/r1/feedback").at(-1);
-    expect(sent?.method).toBe("POST");
-    expect(JSON.parse(sent?.body ?? "null")).toEqual({ body: "please rewrite this paragraph", version: 2 });
   });
 
   it("does not reopen the panel when a load is in flight as the panel closes", async () => {

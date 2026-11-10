@@ -84,15 +84,6 @@ describe("deferred media markup", () => {
     expect(frame.getAttribute("data-defer-src")).toBe(`/rich-pages/${ID}/frame`);
     expect(frame.hasAttribute("src")).toBe(false);
   });
-
-  it("is the plain output without the flag", () => {
-    const box = document.createElement("div");
-    box.innerHTML = renderMarkdownHtml(TEXT);
-    expect(box.querySelector("img")?.getAttribute("src")).toBe("/api/share/shot.png");
-    expect(box.querySelector("img")?.hasAttribute("data-defer-src")).toBe(false);
-    expect(box.querySelector("iframe")?.getAttribute("src")).toBe(`/rich-pages/${ID}/frame`);
-    expect(box.querySelector("iframe")?.hasAttribute("data-defer-src")).toBe(false);
-  });
 });
 
 describe("deferred media observers", () => {

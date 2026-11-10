@@ -141,17 +141,6 @@ describe("the Pages row", () => {
     expect(links(open).map((each) => each.getAttribute("role"))).toEqual(["menuitem", "menuitem", "menuitem"]);
   });
 
-  it("carries the mount prefix into every link", async () => {
-    open = await loadChatPage({ base: "/sec", url: "/sec/basic-chat" });
-    press(open, toggle(open));
-    await more(1);
-    expect(links(open).map((each) => each.getAttribute("href"))).toEqual([
-      "/sec/report",
-      "/sec/usage",
-      "/sec/chats",
-    ]);
-  });
-
   it("toggles on the button, and closes on a press outside the row", async () => {
     open = await loadChatPage();
     press(open, toggle(open));

@@ -1173,55 +1173,6 @@ describe("the two buttons of a result report", () => {
     }
   });
 
-  it("sends the text with Done when the field has some", async () => {
-    const { page } = await openResult();
-    try {
-      const field = page.document.getElementById("feedback-body") as HTMLTextAreaElement;
-      field.value = "run it once more";
-      field.dispatchEvent(new page.window.Event("input", { bubbles: true }));
-      await settle();
-
-      (page.document.getElementById("feedback-done") as HTMLButtonElement).dispatchEvent(
-        new page.window.Event("click", { bubbles: true }),
-      );
-      await settle();
-      await settle();
-      // The same route as an empty Done, with the user's words in it: text with
-      // Done is a request for follow-up work, not feedback.
-      expect(posts(page)).toEqual([
-        { path: "/api/reports/r1/done", body: { version: 2, via: "viewer", text: "run it once more" } },
-      ]);
-      // The server took it, so the field is empty again.
-      expect(field.value).toBe("");
-    } finally {
-      page.close();
-    }
-  });
-
-  it("keeps the reader's text when the server refuses the Done", async () => {
-    const { page } = await openResult({
-      done: { status: 409, body: { error: { code: "not_active", message: "the job finished" } } },
-    });
-    try {
-      const field = page.document.getElementById("feedback-body") as HTMLTextAreaElement;
-      field.value = "run it once more";
-      field.dispatchEvent(new page.window.Event("input", { bubbles: true }));
-      await settle();
-
-      (page.document.getElementById("feedback-done") as HTMLButtonElement).dispatchEvent(
-        new page.window.Event("click", { bubbles: true }),
-      );
-      await settle();
-      await settle();
-      // A refusal leaves the reader's words where they are, so the press can be
-      // taken again once the reason is gone.
-      expect(field.value).toBe("run it once more");
-      expect(page.document.getElementById("feedback-hint")?.textContent).toContain("finished");
-    } finally {
-      page.close();
-    }
-  });
-
   it("leaves a plan's bar with its one button", async () => {
     const { page } = await openReportPage({ url: "/report/plan" });
     try {

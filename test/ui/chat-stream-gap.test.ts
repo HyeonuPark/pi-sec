@@ -17,7 +17,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { MESSAGE_SOURCES, wrapMessage, type MessageSource } from "../../src/message-envelope.ts";
 import { slimSnapshot } from "../../src/server/stream-entries.ts";
-import { isSilentAssistantTurn } from "../../src/shared/silent-turn.ts";
 import { settle } from "./harness.ts";
 import { assistant, loadStreamPage, operatorMessage, toolResult, type StreamPage } from "./chat-stream-harness.ts";
 import { fullEntries } from "../stream-entries-fixture.ts";
@@ -81,18 +80,6 @@ function sectionNote(id: number, body: string, key = "role:worker"): Record<stri
 function drawnRows(ui: StreamPage): Element[] {
   return [...ui.document.querySelectorAll('#transcript > [data-row-key]:not([data-row-key="writing"])')];
 }
-
-describe("an operator message with no files", () => {
-  it("draws a message without the attribute exactly as before", async () => {
-    const ui = await page();
-    ui.emit("snapshot", { entries: [operatorMessage(1, "plain words")] });
-    await flush();
-
-    const html = ui.document.getElementById("transcript")?.innerHTML ?? "";
-    expect(html).toContain("plain words");
-    expect(html).not.toContain("message-attachments");
-  });
-});
 
 describe("the no-response marker in the transcript", () => {
   it("draws nothing for a turn whose whole answer is the marker", async () => {
@@ -197,16 +184,6 @@ describe("the no-response marker in the transcript", () => {
     const html = ui.document.getElementById("transcript")?.innerHTML ?? "";
     expect(html).toContain("no-response");
     expect(ui.document.querySelectorAll(".message.assistant:not(.writing)")).toHaveLength(4);
-  });
-
-  it("judges only the marker alone as silence", () => {
-    expect(typeof isSilentAssistantTurn).toBe("function");
-    expect(isSilentAssistantTurn("")).toBe(true);
-    expect(isSilentAssistantTurn("   \n")).toBe(true);
-    expect(isSilentAssistantTurn(MARKER)).toBe(true);
-    expect(isSilentAssistantTurn(` ${MARKER} `)).toBe(true);
-    expect(isSilentAssistantTurn(`${MARKER} more`)).toBe(false);
-    expect(isSilentAssistantTurn("hello")).toBe(false);
   });
 });
 

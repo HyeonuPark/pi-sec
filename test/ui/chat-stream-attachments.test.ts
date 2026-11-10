@@ -109,5 +109,8 @@ describe("an attachment in the transcript", () => {
     ui.emit("snapshot", { entries: [operatorMessage(1, "plain words")] });
     await flush();
     expect(ui.document.querySelector('[data-row-key="entry:1"] .message-attachments')).toBeNull();
+    const html = ui.document.getElementById("transcript")?.innerHTML ?? "";
+    expect(html).toContain("plain words");
+    expect(html).not.toContain("message-attachments");
   });
 });

@@ -226,6 +226,7 @@ describe("markdown: rich page tags", () => {
     const message = drawn(draw(`![Weekly calls](/rich-pages/${ID})`));
     const frame = message.querySelector("iframe");
     expect(frame?.getAttribute("src")).toBe(`/sec/rich-pages/${ID}/frame`);
+    expect(frame?.hasAttribute("data-defer-src")).toBe(false);
     expect(frame?.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
     expect(frame?.getAttribute("sandbox")).not.toContain("allow-same-origin");
     expect(frame?.getAttribute("title")).toBe("Weekly calls");
@@ -258,6 +259,7 @@ describe("markdown: rich page tags", () => {
     expect(message.querySelectorAll("iframe").length).toBe(0);
     expect(message.querySelectorAll("img").length).toBe(4);
     expect(message.querySelectorAll("img")[3]?.getAttribute("src")).toBe("/api/share/shot.png");
+    expect(message.querySelectorAll("[data-defer-src]")).toHaveLength(0);
   });
 
   it("escapes a title with a quote and an angle bracket", () => {

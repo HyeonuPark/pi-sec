@@ -126,6 +126,9 @@ describe("one send at a time", () => {
 
   it("sends nothing for an empty draft, or one that is only whitespace", async () => {
     const ui = await page();
+    ui.press({});
+    await ui.settle();
+    expect(calls(ui, "/messages")).toHaveLength(0);
     ui.submit();
     await ui.settle();
     expect(calls(ui, "/messages")).toHaveLength(0);

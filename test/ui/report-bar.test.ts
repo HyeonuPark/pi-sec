@@ -737,22 +737,6 @@ describe("a result report's bar", () => {
     }
   });
 
-  it("sends Done, and reads the answer as a Done", async () => {
-    const page = await openResult();
-    try {
-      click(page, doneOf(page));
-      await settle();
-      await settle();
-
-      expect(posts(page)).toEqual([{ path: "/api/reports/r1/done", body: { version: 2, via: "viewer" } }]);
-      // The line under the bar says which button was pressed, from the record.
-      expect(hintOf(page).textContent).toContain("Done v2");
-      expect(doneOf(page).disabled).toBe(true);
-    } finally {
-      page.close();
-    }
-  });
-
   it("sends the field's text with Done", async () => {
     const page = await openResult();
     try {

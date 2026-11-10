@@ -85,17 +85,6 @@ describe("the four buttons", () => {
     // The input is emptied, so the same file can be picked twice in a row.
     expect(image.value).toBe("");
   });
-
-  it("hands the snippet button to the panel that owns it", async () => {
-    const ui = await page();
-    let opened = 0;
-    ui.composer.onSnippetPress(() => {
-      opened += 1;
-    });
-    (ui.document.getElementById("attach-snippet") as HTMLButtonElement).click();
-    expect(opened).toBe(1);
-    ui.composer.onSnippetPress(null);
-  });
 });
 
 describe("one upload", () => {
@@ -233,29 +222,6 @@ describe("the chips above the field", () => {
     expect(tray(ui).querySelector(".attachment-chip.is-failed .attachment-meta")?.textContent).toBe("an uploaded file has no bytes");
     // A failed chip contributes nothing to the next message.
     expect(ui.attachments.readyAttachmentIds()).toEqual([]);
-  });
-
-  it("carries the ready ids in the order the files were picked", async () => {
-    const ui = await page({ bitmap: { width: 800, height: 600 } });
-    ui.attachments.addAttachmentFiles([
-      fileOf(ui.window, "photo.png", "image/png"),
-      fileOf(ui.window, "report.pdf", "application/pdf"),
-    ]);
-    await ui.settle();
-
-    ui.type("here they are");
-    ui.submit();
-    await ui.settle();
-
-    const send = ui.fetchCalls.find((call) => call.path.endsWith("/messages"));
-    expect(bodyOf(send)).toEqual({
-      content: "here they are",
-      attachmentIds: [idOf(ui, "photo.png"), idOf(ui, "report.pdf")],
-      requestId: expect.stringMatching(/^web:/),
-    });
-    // A send the server accepted empties the tray.
-    expect(tray(ui).classList.contains("hidden")).toBe(true);
-    expect(ui.attachments.attachments.value).toEqual([]);
   });
 
   it("names the file in the transcript's bubble for the id it uploaded", async () => {
