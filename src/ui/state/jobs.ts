@@ -32,6 +32,7 @@ import { request } from "../api/request.ts";
 import { timezone } from "../mount.ts";
 import { carryStoredFolds, resetFoldsState } from "./folds.ts";
 import { reconcileById } from "./keyed.ts";
+import { createRefreshScheduler } from "./refresh-scheduler.ts";
 import {
   onPreferences,
   readPreferences,
@@ -283,15 +284,10 @@ export async function readJobs(): Promise<void> {
   }
 }
 
-/** The read in flight, if any. */
-let readInFlight: Promise<void> | null = null;
-/** One more read is wanted once the read in flight ends. */
-let readAgain = false;
-/** The one-second window, while it is open. */
-let windowTimer: ReturnType<typeof setTimeout> | undefined;
-
 /** How long a burst of job events is collected before the one read it costs. */
 export const JOBS_REFRESH_WINDOW_MS = 1000;
+
+const scheduler = createRefreshScheduler(readJobs, JOBS_REFRESH_WINDOW_MS);
 
 /**
  * Read the job tree, unless a read is already running. The caller gets the
@@ -299,18 +295,7 @@ export const JOBS_REFRESH_WINDOW_MS = 1000;
  * that starts when that read ends.
  */
 export function refreshJobs(): Promise<void> {
-  if (readInFlight !== null) {
-    readAgain = true;
-    return readInFlight;
-  }
-  readInFlight = readJobs().finally(() => {
-    readInFlight = null;
-    if (readAgain) {
-      readAgain = false;
-      void refreshJobs();
-    }
-  });
-  return readInFlight;
+  return scheduler.refresh();
 }
 
 /**
@@ -318,25 +303,15 @@ export function refreshJobs(): Promise<void> {
  * the request until it is looked at again.
  */
 export function applyJobEvent(_type?: string): void {
-  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-    return;
-  }
-  if (windowTimer !== undefined) return;
-  windowTimer = setTimeout(() => {
-    windowTimer = undefined;
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-      return;
-    }
-    void refreshJobs();
-  }, JOBS_REFRESH_WINDOW_MS);
+  scheduler.event();
 }
 
 /**
  * The tab came back. One read covers both the events a hidden tab was not told
  * about and a run that ended under the harness, which publishes no job event.
  */
-export async function jobsTabVisible(): Promise<void> {
-  await refreshJobs();
+export function jobsTabVisible(): Promise<void> {
+  return scheduler.visible();
 }
 
 /** Fold or unfold one group's children, and save the fold for every page. */
@@ -472,11 +447,8 @@ export function zoneRowStamp(at: unknown): string {
 export function resetJobsState(): void {
   resetPreferencesState();
   resetFoldsState();
-  if (windowTimer !== undefined) clearTimeout(windowTimer);
   ZONE_FIELDS.clear();
-  windowTimer = undefined;
-  readInFlight = null;
-  readAgain = false;
+  scheduler.reset();
   jobs.value = [];
   legacyScheduleProblem.value = null;
   hiddenJobs.value = new Set();

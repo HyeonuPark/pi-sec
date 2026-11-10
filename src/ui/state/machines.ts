@@ -27,6 +27,7 @@ import {
   type RemoteMachinesResponse,
 } from "../../shared/wire/remote-machines.ts";
 import { request } from "../api/request.ts";
+import { createRefreshScheduler } from "./refresh-scheduler.ts";
 
 /** How long a burst of frames is collected before the one read it costs. */
 export const MACHINES_REFRESH_WINDOW_MS = 500;
@@ -109,27 +110,11 @@ export async function readMachines(): Promise<void> {
   }
 }
 
-/** The read in flight, if any. */
-let readInFlight: Promise<void> | null = null;
-/** One more read is wanted once the read in flight ends. */
-let readAgain = false;
-/** The window timer, while it is open. */
-let windowTimer: ReturnType<typeof setTimeout> | undefined;
+const scheduler = createRefreshScheduler(readMachines, MACHINES_REFRESH_WINDOW_MS);
 
 /** Read the list, unless a read is already running. */
 export function refreshMachines(): Promise<void> {
-  if (readInFlight !== null) {
-    readAgain = true;
-    return readInFlight;
-  }
-  readInFlight = readMachines().finally(() => {
-    readInFlight = null;
-    if (readAgain) {
-      readAgain = false;
-      void refreshMachines();
-    }
-  });
-  return readInFlight;
+  return scheduler.refresh();
 }
 
 /**
@@ -139,22 +124,12 @@ export function refreshMachines(): Promise<void> {
  * tree keeps: a page nobody looks at pays nothing.
  */
 export function applyMachineEvent(): void {
-  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-    return;
-  }
-  if (windowTimer !== undefined) return;
-  windowTimer = setTimeout(() => {
-    windowTimer = undefined;
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-      return;
-    }
-    void refreshMachines();
-  }, MACHINES_REFRESH_WINDOW_MS);
+  scheduler.event();
 }
 
 /** The tab came back: read the list once, which covers the frames it missed. */
-export async function machinesTabVisible(): Promise<void> {
-  await refreshMachines();
+export function machinesTabVisible(): Promise<void> {
+  return scheduler.visible();
 }
 
 /** One level press, its request, and what the answer did to the panel. */
@@ -192,10 +167,7 @@ function omit<T>(record: Readonly<Record<string, T>>, key: string): Readonly<Rec
 
 /** Put this module back where a freshly loaded page starts. */
 export function resetMachinesState(): void {
-  if (windowTimer !== undefined) clearTimeout(windowTimer);
-  windowTimer = undefined;
-  readInFlight = null;
-  readAgain = false;
+  scheduler.reset();
   machines.value = [];
   machinesEnabled.value = false;
   pendingLevels.value = {};
