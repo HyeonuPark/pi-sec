@@ -441,6 +441,21 @@ describe("how the file tools write", () => {
     expect(await readFile(file, "utf8")).toBe("CHANGED ELSEWHERE\n");
   });
 
+  it("refuses a background edit whose file changed after the call read it", async () => {
+    const dir = await directory();
+    const file = join(dir, "raced-background.md");
+    await writeFile(file, "a\nb\n", "utf8");
+    const env = new RacingReadEnv({ cwd: dir });
+    const tools = codingTools();
+
+    await expect(
+      tools
+        .get("edit")
+        ?.execute({ path: file, edits: [{ oldText: "a", newText: "A" }] }, apiFor(env, { callId: "async:demo" }), ctx()),
+    ).rejects.toThrow(/changed on disk after this call read it/);
+    expect(await readFile(file, "utf8")).toBe("CHANGED ELSEWHERE\n");
+  });
+
   it("refuses an edit that would empty the file, and lets a write empty it", async () => {
     const dir = await directory();
     const file = join(dir, "empty.md");

@@ -1494,7 +1494,8 @@ The temporary file carries the permissions of the file it replaces, and a write
 that fails removes it. `edit` refuses a file that changed between the read its
 `oldText` was matched against and the write, with an error that asks for a fresh
 read, and it refuses a result that would leave a non-empty file empty. `write`
-with empty content is how a file is emptied on purpose.
+with empty content is how a file is emptied on purpose. A call that runs in the
+background takes no slot, but the rename and the two refusals also hold for it.
 
 The rules are `src/extensions/write-guard.ts`, and `coding` installs them as tool
 wrappers rather than as hooks: no hook runs for a nested call, and a `js` script

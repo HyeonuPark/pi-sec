@@ -314,7 +314,12 @@ function guardedTool(
   return {
     ...tool,
     execute: async (args, api, context) => {
-      if (runsInBackground(api)) return tool.execute(args, api, context);
+      // A background call takes no slot, because it must not make a turn wait, but
+      // a file tool keeps its guarded environment: the rename and the two refusals
+      // protect the file, whoever runs the call.
+      if (runsInBackground(api)) {
+        return tool.execute(args, fileTool === undefined ? api : guardedApi(api, fileTool), context);
+      }
       const release = await taken(api, kind);
       try {
         return await tool.execute(args, fileTool === undefined ? api : guardedApi(api, fileTool), context);
