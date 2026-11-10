@@ -6,7 +6,8 @@
  * written as one line of the audit trail instead (`logs/audit.jsonl`, `type:
  * "judge"`). This module turns those lines into the three windows the usage
  * screen shows: the last 24 hours, the last 7 days and the last 30 days, each
- * ending at the moment of the read.
+ * ending at the moment of the read. A line timed after the read counts in no
+ * window until that moment comes.
  *
  * Four rules hold here.
  *
@@ -188,7 +189,7 @@ export class JudgeUsage {
         const judge = textOf(event["judge"]);
         if (judge === null) continue;
         const at = typeof event["time"] === "number" ? event["time"] : Number(event["time"]);
-        if (!Number.isFinite(at) || at < oldest) continue;
+        if (!Number.isFinite(at) || at < oldest || at > now) continue;
 
         let sums = counted.get(judge);
         if (sums === undefined) {

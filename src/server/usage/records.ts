@@ -26,7 +26,9 @@
  *   it costs half the recorded amount. Chinese holidays are not considered.
  *
  * A bucket is kept for one minute, so a window's start is the start of the minute
- * the window began in. Nothing older than 30 days stays in memory.
+ * the window began in. A call recorded after the request minute counts in no
+ * window and no slot until that minute comes. Nothing older than 30 days stays
+ * in memory.
  */
 import { DatabaseSync } from "node:sqlite";
 
@@ -305,6 +307,9 @@ export class UsageRecords {
         (range) => ({ from: range.from, to: range.to, calls: 0, tokens: 0, cost: 0 }),
       );
       for (const [minute, bucket] of minutes) {
+        // A window and a slot end at the request minute, so a bucket after it
+        // waits (`#prune` keeps it) and counts once its minute comes.
+        if (minute > m) continue;
         for (const window of USAGE_WINDOWS) {
           if (minute < first[window]) continue;
           const sum = sums[window];
@@ -337,8 +342,9 @@ export class UsageRecords {
    * How many slots back from the newest a bucket minute sits.
    *
    * The minute `m` itself is 0, a minute at the newest slot's own start is 0 as
-   * well, and the minute before that start is 1. A timestamp later than `now`
-   * cannot be in a past slot, so it counts as 0.
+   * well, and the minute before that start is 1. A minute after `m` never gets
+   * here: `#snapshot` leaves it out, so it counts in no slot until its minute
+   * comes.
    */
   #slotsFromNewest(minute: number, m: number): number {
     const back = m - minute;

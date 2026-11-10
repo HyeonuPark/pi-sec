@@ -586,8 +586,9 @@ Recording:
   card counts the conversation records and a judgement runs outside every
   conversation. The usage page shows the audit trail's judgement lines on a card
   of its own, `Decision models`, with the calls, the tokens and the cost of each
-  judge over the last 24 hours, 7 days and 30 days. That card's cost is not added
-  to any provider card's total.
+  judge over the last 24 hours, 7 days and 30 days. A line timed after the
+  moment of the read counts in no window until that moment comes. That card's
+  cost is not added to any provider card's total.
 - After every extension load pass, each judge entry is checked and gets one
   warning line if its provider has no classifier model of that id, if its model
   names an api pi-sec does not call, or if the provider has no credential. The

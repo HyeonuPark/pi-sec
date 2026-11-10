@@ -1192,7 +1192,8 @@ key from another machine is not in them, and a prepaid card says `pi-sec calls
 only · estimated cost`. The first read of the daemon's database sums the whole ledger
 once and keeps per-minute sums in memory. Every later read adds only what arrived
 since. A window starts on a whole minute, so its boundary is accurate to one
-minute. Nothing older than 30 days stays in memory.
+minute. A call recorded after the current minute counts in no window until that
+minute comes. Nothing older than 30 days stays in memory.
 
 **A card with a daily field draws every day of the last 30.** The daily field of
 the answer holds 30 slots, oldest first. The last slot is the last 24 hours, the last

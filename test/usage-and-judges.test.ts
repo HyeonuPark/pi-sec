@@ -121,6 +121,24 @@ describe("usage-judges.test.ts", () => {
       expect(row?.windows.month).toEqual({ calls: 4, tokens: 2400, cost: expect.closeTo(0.0024, 10), unanswered: 0 });
     });
 
+    it("leaves out a line whose time is after the moment of the read", async () => {
+      const { file } = await trail();
+      await writeTrail(file, [
+        judgeLine({ at: NOW - HOUR, tokens: 10 }),
+        judgeLine({ at: NOW + HOUR, tokens: 1000 }),
+      ]);
+
+      const usage = new JudgeUsage({ file });
+      const before = (await usage.rows(NOW)).get("report-check");
+      for (const window of ["day", "week", "month"] as const) {
+        expect(before?.windows[window].calls).toBe(1);
+        expect(before?.windows[window].tokens).toBe(10);
+      }
+      // Once its moment comes, the line counts.
+      const after = (await usage.rows(NOW + 2 * HOUR)).get("report-check");
+      expect(after?.windows.day.calls).toBe(2);
+    });
+
     it("counts a failed and a skipped judgement as unanswered, and keeps their cost", async () => {
       const { file } = await trail();
       await writeTrail(file, [
@@ -333,6 +351,26 @@ describe("usage-records.test.ts", () => {
       expect(windowOf(totals, "alpha", "week").cost).toBe(111);
       expect(windowOf(totals, "alpha", "month").calls).toBe(5);
       expect(windowOf(totals, "alpha", "month").cost).toBe(11_111);
+    });
+
+    it("leaves out a call recorded after the moment of the read, in every window and in every slot", async () => {
+      const { path, db } = await ledger();
+      addCall(db, { provider: "alpha", at: NOW - 60_000, tokens: 10, cost: 1 });
+      addCall(db, { provider: "alpha", at: NOW + 2 * 60_000, tokens: 1000, cost: 100 });
+      db.close();
+
+      const records = new UsageRecords({ path });
+      const totals = await records.totals(NOW);
+      for (const window of ["day", "week", "month"] as const) {
+        expect(windowOf(totals, "alpha", window)).toEqual({ calls: 1, tokens: 10, cost: 1 });
+      }
+      expect(sumOf(slotsOf(totals, "alpha", NOW), 0)).toEqual({ calls: 1, tokens: 10, cost: 1 });
+
+      // A read at a moment past that row counts it.
+      const later = await records.totals(NOW + 3 * 60_000);
+      records.close();
+      expect(windowOf(later, "alpha", "day")).toEqual({ calls: 2, tokens: 1010, cost: 101 });
+      expect(sumOf(slotsOf(later, "alpha", NOW + 3 * 60_000), 0).calls).toBe(2);
     });
 
     it("keeps one provider's calls apart from another's", async () => {

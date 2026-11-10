@@ -1415,7 +1415,8 @@ the sentence that goes with it, for example `Balance not available`.
 are rolling windows of 24 hours, 7 days and 30 days that end at `generatedAt`.
 They come from the record of every model call pi-sec made, read from
 `state/sec.sqlite` through a read-only connection, and never written. A window
-starts on a whole minute. A DeepSeek call outside DeepSeek's peak hours (weekdays
+starts on a whole minute. A call recorded after the current minute counts in no
+window and no slot until that minute comes. A DeepSeek call outside DeepSeek's peak hours (weekdays
 in UTC, 01:00-04:00 and 06:00-10:00) costs half of its recorded amount, and
 `note` says so on that card. The route never reads the ledger in a write
 transaction, and a route that cannot read it answers the three windows with a
