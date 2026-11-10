@@ -466,8 +466,9 @@ describe("commit diff", () => {
     expect(diff.baseRef).toBe("");
     // The same files as the pull request diff, because the branch has one commit.
     const whole = await diffOf(fixture);
-    expect(diff.files.map((file) => [file.path, file.status, file.additions, file.deletions])).toEqual(
-      whole.files.map((file) => [file.path, file.status, file.additions, file.deletions]),
+    // The old path of a rename counts too: it is the check of the commit page's rename.
+    expect(diff.files.map((file) => [file.path, file.status, file.additions, file.deletions, file.oldPath])).toEqual(
+      whole.files.map((file) => [file.path, file.status, file.additions, file.deletions, file.oldPath]),
     );
     const keep = diff.files.find((file) => file.path === "keep.txt");
     expect(keep?.oldContent).toEqual(["one", "two", "three"]);
@@ -481,13 +482,6 @@ describe("commit diff", () => {
       body: "",
     });
     expect(diff.commit.authoredAt).toMatch(/^\d{4}-\d\d-\d\dT/);
-  });
-
-  it("finds a rename", async () => {
-    const fixture = makeFixture();
-    const diff = await commitDiffOf(fixture, fixture.headSha);
-    const renamed = diff.files.find((file) => file.path === "new-name.txt");
-    expect(renamed).toMatchObject({ status: "R", oldPath: "old-name.txt" });
   });
 
   it("gives a root commit's creation diff with no old content, and says it has no parent", async () => {
