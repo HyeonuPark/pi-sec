@@ -64,7 +64,8 @@ comes from the file times of the build directory.
   and status. A name that starts with no job id carries no job.
 - A cache folder is named after the moment it was made, in UTC:
   `YYYYMMDDTHHMMSSZ`, and `-2`, `-3` and so on when two caches fall in the same
-  second.
+  second. The listing orders
+  caches of one second by that number, so `-10` is newer than `-9`.
 
 ## 2. Settings
 
@@ -367,6 +368,8 @@ One refresh visits each repository and each build directory under it.
    `btrfs property set <path> ro true`. The label comes before the read-only
    flag, because a read-only subvolume accepts no write. A read-only subvolume
    still fills a worktree, because a snapshot of it is writable.
+   A step that fails removes the new cache folder, so a half cache is never
+   listed.
 5. Remove the caches past `cacheKeep`, with the steps of section 8.
 
 Each repository and each build directory has its own entry in the answer, so one

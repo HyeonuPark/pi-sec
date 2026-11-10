@@ -195,6 +195,36 @@ describe("cache naming and listing", () => {
     expect(listed.map((entry) => entry.name)).toEqual(["20260101T000000Z-2", "20260101T000000Z"]);
   });
 
+  it("orders caches of one second by their number, so -10 is newer than -9", async () => {
+    const root = tempRoot("buildfs-order");
+    const source = join(root, "node_modules");
+    mkdirSync(source);
+    writeFileSync(join(source, "f"), "v1\n");
+    const cacheParent = join(root, "caches");
+    const meta = {
+      repo: "local/demo",
+      buildDir: "node_modules",
+      sourceWorktree: "/worktrees/demo",
+      lockfileHash: "hash",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    for (let count = 0; count < 10; count += 1) await snapshotToCache({ mode: "copy", source, cacheParent, meta });
+
+    const listed = await listCaches(cacheParent);
+    expect(listed.map((entry) => entry.name)).toEqual([
+      "20260101T000000Z-10",
+      "20260101T000000Z-9",
+      "20260101T000000Z-8",
+      "20260101T000000Z-7",
+      "20260101T000000Z-6",
+      "20260101T000000Z-5",
+      "20260101T000000Z-4",
+      "20260101T000000Z-3",
+      "20260101T000000Z-2",
+      "20260101T000000Z",
+    ]);
+  });
+
   it("returns an empty list for a parent that does not exist", async () => {
     expect(await listCaches(join(tempRoot("buildfs-empty"), "missing"))).toEqual([]);
   });
@@ -334,6 +364,113 @@ describe("fillBuildDir on a copy-mode file system", () => {
       fillBuildDir({ mode: "copy", target, cacheParent: join(root, "c"), install: ["sh", "-c", "echo boom >&2; exit 3"], cwd: root }),
     ).rejects.toThrow(/boom/u);
     expect(existsSync(target)).toBe(false);
+  });
+});
+
+describe("a failed copy into a build directory or a cache", () => {
+  const installV1 = ["sh", "-c", "mkdir -p node_modules/pkg && echo v1 > node_modules/pkg/f"];
+
+  /** A worktree with a filled build directory and one full cache made through the real flow. */
+  async function withCache(prefix: string) {
+    const root = tempRoot(prefix);
+    const worktree = join(root, "worktree");
+    mkdirSync(worktree, { recursive: true });
+    const cacheParent = join(root, "caches");
+    const target = join(worktree, "node_modules");
+    await fillBuildDir({ mode: "copy", target, cacheParent, lockHash: "hash", install: installV1, cwd: worktree });
+    const meta = { repo: "local/demo", buildDir: "node_modules", sourceWorktree: worktree, lockfileHash: "hash" };
+    const cache = await snapshotToCache({ mode: "copy", source: target, cacheParent, meta });
+    return { root, worktree, cacheParent, target, meta, cache };
+  }
+
+  /** A `run` that makes the destination of the named command with one file, then fails. */
+  function failingRun(command: string, destinationIndex: number): NonNullable<BuildfsDeps["run"]> {
+    return async (cmd, args) => {
+      if (cmd === command) {
+        const destination = args[destinationIndex] as string;
+        mkdirSync(destination, { recursive: true });
+        writeFileSync(join(destination, "half"), "partial\n");
+        return failure("No space left on device");
+      }
+      return ok();
+    };
+  }
+
+  it("removes the half-copied directory when the cache copy fails, so a second fill can run", async () => {
+    const { root, cacheParent, cache } = await withCache("buildfs-copy-fail");
+    const second = join(root, "second");
+    mkdirSync(second);
+    const target2 = join(second, "node_modules");
+    const options = { mode: "copy" as const, target: target2, cacheParent, lockHash: "hash", install: installV1, cwd: second };
+
+    await expect(fillBuildDir(options, { run: failingRun("cp", 3) })).rejects.toThrow(/No space left on device/u);
+    expect(existsSync(target2)).toBe(false);
+
+    const again = await fillBuildDir(options);
+    expect(again.filledFrom).toBe(cache.path);
+    expect(readFileSync(join(target2, "pkg", "f"), "utf8")).toBe("v1\n");
+  });
+
+  it("removes the half-copied directory when the subvolume snapshot of a cache fails", async () => {
+    const { root, cacheParent, cache } = await withCache("buildfs-snapshot-fail");
+    const second = join(root, "second");
+    mkdirSync(second);
+    const target2 = join(second, "node_modules");
+    const options = { mode: "subvolume" as const, target: target2, cacheParent, lockHash: "hash", install: installV1, cwd: second };
+
+    await expect(fillBuildDir(options, { run: failingRun("btrfs", 3) })).rejects.toThrow(/No space left on device/u);
+    expect(existsSync(target2)).toBe(false);
+    expect(existsSync(cache.path)).toBe(true);
+  });
+
+  it("leaves no half cache when the copy into a new cache fails, so the next fill takes the last full cache", async () => {
+    const { root, worktree, cacheParent, target, meta, cache } = await withCache("buildfs-half-cache");
+
+    await expect(snapshotToCache({ mode: "copy", source: target, cacheParent, meta }, { run: failingRun("cp", 3) })).rejects.toThrow(
+      /No space left on device/u,
+    );
+    expect((await listCaches(cacheParent)).map((entry) => entry.path)).toEqual([cache.path]);
+
+    const second = join(root, "second");
+    mkdirSync(second);
+    const filled = await fillBuildDir({
+      mode: "copy",
+      target: join(second, "node_modules"),
+      cacheParent,
+      lockHash: "hash",
+      install: ["sh", "-c", "exit 9"],
+      cwd: worktree,
+    });
+    expect(filled.filledFrom).toBe(cache.path);
+    expect(filled.installed).toBe(false);
+  });
+
+  it("leaves no half cache when the first cache copy fails, so the next fill installs", async () => {
+    const root = tempRoot("buildfs-first-cache");
+    const worktree = join(root, "worktree");
+    mkdirSync(worktree);
+    const cacheParent = join(root, "caches");
+    const target = join(worktree, "node_modules");
+    await fillBuildDir({ mode: "copy", target, cacheParent, lockHash: "hash", install: installV1, cwd: worktree });
+    const meta = { repo: "local/demo", buildDir: "node_modules", sourceWorktree: worktree, lockfileHash: "hash" };
+
+    await expect(snapshotToCache({ mode: "copy", source: target, cacheParent, meta }, { run: failingRun("cp", 3) })).rejects.toThrow(
+      /No space left on device/u,
+    );
+    expect(readdirSync(cacheParent)).toEqual([]);
+
+    const second = join(root, "second");
+    mkdirSync(second);
+    const filled = await fillBuildDir({
+      mode: "copy",
+      target: join(second, "node_modules"),
+      cacheParent,
+      lockHash: "hash",
+      install: installV1,
+      cwd: second,
+    });
+    expect(filled.installed).toBe(true);
+    expect(filled.filledFrom).toBeUndefined();
   });
 });
 

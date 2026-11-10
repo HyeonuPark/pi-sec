@@ -193,10 +193,18 @@ function readMeta(dir: string): CacheMeta | undefined {
   };
 }
 
-/** Newest first, and on the same second the later name (`-2`) first. */
+/** The number a cache name ends in (`-2`, `-10`); a name with no suffix counts as 1. */
+function nameNumber(name: string): number {
+  const found = /-(\d+)$/u.exec(name);
+  return found === null ? 1 : Number(found[1]);
+}
+
+/** Newest first, and on the same second the higher number (`-10` before `-9`) first. */
 function compareNewestFirst(a: CacheEntry, b: CacheEntry): number {
   if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
   if (a.name === b.name) return 0;
+  const byNumber = nameNumber(b.name) - nameNumber(a.name);
+  if (byNumber !== 0) return byNumber;
   return a.name < b.name ? 1 : -1;
 }
 
@@ -347,13 +355,20 @@ export async function fillBuildDir(opts: FillBuildDirOptions, deps: BuildfsDeps 
 
   const filledFrom = await cacheForLock(opts, deps);
   if (filledFrom !== undefined) {
-    if (opts.mode === "subvolume") {
-      const result = await run("btrfs", ["subvolume", "snapshot", filledFrom, opts.target]);
-      if (result.code !== 0) throw new Error(`btrfs subvolume snapshot failed for ${opts.target}: ${outputOf(result)}`);
-      await restorecon(opts.target, run);
-    } else {
-      const result = await run("cp", ["-a", "--reflink=auto", filledFrom, opts.target]);
-      if (result.code !== 0) throw new Error(`copying the cache into ${opts.target} failed: ${outputOf(result)}`);
+    try {
+      if (opts.mode === "subvolume") {
+        const result = await run("btrfs", ["subvolume", "snapshot", filledFrom, opts.target]);
+        if (result.code !== 0) throw new Error(`btrfs subvolume snapshot failed for ${opts.target}: ${outputOf(result)}`);
+        await restorecon(opts.target, run);
+      } else {
+        const result = await run("cp", ["-a", "--reflink=auto", filledFrom, opts.target]);
+        if (result.code !== 0) throw new Error(`copying the cache into ${opts.target} failed: ${outputOf(result)}`);
+      }
+    } catch (error) {
+      // A failed copy leaves a partial tree that a retry would refuse and a reader
+      // could take for a full one, so it goes before the error is thrown.
+      await discardBuildDir(opts.mode, opts.target, run);
+      throw error;
     }
     return { filledFrom, installed: false, mode: opts.mode };
   }
@@ -400,6 +415,22 @@ export async function snapshotToCache(opts: SnapshotToCacheOptions, deps: Buildf
   let dest = join(opts.cacheParent, stamp);
   for (let suffix = 2; exists(dest); suffix += 1) dest = join(opts.cacheParent, `${stamp}-${suffix}`);
 
+  // Any failure from the copy to the read-only step removes the new cache folder,
+  // so a half cache without its meta file is never listed as the newest cache.
+  try {
+    return await fillCache(opts, run, dest, createdAt);
+  } catch (error) {
+    await discardBuildDir(opts.mode, dest, run);
+    throw error;
+  }
+}
+
+async function fillCache(
+  opts: SnapshotToCacheOptions,
+  run: NonNullable<BuildfsDeps["run"]>,
+  dest: string,
+  createdAt: string,
+): Promise<CacheEntry> {
   if (opts.mode === "subvolume") {
     const result = await run("btrfs", ["subvolume", "snapshot", opts.source, dest]);
     if (result.code !== 0) throw new Error(`btrfs subvolume snapshot failed for ${dest}: ${outputOf(result)}`);
