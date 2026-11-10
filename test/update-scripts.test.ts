@@ -63,7 +63,17 @@ async function fake(bin: string, name: string, script: string): Promise<void> {
 /** What the second commit of a sandbox adds besides `two.txt`: the files under `user-tools/`. */
 type Installer = (workspace: string, log: string) => Promise<void>;
 
-async function sandbox(installer?: Installer): Promise<Sandbox> {
+/** What a sandbox does beyond the default: lockfiles, an existing node_modules, a failing npm. */
+interface SandboxOptions {
+  /** The text of package-lock.json in the first and in the second commit. Absent: no lockfile. */
+  readonly lockfiles?: { readonly first: string; readonly second: string };
+  /** Make a node_modules directory in the execution tree. */
+  readonly nodeModules?: boolean;
+  /** The arguments of the one npm call that exits 1, for example "run build". */
+  readonly npmFail?: string;
+}
+
+async function sandbox(installer?: Installer, options: SandboxOptions = {}): Promise<Sandbox> {
   const root = await mkdtemp(join(tmpdir(), "pi-sec-update-scripts-"));
   roots.add(root);
   const home = join(root, "pi-sec");
@@ -83,12 +93,20 @@ async function sandbox(installer?: Installer): Promise<Sandbox> {
   await git(workspace, ["init", "-b", "main"]);
   await writeFile(join(workspace, "one.txt"), "one\n");
   await git(workspace, ["add", ".gitignore", "one.txt"]);
+  if (options.lockfiles !== undefined) {
+    await writeFile(join(workspace, "package-lock.json"), options.lockfiles.first);
+    await git(workspace, ["add", "package-lock.json"]);
+  }
   await git(workspace, ["commit", "-m", "one"]);
   const first = await git(workspace, ["rev-parse", "HEAD"]);
   await git(workspace, ["branch", "snapshot"]);
   await git(workspace, ["worktree", "add", snapshot, "snapshot"]);
   await writeFile(join(workspace, "two.txt"), "two\n");
   await git(workspace, ["add", "two.txt"]);
+  if (options.lockfiles !== undefined) {
+    await writeFile(join(workspace, "package-lock.json"), options.lockfiles.second);
+    await git(workspace, ["add", "package-lock.json"]);
+  }
   if (installer !== undefined) {
     await installer(workspace, join(root, "installer.log"));
     await git(workspace, ["add", "user-tools"]);
@@ -110,7 +128,9 @@ process.exit(Number(process.env.FAKE_STATUS_EXIT ?? "1"));
 `,
   );
 
-  await fake(bin, "npm", `printf '%s\\n' "$*" >> "${npmLog}"\nexit 0`);
+  if (options.nodeModules === true) await mkdir(join(snapshot, "node_modules"), { recursive: true });
+  const npmFail = options.npmFail === undefined ? "" : `if [ "$*" = "${options.npmFail}" ]; then echo "npm failed: $*" >&2; exit 1; fi\n`;
+  await fake(bin, "npm", `printf '%s\\n' "$*" >> "${npmLog}"\n${npmFail}exit 0`);
   await fake(bin, "systemctl", `printf '%s\\n' "$*" >> "${systemctlLog}"\nexit 1`);
 
   return { root, home, homeDir, workspace, snapshot, bin, npmLog, systemctlLog, first, second };
@@ -308,5 +328,43 @@ describe("rollback with no systemd unit", () => {
     expect(await headOf(sb)).toBe(sb.first);
     expect(await lines(sb.npmLog)).toEqual(["ci", "run build"]);
     expect(result.stdout).toContain("start your supervised 'pi-sec start' process");
+  });
+  it("installs dependencies again when the target commit has another lockfile", async () => {
+    const sb = await sandbox(undefined, { lockfiles: { first: '{"a": 1}\n', second: '{"a": 2}\n' }, nodeModules: true });
+    await git(sb.snapshot, ["merge", "--ff-only", "main"]);
+
+    const result = await run(sb, ROLLBACK, [sb.first], { FAKE_STATUS_EXIT: "1" });
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(await headOf(sb)).toBe(sb.first);
+    expect(await lines(sb.npmLog)).toEqual(["ci", "run build"]);
+    expect(result.stdout).toContain("dependencies changed");
+  });
+
+  it("reuses node_modules when the lockfile is the same", async () => {
+    const sb = await sandbox(undefined, { lockfiles: { first: '{"a": 1}\n', second: '{"a": 1}\n' }, nodeModules: true });
+    await git(sb.snapshot, ["merge", "--ff-only", "main"]);
+
+    const result = await run(sb, ROLLBACK, [sb.first], { FAKE_STATUS_EXIT: "1" });
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(await lines(sb.npmLog)).toEqual(["run build"]);
+  });
+
+  it("says where the tree is and how to go back when the build fails", async () => {
+    const sb = await sandbox(undefined, { npmFail: "run build" });
+    await git(sb.snapshot, ["merge", "--ff-only", "main"]);
+
+    const result = await run(sb, ROLLBACK, [sb.first], { FAKE_STATUS_EXIT: "1" });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("the rollback failed (exit 1) after the daemon was stopped");
+    expect(result.stderr).toContain("the daemon was not started again");
+    // The commands the user can copy: go back to where this run started, and try again.
+    expect(result.stderr).toContain(`rollback ${sb.second}`);
+    expect(result.stderr).toContain(`rollback ${sb.first}`);
+    expect(result.stderr).toContain("npm ci && npm run build");
+    // Nothing started the daemon.
+    expect(await lines(sb.systemctlLog)).not.toContain("--user start pi-sec");
   });
 });

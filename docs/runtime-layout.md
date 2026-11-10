@@ -533,8 +533,10 @@ that daemon runs and says so.
 ### Rollback
 
 `user-tools/rollback <commit-or-tag>` resets the snapshot branch to that commit,
-installs dependencies if the tree has none, rebuilds, and starts the daemon
-again. It refuses when the snapshot has uncommitted changes, and, with no unit to
+runs `npm ci` when the lockfile differs between the two commits or the tree has
+no `node_modules`, rebuilds, and starts the daemon again. A step that fails after
+the daemon was stopped leaves the daemon stopped and prints the commands to go
+back, to try again and to repair the dependencies. It refuses when the snapshot has uncommitted changes, and, with no unit to
 stop, when a daemon of this home is running. Storage is not touched.
 
 ### Migrations

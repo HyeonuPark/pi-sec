@@ -613,9 +613,18 @@ With no argument it prints the last fifteen commits of the execution tree and
 exits 2. It refuses when the execution tree has uncommitted changes, and, with no
 unit to stop, when a daemon of this home is running.
 
-After the reset it installs dependencies if the tree has no `node_modules`,
-rebuilds, and starts the daemon again the way your run mode needs: the unit is
-started, or the script tells you to start your own process.
+After the reset it compares the lockfile of the two commits. It runs `npm ci`
+when the lockfile differs, and also when the tree has no `node_modules`.
+Otherwise it reuses `node_modules`. It then rebuilds and starts the daemon again
+the way your run mode needs: the unit is started, or the script tells you to
+start your own process.
+
+A step that fails after the daemon was stopped ends the script with the exit code
+of that step. The script does not start the daemon in that case, because a failed
+install or build can leave the tree half written. It prints where the tree is now
+and where it was before, and these commands: go back to where you started, try
+the same rollback again, and repair the dependencies by hand. Under a unit it
+also prints the command that starts the daemon.
 
 Storage is not touched. A migration that made storage unreadable to the older
 binary needs your own copy of `state/` as well. The next update fast-forwards

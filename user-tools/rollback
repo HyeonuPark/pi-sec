@@ -6,6 +6,15 @@
 # back to the workspace's HEAD, and refuses if the two have diverged — which is
 # the behaviour you want here: a rollback should never be undone by accident.
 #
+# Dependencies follow the lockfile, as in update-and-restart: the script reads the
+# lockfile's object id before and after the reset and runs `npm ci` when the two
+# differ, so the older code does not run against the newer dependencies.
+#
+# A step that fails after the daemon was stopped ends the script with the exit
+# code of that step. It does not start the daemon again, because a failed install
+# or build can leave node_modules or dist half written. It prints the commands to
+# go back to the tree that worked, to try again, and to repair by hand.
+#
 # Storage is not touched. If a migration made storage unreadable by the older
 # binary, restore your own copy of it as well.
 #
@@ -106,15 +115,50 @@ case "$(service_unit)" in
     ;;
 esac
 
+SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+FROM_FULL="$(git -C "$SNAPSHOT" rev-parse HEAD)"
+FROM_LINE="$(git -C "$SNAPSHOT" log --oneline -1)"
+LOCK_BEFORE="$(git -C "$SNAPSHOT" rev-parse "HEAD:package-lock.json" 2>/dev/null || echo none)"
+
+# What to print when a step fails after the daemon was stopped. The commands are
+# whole, so the user can copy each one as it is.
+rollback_failed() {
+  local code=$?
+  trap - ERR
+  {
+    echo "error: the rollback failed (exit $code) after the daemon was stopped"
+    echo "  the execution tree is now at $(git -C "$SNAPSHOT" log --oneline -1 2>/dev/null || echo unknown)"
+    echo "  it was at $FROM_LINE before this rollback"
+    echo "  the daemon was not started again, because the tree may not build"
+    echo "  to go back to where you started:  $SCRIPT $FROM_FULL"
+    echo "  to try this rollback again:        $SCRIPT $TARGET"
+    echo "  to repair the dependencies by hand: (cd $SNAPSHOT && npm ci && npm run build)"
+    case "$(service_unit)" in
+      user) echo "  to start the daemon when the tree builds: systemctl --user start pi-sec" ;;
+      system) echo "  to start the daemon when the tree builds: sudo systemctl start pi-sec" ;;
+      runner) echo "  the runner starts the daemon again when this script exits" ;;
+    esac
+  } >&2
+  exit "$code"
+}
+
 svc_stop
+trap rollback_failed ERR
 git -C "$SNAPSHOT" reset --hard "$RESOLVED"
 
-if [ ! -d "$SNAPSHOT/node_modules" ]; then
+LOCK_AFTER="$(git -C "$SNAPSHOT" rev-parse "HEAD:package-lock.json" 2>/dev/null || echo none)"
+if [ "$LOCK_BEFORE" != "$LOCK_AFTER" ]; then
+  echo "  dependencies changed ($(echo "$LOCK_BEFORE" | cut -c1-8) -> $(echo "$LOCK_AFTER" | cut -c1-8)); npm ci"
+  (cd "$SNAPSHOT" && npm ci)
+elif [ ! -d "$SNAPSHOT/node_modules" ]; then
   echo "  installing dependencies"
   (cd "$SNAPSHOT" && npm ci)
+else
+  echo "  dependencies unchanged; reusing node_modules"
 fi
 echo "  building"
 (cd "$SNAPSHOT" && npm run build)
+trap - ERR
 svc_start
 
 echo "done: now at $(git -C "$SNAPSHOT" rev-parse --short HEAD)"
