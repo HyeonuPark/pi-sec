@@ -158,32 +158,40 @@ describe("focused chat tools", () => {
     return report.id;
   }
 
-  it("refuses a delete whose report the user did not approve", async () => {
+  const NOT_APPROVED = "not the revision the user approved";
+  // Each row is one old case: its name, the refusal text, and the report made for the chat `row`.
+  const DELETE_REFUSALS: readonly [string, string, (row: { conversationId: number }) => Promise<string>][] = [
+    ["refuses a delete whose report the user did not approve", NOT_APPROVED, (row) => reportNaming(row.conversationId, false)],
+    [
+      "refuses a delete whose approved report names another conversation",
+      "does not name conversation",
+      async () => reportNaming((await openChat(harness!, "another chat", { test: true })).conversationId, true),
+    ],
+    [
+      "refuses an approval of a revision the text has moved past",
+      NOT_APPROVED,
+      async (row) => {
+        const reportId = await reportNaming(row.conversationId, true);
+        // A newer revision has no approval, so the approval on the older one no longer
+        // speaks for what the report says now.
+        await harness!.runtime.reports.addVersion(CTX, reportId, { content: "something else entirely\n" });
+        return reportId;
+      },
+    ],
+  ];
+
+  it.each(DELETE_REFUSALS)("%s", async (_oldCase, text, makeReport) => {
     harness = await focusedHarness();
     const row = await openChat(harness, "a test chat", { test: true });
-    const reportId = await reportNaming(row.conversationId, false);
+    const reportId = await makeReport(row);
 
     const refused = await runTool(harness, Number(ROOT_CONVERSATION_ID), "focused_chat_delete", {
       conversationId: row.conversationId,
       reportId,
     });
-    expect(refused).toContain("not the revision the user approved");
+    expect(refused).toContain(text);
     expect(harness.runtime.focusedChats.get(row.conversationId)).toBeDefined();
     expect(harness.runtime.focusedChats.isDeleted(row.conversationId)).toBe(false);
-  });
-
-  it("refuses a delete whose approved report names another conversation", async () => {
-    harness = await focusedHarness();
-    const row = await openChat(harness, "a test chat", { test: true });
-    const other = await openChat(harness, "another chat", { test: true });
-    const reportId = await reportNaming(other.conversationId, true);
-
-    const refused = await runTool(harness, Number(ROOT_CONVERSATION_ID), "focused_chat_delete", {
-      conversationId: row.conversationId,
-      reportId,
-    });
-    expect(refused).toContain("does not name conversation");
-    expect(harness.runtime.focusedChats.get(row.conversationId)).toBeDefined();
   });
 
   it("refuses a delete whose approved report names a longer number", async () => {
@@ -322,22 +330,6 @@ describe("focused chat tools", () => {
 
     // Nothing is left to finish, so a third call is refused as before.
     await expect(deleteFocusedChat(depsOf(harness), input, CTX)).rejects.toThrow("was deleted");
-  });
-
-  it("refuses an approval of a revision the text has moved past", async () => {
-    harness = await focusedHarness();
-    const row = await openChat(harness, "a test chat", { test: true });
-    const reportId = await reportNaming(row.conversationId, true);
-    // A newer revision has no approval, so the approval on the older one no longer
-    // speaks for what the report says now.
-    await harness.runtime.reports.addVersion(CTX, reportId, { content: "something else entirely\n" });
-
-    const refused = await runTool(harness, Number(ROOT_CONVERSATION_ID), "focused_chat_delete", {
-      conversationId: row.conversationId,
-      reportId,
-    });
-    expect(refused).toContain("not the revision the user approved");
-    expect(harness.runtime.focusedChats.get(row.conversationId)).toBeDefined();
   });
 
   it("fails a message to an archived chat, because its edge is retired", async () => {

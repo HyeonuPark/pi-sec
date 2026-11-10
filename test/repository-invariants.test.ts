@@ -9,7 +9,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -372,109 +372,80 @@ describe("ui-probe-writes.test.ts", () => {
   const decide = () => pureFunction<WriteDecision>("writeDecision");
   const prefixOf = () => pureFunction<PrefixOf>("prefixOf");
 
-  describe("ui-probe write decision: blocking", () => {
-    it("blocks a write to the page's own API path", async () => {
-      const writeDecision = await decide();
-      expect(writeDecision({ method: "POST", url: "http://127.0.0.1:8787/basic-chat/messages" })).toBe("block");
-    });
+  const BASE = "http://127.0.0.1:8787";
+  let writeDecision: WriteDecision;
 
-    it("blocks the root conversation's messages with no --focused", async () => {
-      const writeDecision = await decide();
-      // The incident: a POST here reached the user's live conversation.
-      expect(writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/conversations/1/messages" })).toBe("block");
-    });
-
-    it("blocks another conversation's messages while one is focused", async () => {
-      const writeDecision = await decide();
-      expect(
-        writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/conversations/12/messages", focusedId: 13 }),
-      ).toBe("block");
-    });
-
-    it("blocks an upload with no --focused", async () => {
-      const writeDecision = await decide();
-      expect(writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/attachments" })).toBe("block");
-    });
-
-    it("blocks a tool call and a focused-chat rename", async () => {
-      const writeDecision = await decide();
-      expect(writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/ui/call", focusedId: 13 })).toBe("block");
-      // The focused chat is the caller's to write messages into, not to retitle.
-      expect(writeDecision({ method: "PATCH", url: "http://127.0.0.1:8787/api/focused-chats/13", focusedId: 13 })).toBe(
-        "block",
-      );
-    });
-
-    it("blocks a write under a proxy prefix, which the exception does not name", async () => {
-      const writeDecision = await decide();
-      expect(
-        writeDecision({ method: "POST", url: "http://127.0.0.1:8787/pi/basic-chat/messages", prefix: "/pi", focusedId: 13 }),
-      ).toBe("block");
-      expect(
-        writeDecision({ method: "POST", url: "http://127.0.0.1:8787/pi/api/ui/call", prefix: "/pi", focusedId: 13 }),
-      ).toBe("block");
-    });
-
-    it("blocks a method other than POST on the upload path", async () => {
-      const writeDecision = await decide();
-      // Only an upload passes; the path alone is not the exception.
-      expect(writeDecision({ method: "DELETE", url: "http://127.0.0.1:8787/api/attachments", focusedId: 13 })).toBe("block");
-    });
-
-    it("does not read 13 as a prefix of 130", async () => {
-      const writeDecision = await decide();
-      expect(
-        writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/conversations/130/messages", focusedId: 13 }),
-      ).toBe("block");
-    });
-
-    it("does not accept a path that is missing the configured prefix", async () => {
-      const writeDecision = await decide();
-      expect(
-        writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/conversations/13/messages", prefix: "/pi", focusedId: 13 }),
-      ).toBe("block");
-    });
+  beforeAll(async () => {
+    writeDecision = await decide();
   });
 
-  describe("ui-probe write decision: passing", () => {
-    it("passes every reading method, whatever the path", async () => {
-      const writeDecision = await decide();
-      for (const method of ["GET", "HEAD", "OPTIONS"]) {
-        expect(writeDecision({ method, url: "http://127.0.0.1:8787/api/conversations/13/messages" })).toBe("pass");
-        expect(writeDecision({ method, url: "http://127.0.0.1:8787/api/conversations/1/messages" })).toBe("pass");
-        expect(writeDecision({ method, url: "http://127.0.0.1:8787/api/admin/status", focusedId: 13 })).toBe("pass");
-      }
-    });
+  // Each row is one old input: the old case name (and the input where a case had several), then the request.
+  const BLOCKED: ReadonlyArray<readonly [string, WriteInput]> = [
+    ["blocks a write to the page's own API path", { method: "POST", url: `${BASE}/basic-chat/messages` }],
+    // The incident: a POST here reached the user's live conversation.
+    ["blocks the root conversation's messages with no --focused", { method: "POST", url: `${BASE}/api/conversations/1/messages` }],
+    [
+      "blocks another conversation's messages while one is focused",
+      { method: "POST", url: `${BASE}/api/conversations/12/messages`, focusedId: 13 },
+    ],
+    ["blocks an upload with no --focused", { method: "POST", url: `${BASE}/api/attachments` }],
+    ["blocks a tool call and a focused-chat rename (a tool call)", { method: "POST", url: `${BASE}/api/ui/call`, focusedId: 13 }],
+    // The focused chat is the caller's to write messages into, not to retitle.
+    ["blocks a tool call and a focused-chat rename (a rename)", { method: "PATCH", url: `${BASE}/api/focused-chats/13`, focusedId: 13 }],
+    [
+      "blocks a write under a proxy prefix, which the exception does not name (a page write)",
+      { method: "POST", url: `${BASE}/pi/basic-chat/messages`, prefix: "/pi", focusedId: 13 },
+    ],
+    [
+      "blocks a write under a proxy prefix, which the exception does not name (a tool call)",
+      { method: "POST", url: `${BASE}/pi/api/ui/call`, prefix: "/pi", focusedId: 13 },
+    ],
+    // Only an upload passes; the path alone is not the exception.
+    ["blocks a method other than POST on the upload path", { method: "DELETE", url: `${BASE}/api/attachments`, focusedId: 13 }],
+    ["does not read 13 as a prefix of 130", { method: "POST", url: `${BASE}/api/conversations/130/messages`, focusedId: 13 }],
+    [
+      "does not accept a path that is missing the configured prefix",
+      { method: "POST", url: `${BASE}/api/conversations/13/messages`, prefix: "/pi", focusedId: 13 },
+    ],
+  ];
 
-    it("passes writes to the focused chat and only that one", async () => {
-      const writeDecision = await decide();
-      expect(writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/conversations/13/messages", focusedId: 13 })).toBe(
-        "pass",
-      );
-      expect(writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/conversations/13/reset", focusedId: 13 })).toBe(
-        "pass",
-      );
-      expect(writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/conversations/13/compact", focusedId: 13 })).toBe(
-        "pass",
-      );
-    });
+  const PASSED: ReadonlyArray<readonly [string, WriteInput]> = [
+    ...["GET", "HEAD", "OPTIONS"].flatMap((method): Array<readonly [string, WriteInput]> => [
+      [`passes every reading method, whatever the path (${method}, another chat)`, { method, url: `${BASE}/api/conversations/13/messages` }],
+      [`passes every reading method, whatever the path (${method}, the root conversation)`, { method, url: `${BASE}/api/conversations/1/messages` }],
+      [`passes every reading method, whatever the path (${method}, an admin path)`, { method, url: `${BASE}/api/admin/status`, focusedId: 13 }],
+    ]),
+    [
+      "passes writes to the focused chat and only that one (a message)",
+      { method: "POST", url: `${BASE}/api/conversations/13/messages`, focusedId: 13 },
+    ],
+    [
+      "passes writes to the focused chat and only that one (a reset)",
+      { method: "POST", url: `${BASE}/api/conversations/13/reset`, focusedId: 13 },
+    ],
+    [
+      "passes writes to the focused chat and only that one (a compact)",
+      { method: "POST", url: `${BASE}/api/conversations/13/compact`, focusedId: 13 },
+    ],
+    // Uploads are not conversation-scoped, so the route cannot say which chat it
+    // is for. The caller's check of the id is what keeps this narrow.
+    ["passes an upload while a chat is focused", { method: "POST", url: `${BASE}/api/attachments`, focusedId: 13 }],
+    [
+      "passes the same writes under a proxy prefix (a message)",
+      { method: "POST", url: `${BASE}/pi/api/conversations/13/messages`, prefix: "/pi", focusedId: 13 },
+    ],
+    [
+      "passes the same writes under a proxy prefix (an upload)",
+      { method: "POST", url: `${BASE}/pi/api/attachments`, prefix: "/pi", focusedId: 13 },
+    ],
+  ];
 
-    it("passes an upload while a chat is focused", async () => {
-      const writeDecision = await decide();
-      // Uploads are not conversation-scoped, so the route cannot say which chat it
-      // is for. The caller's check of the id is what keeps this narrow.
-      expect(writeDecision({ method: "POST", url: "http://127.0.0.1:8787/api/attachments", focusedId: 13 })).toBe("pass");
-    });
+  it.each(BLOCKED)("%s", (_label, input) => {
+    expect(writeDecision(input)).toBe("block");
+  });
 
-    it("passes the same writes under a proxy prefix", async () => {
-      const writeDecision = await decide();
-      expect(
-        writeDecision({ method: "POST", url: "http://127.0.0.1:8787/pi/api/conversations/13/messages", prefix: "/pi", focusedId: 13 }),
-      ).toBe("pass");
-      expect(
-        writeDecision({ method: "POST", url: "http://127.0.0.1:8787/pi/api/attachments", prefix: "/pi", focusedId: 13 }),
-      ).toBe("pass");
-    });
+  it.each(PASSED)("%s", (_label, input) => {
+    expect(writeDecision(input)).toBe("pass");
   });
 
   describe("ui-probe focused chat check", () => {

@@ -4,7 +4,6 @@ import { AdminNotes } from "../src/runtime/notes.ts";
 import { defaultConfig } from "../src/config/schema.ts";
 import { SecSettings } from "../src/documents.ts";
 import { UI_PREFERENCE_KEYS } from "../src/prefs/store.ts";
-import { CONTROL_EVENTS } from "../src/server/streams.ts";
 import { injectPreferences } from "../src/server/static.ts";
 import { SseHub } from "../src/server/sse.ts";
 import { StreamHub } from "../src/server/streams.ts";
@@ -355,10 +354,6 @@ describe("the shared UI state", () => {
     const stored = await harness!.runtime.harness.snapshot(SecSettings, ctx);
     expect(stored?.notes).toBe("written by the agent");
     expect(stored?.theme).toBe("light");
-  });
-
-  it("holds preferences_updated in the control events", () => {
-    expect(CONTROL_EVENTS.has("preferences_updated")).toBe(true);
   });
 
   it("carries preferences_updated on the chats list stream, with the revision only", async () => {

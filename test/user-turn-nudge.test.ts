@@ -223,41 +223,9 @@ describe("a turn the user started answers in text", () => {
     expect(await nudges(harness, root.id)).toBe(1);
     expect((await rowsOf(harness, root.id)).some((row) => row.text.includes("Step 5"))).toBe(true);
   });
-
-  it("leaves a turn alone when the line sits inside a sentence, which the screen draws", async () => {
-    harness = await focusedHarness();
-    let requests = 0;
-    harness.faux.setResponses(
-      script(() => {
-        requests += 1;
-        return say(`표지는 ${MARKER} 입니다. 잠시 뒤 결과를 알려 드리겠습니다.`);
-      }),
-    );
-    const root = await rootOf(harness);
-    await userSays(harness, root, "다음?");
-
-    expect(requests).toBe(1);
-    expect(await nudges(harness, root.id)).toBe(0);
-  });
-
-  it("leaves a turn with text alone", async () => {
-    harness = await focusedHarness();
-    let requests = 0;
-    harness.faux.setResponses(
-      script(() => {
-        requests += 1;
-        return say("Step 5: reload sshd.");
-      }),
-    );
-    const root = await rootOf(harness);
-    await userSays(harness, root, "다음?");
-
-    expect(requests).toBe(1);
-    expect(await nudges(harness, root.id)).toBe(0);
-  });
 });
 
-describe("a turn somebody else started may end empty", () => {
+describe("a turn that needs no nudge", () => {
   let harness: TestHarness | undefined;
 
   afterEach(async () => {
@@ -265,92 +233,81 @@ describe("a turn somebody else started may end empty", () => {
     harness = undefined;
   });
 
-  it("does not nudge an approval input", async () => {
+  /** Sends what a row sends, and answers with the conversations that a turn ran in. */
+  type Start = (harness: TestHarness, root: Conversation) => Promise<ConversationId[]>;
+  const fromUser =
+    (content: string, attrs?: Record<string, string>): Start =>
+    async (h, root) => {
+      await userSays(h, root, content, attrs);
+      return [root.id];
+    };
+  const fromElsewhere =
+    (src: "operator" | "agent", content: string, attrs: Record<string, string>): Start =>
+    async (h, root) => {
+      await otherSays(h, root, src, content, attrs);
+      return [root.id];
+    };
+  /** A note from an agent to the root and to a focused chat. */
+  const agentNotes: Start = async (h, root) => {
+    await otherSays(h, root, "agent", "The report is published.", { from: "root", kind: "note" });
+    const chat = await openChat(h, "예시 주제");
+    const conversation = await conversationOf(h, chat.conversationId);
+    await otherSays(h, conversation, "agent", "A note from the root.", { from: "root", kind: "note" });
+    return [root.id, chat.conversationId as ConversationId];
+  };
+
+  // Each row is one old case: its name, the model's reply every time, how the turn starts, and the
+  // requests the model sees. The first two rows are turns the user started, and the answer has text.
+  const NO_NUDGE: readonly [string, () => AssistantMessage, Start, number][] = [
+    [
+      "leaves a turn alone when the line sits inside a sentence, which the screen draws",
+      () => say(`표지는 ${MARKER} 입니다. 잠시 뒤 결과를 알려 드리겠습니다.`),
+      fromUser("다음?"),
+      1,
+    ],
+    ["leaves a turn with text alone", () => say("Step 5: reload sshd."), fromUser("다음?"), 1],
+    [
+      "does not nudge an approval input",
+      quiet,
+      fromUser("Approved.", { via: "approval", approval: "20261027-01M5YBCRMC000000000000JJP9/v1" }),
+      1,
+    ],
+    [
+      "does not nudge a question card's answer",
+      quiet,
+      fromElsewhere("operator", "Yes.", { via: "ask-user", key: "k", mode: "choice" }),
+      1,
+    ],
+    ["does not nudge a turn an agent's message started, in the root or in a focused chat", quiet, agentNotes, 2],
+    [
+      "does not nudge a turn an agent's message started, even when it answers with the line alone",
+      silent,
+      agentNotes,
+      2,
+    ],
+    [
+      "does not nudge a message with no envelope, which no producer writes",
+      quiet,
+      async (_h, root) => {
+        const submission = await root.submit({ type: "input", content: "다음?" }, CTX);
+        await submission.wait(CTX);
+        return [root.id];
+      },
+      1,
+    ],
+  ];
+
+  it.each(NO_NUDGE)("%s", async (_oldCase, reply, start, requests) => {
     harness = await focusedHarness();
-    let requests = 0;
+    let seen = 0;
     harness.faux.setResponses(
       script(() => {
-        requests += 1;
-        return quiet();
+        seen += 1;
+        return reply();
       }),
     );
-    const root = await rootOf(harness);
-    await userSays(harness, root, "Approved.", { via: "approval", approval: "20261027-01M5YBCRMC000000000000JJP9/v1" });
-
-    expect(requests).toBe(1);
-    expect(await nudges(harness, root.id)).toBe(0);
-  });
-
-  it("does not nudge a question card's answer", async () => {
-    harness = await focusedHarness();
-    let requests = 0;
-    harness.faux.setResponses(
-      script(() => {
-        requests += 1;
-        return quiet();
-      }),
-    );
-    const root = await rootOf(harness);
-    await otherSays(harness, root, "operator", "Yes.", { via: "ask-user", key: "k", mode: "choice" });
-
-    expect(requests).toBe(1);
-    expect(await nudges(harness, root.id)).toBe(0);
-  });
-
-  it("does not nudge a turn an agent's message started, in the root or in a focused chat", async () => {
-    harness = await focusedHarness();
-    let requests = 0;
-    harness.faux.setResponses(
-      script(() => {
-        requests += 1;
-        return quiet();
-      }),
-    );
-    const root = await rootOf(harness);
-    await otherSays(harness, root, "agent", "The report is published.", { from: "root", kind: "note" });
-    const chat = await openChat(harness, "예시 주제");
-    const conversation = await conversationOf(harness, chat.conversationId);
-    await otherSays(harness, conversation, "agent", "A note from the root.", { from: "root", kind: "note" });
-
-    expect(requests).toBe(2);
-    expect(await nudges(harness, root.id)).toBe(0);
-    expect(await nudges(harness, chat.conversationId as ConversationId)).toBe(0);
-  });
-
-  it("does not nudge a turn an agent's message started, even when it answers with the line alone", async () => {
-    harness = await focusedHarness();
-    let requests = 0;
-    harness.faux.setResponses(
-      script(() => {
-        requests += 1;
-        return silent();
-      }),
-    );
-    const root = await rootOf(harness);
-    await otherSays(harness, root, "agent", "The report is published.", { from: "root", kind: "note" });
-    const chat = await openChat(harness, "예시 주제");
-    const conversation = await conversationOf(harness, chat.conversationId);
-    await otherSays(harness, conversation, "agent", "A note from the root.", { from: "root", kind: "note" });
-
-    expect(requests).toBe(2);
-    expect(await nudges(harness, root.id)).toBe(0);
-    expect(await nudges(harness, chat.conversationId as ConversationId)).toBe(0);
-  });
-
-  it("does not nudge a message with no envelope, which no producer writes", async () => {
-    harness = await focusedHarness();
-    let requests = 0;
-    harness.faux.setResponses(
-      script(() => {
-        requests += 1;
-        return quiet();
-      }),
-    );
-    const root = await rootOf(harness);
-    const submission = await root.submit({ type: "input", content: "다음?" }, CTX);
-    await submission.wait(CTX);
-
-    expect(requests).toBe(1);
-    expect(await nudges(harness, root.id)).toBe(0);
+    const ids = await start(harness, await rootOf(harness));
+    expect(seen).toBe(requests);
+    for (const id of ids) expect(await nudges(harness, id)).toBe(0);
   });
 });

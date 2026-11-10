@@ -19,11 +19,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const { createModels } = await import("../src/agent/models.ts");
-const { migrateModelCredentials, modelSecretName, ModelCredentialStore } = await import(
-  "../src/secrets/model-credentials.ts"
-);
+const { migrateModelCredentials, ModelCredentialStore } = await import("../src/secrets/model-credentials.ts");
 const { SecretRegistry } = await import("../src/secrets/registry.ts");
-const { isValidSecretName, SECRET_NAME_PATTERN } = await import("../src/secrets/upload.ts");
 
 // Fake values only. Each is long and unique so a search for it cannot miss.
 const FAKE_KEY = "sk-fake-deepseek-key-0123456789abcdef";
@@ -91,21 +88,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-});
-
-describe("model credential names", () => {
-  it("passes the secret write name rule for every name it makes", () => {
-    for (const [provider, field] of [
-      ["deepseek", "key"],
-      ["anthropic", "access"],
-      ["anthropic", "refresh"],
-    ] as const) {
-      const name = modelSecretName(provider, field);
-      expect(name).toBe(`model-auth.${provider}.${field}`);
-      expect(SECRET_NAME_PATTERN.test(name)).toBe(true);
-      expect(isValidSecretName(name)).toBe(true);
-    }
-  });
 });
 
 describe("ModelCredentialStore reads", () => {

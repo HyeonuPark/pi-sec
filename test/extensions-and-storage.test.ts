@@ -15,7 +15,6 @@ import { createRegistry } from "@earendil-works/pi-durable";
 import { ensureDependencyLink, ExtensionLoader } from "../src/registry/loader.ts";
 import type { EventsSink } from "../src/extensions/context.ts";
 import { UI_EVENT_MAX_BYTES, UiRegistry, type UiPublish } from "../src/registry/ui.ts";
-import { CONTROL_EVENTS } from "../src/server/streams.ts";
 import { Janitor } from "../src/runtime/janitor.ts";
 import { isProcessAlive, readPid, writePid } from "../src/runtime/supervisor.ts";
 import { SecretRegistry } from "../src/secrets/registry.ts";
@@ -844,12 +843,6 @@ describe("ui-registry.test.ts", () => {
       const errors = h.ui.diagnostics("rejecting-start")?.errors ?? [];
       expect(errors).toEqual(["ui.start threw: poll failed"]);
       expect(h.loader.list().find((entry) => entry.name === "rejecting-start")?.error).toBeUndefined();
-    });
-  });
-
-  describe("ui_event on the conversation stream", () => {
-    it("is a control event, so the conversation stream carries it", () => {
-      expect(CONTROL_EVENTS.has("ui_event")).toBe(true);
     });
   });
 });

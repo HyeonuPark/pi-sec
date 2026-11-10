@@ -35,21 +35,19 @@ writeFileSync(join(MEMORY, "pi-sec-notes.md"), "# test notes\n");
 afterAll(() => rmSync(MEMORY, { recursive: true, force: true }));
 
 describe("touchesUserRecord", () => {
-  it("covers the record and its split directory", () => {
-    expect(touchesUserRecord(`${MEMORY}/${USER_RECORD_FILE}`, MEMORY)).toBe(true);
-    expect(touchesUserRecord(`${MEMORY}/${USER_RECORD_DIRECTORY}/devices.md`, MEMORY)).toBe(true);
-  });
+  // Each row is one old case: its name, the verdict, and the paths it checked.
+  const TOUCHES: readonly [string, boolean, string[]][] = [
+    ["covers the record and its split directory", true, [`${MEMORY}/${USER_RECORD_FILE}`, `${MEMORY}/${USER_RECORD_DIRECTORY}/devices.md`]],
+    ["covers a path by name, wherever it resolves", true, [USER_RECORD_FILE, `memory/${USER_RECORD_FILE}`, `/tmp/x/${USER_RECORD_FILE}`]],
+    [
+      "leaves the other memory files alone",
+      false,
+      [`${MEMORY}/operator-preferences.md`, `${MEMORY}/pi-sec-notes.md`, `${MEMORY}/${USER_RECORD_DIRECTORY}-old.md`],
+    ],
+  ];
 
-  it("covers a path by name, wherever it resolves", () => {
-    expect(touchesUserRecord(USER_RECORD_FILE, MEMORY)).toBe(true);
-    expect(touchesUserRecord(`memory/${USER_RECORD_FILE}`, MEMORY)).toBe(true);
-    expect(touchesUserRecord(`/tmp/x/${USER_RECORD_FILE}`, MEMORY)).toBe(true);
-  });
-
-  it("leaves the other memory files alone", () => {
-    expect(touchesUserRecord(`${MEMORY}/operator-preferences.md`, MEMORY)).toBe(false);
-    expect(touchesUserRecord(`${MEMORY}/pi-sec-notes.md`, MEMORY)).toBe(false);
-    expect(touchesUserRecord(`${MEMORY}/${USER_RECORD_DIRECTORY}-old.md`, MEMORY)).toBe(false);
+  it.each(TOUCHES)("%s", (_name, expected, paths) => {
+    for (const path of paths) expect(touchesUserRecord(path, MEMORY), path).toBe(expected);
   });
 });
 

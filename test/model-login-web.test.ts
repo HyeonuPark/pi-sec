@@ -29,6 +29,7 @@ import { ProviderRegistry, preloadExtensionProviders } from "../src/registry/pro
 import { createAuditLog } from "../src/runtime/audit.ts";
 import { createEventBus } from "../src/runtime/event-bus.ts";
 import { createLogger } from "../src/runtime/logger.ts";
+import { readOrCreateDeviceId } from "../src/runtime/model-login.ts";
 import { AdminNotes } from "../src/runtime/notes.ts";
 import { buildPaths, ensureLayout, type Paths } from "../src/runtime/paths.ts";
 import { SecretRegistry } from "../src/secrets/registry.ts";
@@ -766,41 +767,24 @@ describe("signing a provider in from the web UI", () => {
   });
 
   it("keeps one installation ID across logins and across a runtime on the same state", async () => {
-    const log = newDeviceIdLog();
-    const app = await boot({ deviceIdLog: log });
-    const file = join(app.paths.stateDir, DEVICE_ID_FILE);
-    let id = "";
-    let written = "";
-    let stamp = 0;
-    try {
-      expect((await startDeviceLogin(app)).status).toBe("succeeded");
-      id = log.ids[0] as string;
-      written = await readFile(file, "utf8");
-      // A rewrite would give the file a new time, so the test gives it an old
-      // one and looks for that time after the next login.
-      const past = new Date(Date.now() - 60_000);
-      await utimes(file, past, past);
-      stamp = (await stat(file)).mtimeMs;
+    // The rule lives in the function that every login and every runtime calls on the same file,
+    // so the case calls it three times. The manager passing it to the flow is the wiring case above.
+    const root = await mkdtemp(join(tmpdir(), "pi-sec-device-id-"));
+    roots.push(root);
+    const file = join(root, DEVICE_ID_FILE);
+    const id = readOrCreateDeviceId(file);
+    const written = await readFile(file, "utf8");
+    // A rewrite would give the file a new time, so the test gives it an old
+    // one and looks for that time after the next call.
+    const past = new Date(Date.now() - 60_000);
+    await utimes(file, past, past);
+    const stamp = (await stat(file)).mtimeMs;
 
-      expect((await startDeviceLogin(app)).status).toBe("succeeded");
-      expect(log.ids).toEqual([id, id]);
-      expect(await readFile(file, "utf8")).toBe(written);
-      expect((await stat(file)).mtimeMs).toBe(stamp);
-    } finally {
-      await app.close();
-    }
-
-    // A new runtime over the same home, which is what a daemon restart leaves.
-    const restarted = newDeviceIdLog();
-    const again = await boot({ deviceIdLog: restarted, root: app.root });
-    try {
-      expect((await startDeviceLogin(again)).status).toBe("succeeded");
-      expect(restarted.ids).toEqual([id]);
-      expect(await readFile(file, "utf8")).toBe(written);
-      expect((await stat(file)).mtimeMs).toBe(stamp);
-    } finally {
-      await again.close();
-    }
+    // A second login, and a new runtime over the same home, which is what a daemon restart leaves.
+    expect(readOrCreateDeviceId(file)).toBe(id);
+    expect(readOrCreateDeviceId(file)).toBe(id);
+    expect(await readFile(file, "utf8")).toBe(written);
+    expect((await stat(file)).mtimeMs).toBe(stamp);
   });
 
   it("fails a login that needs the ID when the file holds no UUID, and leaves the file as it is", async () => {

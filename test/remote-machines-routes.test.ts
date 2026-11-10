@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { CONTROL_EVENTS } from "../src/server/streams.ts";
 import { SseHub } from "../src/server/sse.ts";
 import { StreamHub } from "../src/server/streams.ts";
 import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
@@ -9,13 +8,13 @@ import { defaultConfig } from "../src/config/schema.ts";
 import { createRemoteFixture, type RemoteFixture } from "./remote-helpers.ts";
 
 /**
- * The two routes, and the one frame.
+ * The two routes.
  *
  * The list is read-only and answers with a shape the panel draws. The write route
  * refuses three things before it touches anything: a body that is not JSON, a level
  * that is not one of the three words, and a machine the config does not name. The
- * fourth case is the frame an open page listens for, which has to be in the set
- * `src/server/streams.ts` keeps, or the server silently drops it.
+ * frame an open page listens for is pinned with the other control events in
+ * stream-entries.test.ts.
  */
 
 let fixture: RemoteFixture | undefined;
@@ -147,17 +146,5 @@ describe("POST /api/remote-machines/:id/level", () => {
     const after = events.seen.length;
     await post(origin, "/api/remote-machines/box-a/level", { level: "on" });
     expect(events.seen.length).toBe(after);
-  });
-});
-
-describe("the stream", () => {
-  it("carries remote_machine_updated in the control-event set", () => {
-    // A frame a page needs but this set omits is dropped by the server and nothing
-    // else notices, so the name is pinned here.
-    expect(CONTROL_EVENTS.has("remote_machine_updated")).toBe(true);
-    // The panel must not refresh on this one: the admin reload route emits it
-    // before it replaces the config, so a page listening to it would read the
-    // config that is about to go away.
-    expect(CONTROL_EVENTS.has("extension_reloaded")).toBe(true);
   });
 });

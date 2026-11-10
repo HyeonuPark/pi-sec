@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { buildSetupModelPlan, writeSetupModel } from "../src/config/write.ts";
 import { buildPaths, ensureLayout, type Paths } from "../src/runtime/paths.ts";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
@@ -92,6 +93,14 @@ function runCli(sb: Sandbox, args: readonly string[]): Run {
 function lines(stdout: string): string[] {
   return stdout.split("\n").filter((line) => line !== "");
 }
+
+/** The plan the CLI builds for `--provider acme --model acme-fake-chat`. */
+const DEFAULT_PLAN = buildSetupModelPlan({
+  provider: "acme",
+  modelId: "acme-fake-chat",
+  thinking: "medium",
+  force: false,
+});
 
 const ROOT_KEY = { provider: "acme", modelId: "acme-fake-chat", thinkingLevel: "medium", prompt: "default" };
 
@@ -180,14 +189,13 @@ describe("pi-sec setup-model", () => {
 
   it("keeps a role list that is not empty", async () => {
     const sb = await sandbox();
-    await writeProviders(sb);
     await writeFile(
       sb.paths.configFile,
       `${JSON.stringify({ agent: { vmodel: "", roles: ["root", "orchestrator"] } }, null, 2)}\n`,
       { mode: 0o600 },
     );
-    const run = runCli(sb, ["setup-model", "--provider", "acme", "--model", "acme-fake-chat"]);
-    expect(run.status, run.stderr).toBe(0);
+    // The role list is decided by the write, so this case calls it directly. The CLI success run is the first case.
+    expect(await writeSetupModel(sb.paths.configFile, DEFAULT_PLAN)).toMatchObject({ status: "written" });
     const written = JSON.parse(await readFile(sb.paths.configFile, "utf8")) as Record<string, any>;
     expect(written["agent"]).toEqual({ vmodel: "root", roles: ["root", "orchestrator"] });
   }, 60_000);
@@ -208,7 +216,8 @@ describe("pi-sec setup-model", () => {
   it("refuses to overwrite an existing vmodel without --force, and overwrites with it", async () => {
     const sb = await sandbox();
     await writeProviders(sb);
-    expect(runCli(sb, ["setup-model", "--provider", "acme", "--model", "acme-fake-chat"]).status).toBe(0);
+    // The first write only prepares the file, so it is a direct call. The refusal and the --force run stay on the CLI.
+    expect(await writeSetupModel(sb.paths.configFile, DEFAULT_PLAN)).toMatchObject({ status: "written" });
     const written = await readFile(sb.paths.configFile, "utf8");
 
     const refused = runCli(sb, ["setup-model", "--provider", "acme-native", "--model", "acme-native-chat"]);

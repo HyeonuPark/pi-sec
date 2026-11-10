@@ -11,7 +11,7 @@ import {
 import { AdminNotes } from "../src/runtime/notes.ts";
 import { defaultConfig } from "../src/config/schema.ts";
 import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
+import { CONTROL_EVENTS, StreamHub } from "../src/server/streams.ts";
 import { slimAgentEvent, slimEntries, slimEntry, slimSnapshot } from "../src/server/stream-entries.ts";
 import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
 import type { AppDeps } from "../src/server/deps.ts";
@@ -596,5 +596,14 @@ describe("the conversation stream", () => {
     expect(text).not.toContain("thinkingSignature");
     expect(text).not.toContain('"sections"');
     controller.abort();
+  });
+});
+
+describe("the control events", () => {
+  // A frame a page needs but this set omits is dropped by the server and nothing else notices, so the names are pinned.
+  // The Machines panel must not refresh on `extension_reloaded`: the admin reload route emits it before it replaces the
+  // config, so a page listening to it would read the config that is about to go away.
+  it.each(["remote_machine_updated", "extension_reloaded", "ui_event", "preferences_updated"])("carries %s", (name) => {
+    expect(CONTROL_EVENTS.has(name)).toBe(true);
   });
 });

@@ -374,118 +374,90 @@ describe("personality and language-rule sections", () => {
     expect(orchestratorHead).not.toContain("<personality>");
   });
 
-  it("reads the document's front matter, and English when it names no language", () => {
-    const named = parsePersonality("---\nlanguage: ko\n---\n# 제목\n\n본문\n");
-    expect(named).toEqual({ language: "ko", languageNamed: true, body: "# 제목\n\n본문" });
+  // The four old cases, by name. Each row below carries the one it came from.
+  const FRONT_MATTER = "reads the document's front matter, and English when it names no language";
+  const NAME_LINE_READ = "reads the name line in a front matter of one, two or three key lines";
+  const MIDDLE_LINE = "strips a three-line block whose middle line it does not read";
+  const NAME_LINE_WRITTEN = "writes the name line only when it is given, and never inside the body";
+  const KO = { language: "ko", languageNamed: true } as const;
+  const EN = { language: "en", languageNamed: false } as const;
 
+  // Input, then what parsePersonality answers. A block that is not front matter keeps its whole text as the body.
+  // The three-line block of the second old case is the first row: the same input and result.
+  const PARSE_ROWS: readonly [string, string, object | undefined][] = [
+    [FRONT_MATTER, "---\nlanguage: ko\n---\n# 제목\n\n본문\n", { ...KO, body: "# 제목\n\n본문" }],
     // No front matter, an unknown language, and a block that is not three lines:
     // all of them are English, and each keeps its whole text as the body.
-    for (const text of ["# 제목\n\n본문\n", "---\nlanguage: fr\n---\n# 제목\n\n본문\n"]) {
-      expect(parsePersonality(text)).toEqual({ language: "en", languageNamed: false, body: "# 제목\n\n본문" });
-    }
-    expect(parsePersonality("---\nlanguage: ko\n# 제목\n\n본문\n")).toEqual({
-      language: "en",
-      languageNamed: false,
-      body: "---\nlanguage: ko\n# 제목\n\n본문",
-    });
-
+    [FRONT_MATTER, "# 제목\n\n본문\n", { ...EN, body: "# 제목\n\n본문" }],
+    [FRONT_MATTER, "---\nlanguage: fr\n---\n# 제목\n\n본문\n", { ...EN, body: "# 제목\n\n본문" }],
+    [FRONT_MATTER, "---\nlanguage: ko\n# 제목\n\n본문\n", { ...EN, body: "---\nlanguage: ko\n# 제목\n\n본문" }],
     // A document that is only whitespace reads as none at all.
-    expect(parsePersonality("---\nlanguage: ko\n---\n\n")).toBeUndefined();
-    expect(parsePersonality("\n\n")).toBeUndefined();
-
-    // The file form is the front matter and the body, and it reads back the same.
-    expect(renderPersonalityFile("ko", "# 제목")).toBe("---\nlanguage: ko\n---\n# 제목\n");
-    expect(parsePersonality(renderPersonalityFile("en", "# Title"))?.body).toBe("# Title");
-
-    // A pasted document drops its own front matter; the argument decides.
-    expect(personalityBodyOf("---\nlanguage: ko\n---\n# Title\n")).toBe("# Title");
-    expect(personalityBodyOf("# Title\n")).toBe("# Title");
-  });
-
-  it("reads the name line in a front matter of one, two or three key lines", () => {
-    // Three lines, as this release wrote them before the name line existed.
-    expect(parsePersonality("---\nlanguage: ko\n---\n# 제목\n\n본문\n")).toEqual({
-      language: "ko",
-      languageNamed: true,
-      body: "# 제목\n\n본문",
-    });
-
+    [FRONT_MATTER, "---\nlanguage: ko\n---\n\n", undefined],
+    [FRONT_MATTER, "\n\n", undefined],
     // Four lines, in both key orders.
-    for (const keys of ["language: ko\nname: 테스트봇", "name: 테스트봇\nlanguage: ko"]) {
-      expect(parsePersonality(`---\n${keys}\n---\n# 제목\n\n본문\n`)).toEqual({
-        language: "ko",
-        languageNamed: true,
-        name: "테스트봇",
-        body: "# 제목\n\n본문",
-      });
-    }
-
+    [NAME_LINE_READ, "---\nlanguage: ko\nname: 테스트봇\n---\n# 제목\n\n본문\n", { ...KO, name: "테스트봇", body: "# 제목\n\n본문" }],
+    [NAME_LINE_READ, "---\nname: 테스트봇\nlanguage: ko\n---\n# 제목\n\n본문\n", { ...KO, name: "테스트봇", body: "# 제목\n\n본문" }],
     // A front matter that names only the name reads the language as English.
-    expect(parsePersonality("---\nname: 테스트봇\n---\n# 제목\n\n본문\n")).toEqual({
-      language: "en",
-      languageNamed: false,
-      name: "테스트봇",
-      body: "# 제목\n\n본문",
-    });
-
+    [NAME_LINE_READ, "---\nname: 테스트봇\n---\n# 제목\n\n본문\n", { ...EN, name: "테스트봇", body: "# 제목\n\n본문" }],
     // The value is trimmed, and an empty value is no name at all.
-    expect(parsePersonality("---\nlanguage: ko\nname:   테스트봇  \n---\n# 제목\n")?.name).toBe("테스트봇");
-    expect(parsePersonality("---\nlanguage: ko\nname:\n---\n# 제목\n")).toEqual({
-      language: "ko",
-      languageNamed: true,
-      body: "# 제목",
-    });
-
+    [NAME_LINE_READ, "---\nlanguage: ko\nname:   테스트봇  \n---\n# 제목\n", { ...KO, name: "테스트봇", body: "# 제목" }],
+    [NAME_LINE_READ, "---\nlanguage: ko\nname:\n---\n# 제목\n", { ...KO, body: "# 제목" }],
     // A key line this release does not read makes the whole block text, as it
     // was before the name line existed: the file is never half understood.
-    expect(parsePersonality("---\nversion: 2\nlanguage: ko\n---\n# 제목\n")).toEqual({
-      language: "en",
-      languageNamed: false,
-      body: "---\nversion: 2\nlanguage: ko\n---\n# 제목",
-    });
-    expect(parsePersonality("---\nlanguage: ko\nname: 이해\nname: 다른이름\n---\n# 제목\n")?.languageNamed).toBe(false);
-  });
-
-  it("strips a three-line block whose middle line it does not read", () => {
+    [NAME_LINE_READ, "---\nversion: 2\nlanguage: ko\n---\n# 제목\n", { ...EN, body: "---\nversion: 2\nlanguage: ko\n---\n# 제목" }],
+    [
+      NAME_LINE_READ,
+      "---\nlanguage: ko\nname: 이해\nname: 다른이름\n---\n# 제목\n",
+      { ...EN, body: "---\nlanguage: ko\nname: 이해\nname: 다른이름\n---\n# 제목" },
+    ],
     // A three-line block was front matter before the name line existed, whatever
     // its middle line said: the marker pair decided it, and a line this release
     // does not read leaves the language at English. A file written then must
     // read as it read then.
-    expect(parsePersonality("---\nfoo: bar\n---\n# Doc\n\nBody\n")).toEqual({
-      language: "en",
-      languageNamed: false,
-      body: "# Doc\n\nBody",
-    });
+    [MIDDLE_LINE, "---\nfoo: bar\n---\n# Doc\n\nBody\n", { ...EN, body: "# Doc\n\nBody" }],
     // A `language` line with no value is no language, and the block is still
     // stripped: the value is what a person omits, not the line.
-    expect(parsePersonality("---\nlanguage:\n---\n# Doc\n")).toEqual({
-      language: "en",
-      languageNamed: false,
-      body: "# Doc",
-    });
+    [MIDDLE_LINE, "---\nlanguage:\n---\n# Doc\n", { ...EN, body: "# Doc" }],
+  ];
 
-    // The body a caller registers drops the same block, so those three lines can
-    // never be written into the body of the next document.
-    expect(personalityBodyOf("---\nfoo: bar\n---\n# Doc\n")).toBe("# Doc");
-    expect(personalityBodyOf("---\nlanguage:\n---\n# Doc\n")).toBe("# Doc");
+  // Language, body and name given to renderPersonalityFile, then the file it writes. The name line is written only when given.
+  const RENDER_ROWS: readonly [string, ["ko" | "en", string, string?], string][] = [
+    [FRONT_MATTER, ["ko", "# 제목"], "---\nlanguage: ko\n---\n# 제목\n"],
+    [NAME_LINE_WRITTEN, ["ko", "# 제목", "테스트봇"], "---\nlanguage: ko\nname: 테스트봇\n---\n# 제목\n"],
+    // An empty name is no name: the file keeps the three-line front matter.
+    [NAME_LINE_WRITTEN, ["ko", "# 제목", ""], "---\nlanguage: ko\n---\n# 제목\n"],
+  ];
+
+  // A pasted document drops its own front matter, whatever its lines, so none of them
+  // can be written into the body of the next document.
+  const BODY_ROWS: readonly [string, string, string][] = [
+    [FRONT_MATTER, "---\nlanguage: ko\n---\n# Title\n", "# Title"],
+    [FRONT_MATTER, "# Title\n", "# Title"],
+    [MIDDLE_LINE, "---\nfoo: bar\n---\n# Doc\n", "# Doc"],
+    [MIDDLE_LINE, "---\nlanguage:\n---\n# Doc\n", "# Doc"],
+    [NAME_LINE_WRITTEN, "---\nlanguage: ko\nname: 테스트봇\n---\n# 제목\n", "# 제목"],
+  ];
+
+  it("reads the front matter, the name line and the lines it does not read", () => {
+    for (const [oldCase, text, expected] of PARSE_ROWS) {
+      expect(parsePersonality(text), `${oldCase}: ${JSON.stringify(text)}`).toEqual(expected);
+    }
   });
 
-  it("writes the name line only when it is given, and never inside the body", () => {
-    expect(renderPersonalityFile("ko", "# 제목")).toBe("---\nlanguage: ko\n---\n# 제목\n");
-    expect(renderPersonalityFile("ko", "# 제목", "테스트봇")).toBe("---\nlanguage: ko\nname: 테스트봇\n---\n# 제목\n");
-    // An empty name is no name: the file keeps the three-line front matter.
-    expect(renderPersonalityFile("ko", "# 제목", "")).toBe("---\nlanguage: ko\n---\n# 제목\n");
-
+  it("writes the file form, and it reads back the same", () => {
+    for (const [oldCase, args, file] of RENDER_ROWS) expect(renderPersonalityFile(...args), oldCase).toBe(file);
+    // The file form reads back the same.
+    expect(parsePersonality(renderPersonalityFile("en", "# Title"))).toEqual({ language: "en", languageNamed: true, body: "# Title" });
     expect(parsePersonality(renderPersonalityFile("en", "# Title", "Alice"))).toEqual({
       language: "en",
       languageNamed: true,
       name: "Alice",
       body: "# Title",
     });
+  });
 
-    // A pasted document drops a four-line front matter as well, so a name line
-    // can never be written into the body of the next document.
-    expect(personalityBodyOf("---\nlanguage: ko\nname: 테스트봇\n---\n# 제목\n")).toBe("# 제목");
+  it("drops the front matter of a pasted document", () => {
+    for (const [oldCase, text, body] of BODY_ROWS) expect(personalityBodyOf(text), `${oldCase}: ${JSON.stringify(text)}`).toBe(body);
   });
 
   it("resolves the file under the home, or wherever an absolute path points", () => {
@@ -560,62 +532,54 @@ describe("the design interview", () => {
     expect(interviewLanguage([])).toBe("en");
   });
 
-  it("does not run once a personality is registered", async () => {
-    harness = await createTestHarness();
-    await writePersonality(harness, DOCUMENTS[1]!.text);
-    const root = await resolveDefaultConversation(
-      harness.runtime.harness,
-      harness.config,
-      harness.runtime.paths,
-      CTX,
-    );
-    const messages = await firstRequest(harness, root, "안녕하세요");
+  const rootOf = (test: TestHarness) =>
+    resolveDefaultConversation(test.runtime.harness, test.config, test.runtime.paths, CTX);
 
-    expect(systemText(messages)).not.toContain(MARKERS.en);
-    expect(systemText(messages)).not.toContain(MARKERS.ko);
-  });
+  // Each row is one old case: its name, the harness config, and a run that answers with the
+  // system text of every request it made.
+  const NEVER_RUNS: readonly [string, Partial<Config> | undefined, (test: TestHarness) => Promise<string[]>][] = [
+    [
+      "does not run once a personality is registered",
+      undefined,
+      async (test) => {
+        await writePersonality(test, DOCUMENTS[1]!.text);
+        return [systemText(await firstRequest(test, await rootOf(test), "안녕하세요"))];
+      },
+    ],
+    [
+      "does not run once the conversation has an answer in it",
+      undefined,
+      async (test) => {
+        const root = await rootOf(test);
+        await firstRequest(test, root, "hello");
+        return [systemText(await firstRequest(test, root, "hello again"))];
+      },
+    ],
+    [
+      "does not run when the interview is switched off",
+      NO_INTERVIEW,
+      async (test) => [systemText(await firstRequest(test, await rootOf(test), "hello"))],
+    ],
+    [
+      "never runs in a subagent or a scheduled run",
+      undefined,
+      async (test) => {
+        const subagent = await makeAgent(test, "subagent", ["worker"]);
+        const scheduled = await makeAgent(test, "scheduled", []);
+        return [
+          systemText(await firstRequest(test, subagent, "안녕하세요", { park: true })),
+          systemText(await firstRequest(test, scheduled, "안녕하세요")),
+        ];
+      },
+    ],
+  ];
 
-  it("does not run once the conversation has an answer in it", async () => {
-    harness = await createTestHarness();
-    const root = await resolveDefaultConversation(
-      harness.runtime.harness,
-      harness.config,
-      harness.runtime.paths,
-      CTX,
-    );
-    await firstRequest(harness, root, "hello");
-    const messages = await firstRequest(harness, root, "hello again");
-
-    expect(systemText(messages)).not.toContain(MARKERS.en);
-    expect(systemText(messages)).not.toContain(MARKERS.ko);
-  });
-
-  it("does not run when the interview is switched off", async () => {
-    harness = await createTestHarness({ config: NO_INTERVIEW });
-    const root = await resolveDefaultConversation(
-      harness.runtime.harness,
-      harness.config,
-      harness.runtime.paths,
-      CTX,
-    );
-    const messages = await firstRequest(harness, root, "hello");
-
-    expect(systemText(messages)).not.toContain(MARKERS.en);
-    expect(systemText(messages)).not.toContain(MARKERS.ko);
-  });
-
-  it("never runs in a subagent or a scheduled run", async () => {
-    harness = await createTestHarness();
-    const subagent = await makeAgent(harness, "subagent", ["worker"]);
-    const scheduled = await makeAgent(harness, "scheduled", []);
-
-    const subagentText = systemText(await firstRequest(harness, subagent, "안녕하세요", { park: true }));
-    const scheduledText = systemText(await firstRequest(harness, scheduled, "안녕하세요"));
-
-    expect(subagentText).not.toContain(MARKERS.en);
-    expect(subagentText).not.toContain(MARKERS.ko);
-    expect(scheduledText).not.toContain(MARKERS.en);
-    expect(scheduledText).not.toContain(MARKERS.ko);
+  it.each(NEVER_RUNS)("%s", async (_oldCase, config, run) => {
+    harness = await createTestHarness(config === undefined ? undefined : { config });
+    for (const text of await run(harness)) {
+      expect(text).not.toContain(MARKERS.en);
+      expect(text).not.toContain(MARKERS.ko);
+    }
   });
 });
 
@@ -659,39 +623,30 @@ describe("the personality tools", () => {
     await expect(readFile(personalityFile(harness), "utf8")).rejects.toThrow();
   });
 
-  it("refuses a call with no language, or one outside the two", async () => {
+  const PERSONA = "# Persona\n\nWarm.";
+  const LANGUAGE = 'Refused: `language` must be "en" or "ko"';
+  const NO_LANGUAGE_OR_WRONG = "refuses a call with no language, or one outside the two";
+  const OLD_CHECKS = "keeps the old document checks";
+  const NAME_LIMITS = "refuses a name with a line break, and one over 40 characters";
+  // Each row is one old call: the old case, what is wrong, the arguments of personality_set, and the sentence that refuses it.
+  const BAD_CALLS: readonly [string, string, Record<string, unknown>, string][] = [
+    [NO_LANGUAGE_OR_WRONG, "no language", { content: PERSONA }, LANGUAGE],
+    [NO_LANGUAGE_OR_WRONG, "a language outside the two", { content: PERSONA, language: "fr" }, LANGUAGE],
+    [OLD_CHECKS, "an empty document", { content: "  ", language: "en" }, "Refused: the personality document is empty."],
+    [OLD_CHECKS, "a document over the limit", { content: `# Persona\n\n${"x".repeat(8001)}`, language: "en" }, "is over the 8000 limit"],
+    [OLD_CHECKS, "a document with no heading", { content: "Warm and plain, with no title.", language: "en" }, "Refused: no markdown heading found."],
+    [NAME_LIMITS, "a name with a line break", { content: PERSONA, language: "en", name: "one\ntwo" }, "Refused: `name` must be on one line"],
+    [NAME_LIMITS, "a name over 40 characters", { content: PERSONA, language: "en", name: "가".repeat(41) }, "`name` is 41 characters, over the 40 limit"],
+  ];
+
+  it("refuses a bad call, and a refused call writes nothing", async () => {
     harness = await createTestHarness();
     const conversation = await root(harness);
-
-    const missing = await toolResultOf(harness, conversation, "personality_set", { content: "# Persona\n\nWarm." });
-    expect(missing).toContain('Refused: `language` must be "en" or "ko"');
-
-    const wrong = await toolResultOf(harness, conversation, "personality_set", {
-      content: "# Persona\n\nWarm.",
-      language: "fr",
-    });
-    expect(wrong).toContain('Refused: `language` must be "en" or "ko"');
+    for (const [oldCase, wrong, args, text] of BAD_CALLS) {
+      expect(await toolResultOf(harness, conversation, "personality_set", args), `${oldCase}: ${wrong}`).toContain(text);
+    }
+    // The refused calls wrote nothing.
     await expect(readFile(personalityFile(harness), "utf8")).rejects.toThrow();
-  });
-
-  it("keeps the old document checks", async () => {
-    harness = await createTestHarness();
-    const conversation = await root(harness);
-
-    const empty = await toolResultOf(harness, conversation, "personality_set", { content: "  ", language: "en" });
-    expect(empty).toContain("Refused: the personality document is empty.");
-
-    const long = await toolResultOf(harness, conversation, "personality_set", {
-      content: `# Persona\n\n${"x".repeat(8001)}`,
-      language: "en",
-    });
-    expect(long).toContain("is over the 8000 limit");
-
-    const headingless = await toolResultOf(harness, conversation, "personality_set", {
-      content: "Warm and plain, with no title.",
-      language: "en",
-    });
-    expect(headingless).toContain("Refused: no markdown heading found.");
   });
 
   it("writes the front matter, and answers differently the first time", async () => {
@@ -793,30 +748,11 @@ describe("the personality tools", () => {
     expect(trimmed).toContain("name 테스트봇");
   });
 
-  it("refuses a name with a line break, and one over 40 characters", async () => {
-    harness = await createTestHarness();
-    const conversation = await root(harness);
-    const path = personalityFile(harness);
-
-    const broken = await toolResultOf(harness, conversation, "personality_set", {
-      content: "# Persona\n\nWarm.",
-      language: "en",
-      name: "one\ntwo",
-    });
-    expect(broken).toContain("Refused: `name` must be on one line");
-
-    const long = await toolResultOf(harness, conversation, "personality_set", {
-      content: "# Persona\n\nWarm.",
-      language: "en",
-      name: "가".repeat(41),
-    });
-    expect(long).toContain("`name` is 41 characters, over the 40 limit");
-    // Both refused calls wrote nothing.
-    await expect(readFile(path, "utf8")).rejects.toThrow();
-
+  it("counts the name limit in code points, so 40 Korean letters are accepted", async () => {
     // The limit counts code points, not bytes: 40 Korean letters are accepted.
-    const accepted = await toolResultOf(harness, conversation, "personality_set", {
-      content: "# Persona\n\nWarm.",
+    harness = await createTestHarness();
+    const accepted = await toolResultOf(harness, await root(harness), "personality_set", {
+      content: PERSONA,
       language: "en",
       name: "가".repeat(40),
     });
