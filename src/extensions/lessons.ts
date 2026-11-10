@@ -40,7 +40,7 @@ import { ulid } from "../runtime/ids.ts";
 import { scanDocumentKeys } from "../runtime/storage.ts";
 import type { Redactor } from "../secrets/redact.ts";
 import { requireHarness, type ExtensionContext } from "./context.ts";
-import { resolveWorkspacePath } from "./self-edit.ts";
+import { resolveWorkspacePathReal } from "./self-edit.ts";
 import { withLocal, zoneIso } from "../time-format.ts";
 
 /**
@@ -2020,7 +2020,7 @@ export async function importLessons(
 /**
  * Read one import file from the workspace tree, refusing anything outside it.
  *
- * The boundary is the same one `self_edit` enforces (`resolveWorkspacePath`), and
+ * The boundary is the same one `self_edit` enforces (`resolveWorkspacePathReal`), and
  * the size cap is what bounds a file-driven write when the item cap and the
  * statement cap are not enough on their own.
  */
@@ -2030,7 +2030,7 @@ export async function readImportFile(
 ): Promise<{ readonly ok: true; readonly items: readonly unknown[] } | { readonly ok: false; readonly reason: string }> {
   let absolute: string;
   try {
-    absolute = resolveWorkspacePath(workspaceRoot, path);
+    absolute = await resolveWorkspacePathReal(workspaceRoot, path);
   } catch {
     return { ok: false, reason: `refused: ${path} is outside the workspace tree (${workspaceRoot})` };
   }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import {
   defineExtension,
   defineTool,
@@ -36,6 +36,47 @@ export function resolveWorkspacePath(root: string, candidate: string): string {
   const abs = resolve(root, candidate);
   const rootResolved = resolve(root);
   if (abs !== rootResolved && !abs.startsWith(rootResolved + sep)) {
+    throw new WorkspaceBoundaryError(candidate, root);
+  }
+  return abs;
+}
+
+/**
+ * `resolveWorkspacePath`, and then the same check on real paths.
+ *
+ * The text check cannot see a symbolic link. This one resolves the root and the
+ * nearest existing part of the target with `realpath`, and refuses the path when
+ * that real path lies outside the real root. A link that stays inside the tree is
+ * allowed, and so is a new file in a directory that does not exist yet.
+ */
+export async function resolveWorkspacePathReal(root: string, candidate: string): Promise<string> {
+  const abs = resolveWorkspacePath(root, candidate);
+  const realRoot = await realpath(resolve(root));
+  let existing = abs;
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      existing = await realpath(existing);
+      break;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") {
+        // A dangling link or a loop is not a path to write through.
+        if (code === "ELOOP") throw new WorkspaceBoundaryError(candidate, root);
+        throw error;
+      }
+      // A link whose target does not exist would be created through by a write.
+      if ((await lstat(existing).catch(() => undefined))?.isSymbolicLink() === true) {
+        throw new WorkspaceBoundaryError(candidate, root);
+      }
+      const parent = dirname(existing);
+      if (parent === existing) throw new WorkspaceBoundaryError(candidate, root);
+      missing.unshift(existing.slice(parent.length + 1));
+      existing = parent;
+    }
+  }
+  const real = join(existing, ...missing);
+  if (real !== realRoot && !real.startsWith(realRoot + sep)) {
     throw new WorkspaceBoundaryError(candidate, root);
   }
   return abs;
@@ -864,7 +905,7 @@ export function createSelfEditExtension(context: ExtensionContext): Extension<To
   const edit = defineTool({
     name: "self_edit",
     description:
-      "Write or patch a file in the workspace (modification) tree. Never executed by the running process; a core change needs a cold restart.",
+      "Write or patch a file in the workspace (modification) tree. Never executed by the running process; a core change needs a cold restart. Without kind, the write counts as a core change.",
     parameters: obj(
       {
         path: str(),
@@ -878,6 +919,14 @@ export function createSelfEditExtension(context: ExtensionContext): Extension<To
     replay: "unsafe",
     execute: async (args, api, ctx) => {
       const target = resolveWorkspacePath(workspaceRoot, args.path);
+      try {
+        await resolveWorkspacePathReal(workspaceRoot, args.path);
+      } catch (error) {
+        if (error instanceof WorkspaceBoundaryError) {
+          return { output: [{ type: "text" as const, text: `refused: ${error.message}` }], isError: true };
+        }
+        throw error;
+      }
       if (args.content === undefined && (args.oldText === undefined || args.newText === undefined)) {
         return { output: [{ type: "text" as const, text: "provide content, or both oldText and newText" }], isError: true };
       }
@@ -900,11 +949,20 @@ export function createSelfEditExtension(context: ExtensionContext): Extension<To
         return { output: [{ type: "text" as const, text: "refused: the edited file contains a registered secret value" }], isError: true };
       }
 
+      // Checked again right before the write: the tree may have changed since.
+      try {
+        await resolveWorkspacePathReal(workspaceRoot, args.path);
+      } catch (error) {
+        if (error instanceof WorkspaceBoundaryError) {
+          return { output: [{ type: "text" as const, text: `refused: ${error.message}` }], isError: true };
+        }
+        throw error;
+      }
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, next, { encoding: "utf8", mode: 0o600 });
       const rel = relative(workspaceRoot, target);
       const diffHash = createHash("sha256").update(next).digest("hex");
-      const kind = args.kind ?? "runtime-extension";
+      const kind = args.kind ?? "core-change";
       const validation: ValidationResult = { secretsClean };
       await record(api, ctx, {
         title: args.title,

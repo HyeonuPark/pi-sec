@@ -1225,7 +1225,7 @@ document.getElementById("refresh")?.addEventListener("click", async () => {
 | `web` | `fetch_url`; HTML→text; fetched content is external and untrusted. It reads at most 200,000 bytes of the body (the rest of the stream is cancelled), stops after 60 seconds, and ends at once when the tool call is cancelled. It is declared `replay: "unsafe"`, so a call that a daemon restart interrupted is reported as interrupted and is not sent again. | M3 |
 | `expiry-check` | `expiry_check`: reads a JSON expiry registry that the user keeps and reports the entries inside their warning window, measured in the harness timezone. Read-only, no section, no secret. Not in the default enabled list: add the name to `agent.extensions.enabled` once a registry exists. | — |
 | `notify` | Writes `sec.inbox` notification items (and SSE notices). Given a `reportId`, the item becomes a report notice that opens that report in the chat panel, and no revision is written. | M3 |
-| `self-edit` | `self_edit`, `reload_extensions`, `request_restart`, `withdraw_restart`; validation gate; records `sec.candidate` entries for gated changes; promotes a runtime extension to core only with user confirmation; audit. `request_restart` takes a `reportId` and checks it with the routine gate's rule: the report is live, its job has not ended, and the approval names the sha256 of the newest revision. A report archived with its finished job is refused, so a core change cannot be landed without the user's consent to that change. When a child conversation is still working, it sends that child a safe-point note and waits instead of refusing; the argument `allowBusyReason` skips that check with a recorded reason. See [Safe point before the gate](#safe-point). | M4 |
+| `self-edit` | `self_edit`, `reload_extensions`, `request_restart`, `withdraw_restart`; validation gate; records `sec.candidate` entries for gated changes; promotes a runtime extension to core only with user confirmation; audit. `self_edit` writes only inside `code.workspace`: it resolves real paths and refuses a path whose real location is outside the tree, so a symbolic link that leaves the tree is not followed. A call without `kind` counts as a core change. `request_restart` takes a `reportId` and checks it with the routine gate's rule: the report is live, its job has not ended, and the approval names the sha256 of the newest revision. A report archived with its finished job is refused, so a core change cannot be landed without the user's consent to that change. When a child conversation is still working, it sends that child a safe-point note and waits instead of refusing; the argument `allowBusyReason` skips that check with a recorded reason. See [Safe point before the gate](#safe-point). | M4 |
 | `usage` | The `usage` tool, reporting `pi.usage` totals for the session. Deliberately no section: the totals move on every request, and a section that returns a different value each time rewrites the head of the request and loses the provider prefix cache. See `test/agent-and-focused-chats.test.ts`. | M3 |
 | `usage-freeze` | No tools and no section. A provider that refuses a model request for usage (HTTP 429) leaves the run settled `unanswered` and the agent record claiming to be `running`; this extension writes a state that answers that (`held`), keeps the conversation from calling the model while it is held, and sends it again once the provider accepts a request. Recovery is two steps: the provider's own usage numbers say the window has room, and then one short model request to the same provider and model proves it. One such request per provider per ten minutes, counted from the last attempt and stored, so a restart cannot shorten it and ten held conversations cost one request. An input to a held conversation is written to the transcript and starts no run, so the retry after a recovery carries it in the order it arrived. Every provider is covered, including the ones whose usage this server cannot read: those skip the first step and are checked by the short request from the first pass. The hold is `sec.usageHold`, one per conversation, and the probe clock is `sec.usageProbe`, one per provider; neither is a field of `sec.agent`, so a rollback reads the records it knows and never ends the holds. The banner draws `usageHold` from `GET /api/admin/status` (see [http-api.md](./http-api.md)). Audit rows: `usage_held`, `usage_probed`, `usage_retried`, `usage_resumed`. In the default enabled list. See [Held conversations](#usage-freeze-holds). | — |
 | `session-restart` | `restart_session`, `restart_cascade_start`, `restart_cascade_status` and `restart_cascade_close`, and the `session-restart` section that explains them. An agent resets its own conversation with `restart_session` so that it reads a changed prompt; a parent opens a round, counts its children's resets, and closes the round. A restart with no `roundId` is the agent's own, taken because its context grew long: the ledger records the request and opens no round. The extension also reads the size of every answer's request, and a conversation that passes `agent.contextRestart.thresholdTokens` gets one restart advice on its next input. A root or an orchestrator that has been quiet for `agent.contextRestart.idle.minutes` gets a second advice while it rests, without waiting for an input, and `agent.contextRestart.idle.minTokens` keeps it away from a conversation whose context is too small to gain from a restart. The round ledger is under `state/restart/`. The conventions name these tools. In the default enabled list. | — |
@@ -2954,22 +2954,29 @@ exists stays beside the lesson that asked for it.
 
 ```text
 1. Agent decides it needs a capability change.
-2. `self_edit` creates or patches ~/.pi/sec/extensions/<name>/{index.js,config.json}.
-   └─ fail: refuse the write, report the error to the agent. The one check here is
-      the secret scan; it is cheap enough to run on every write.
-3. `reload_extensions` imports, validates config, and registry.install()s it.
-   The import *is* the smoke test: an extension that does not load is reported
-   and the previous instance stays installed.
-4. Emit `extension_reloaded`; audit.
+2. The agent creates or patches ~/.pi/sec/extensions/<name>/{index.js,config.json}
+   with the ordinary file tools (`write`, `edit`). They write a temporary file in
+   the same directory and rename it into place, so the loader never reads half a
+   file. `self_edit` does not reach this directory: it writes only inside
+   code.workspace (the modification tree), and every write it makes counts as a
+   core change. No secret scan runs on this write.
+3. The loader watches the extensions directory and reloads every runtime
+   extension about 250 ms after a file changes. `reload_extensions` runs the same
+   reload on request. The reload imports, validates config, and
+   registry.install()s each extension. The import *is* the smoke test: an
+   extension that does not load is reported and logged as a warning, and the
+   previous instance stays installed.
+4. Only the admin route `POST /api/admin/reload` emits `extension_reloaded`.
+   The watcher and `reload_extensions` emit no event, and no reload path writes
+   an audit entry.
 5. Optionally promote it into core: **ask the user to confirm**, then commit
    the code into code.workspace (the modification tree) as a core candidate and
    `request_restart` for the next cold restart.
 ```
 
 The gate below does **not** run on this path. A runtime extension reaches the
-running process through `reload_extensions`, not through a restart, so
-typechecking and testing the modification tree would say nothing about what is
-now loaded.
+running process through a reload, not through a restart, so typechecking and
+testing the modification tree would say nothing about what is now loaded.
 
 No restart; the capability is usable in the same session.
 

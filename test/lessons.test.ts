@@ -1,6 +1,6 @@
 import { commitWrites } from "@earendil-works/pi-durable/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -1315,6 +1315,20 @@ describe("lesson scan and import", () => {
     const broken = await readImportFile(h.paths.workspaceTree, "broken.json");
     expect(broken.ok).toBe(false);
     expect(broken.ok === false && broken.reason).toContain("not JSON");
+  });
+  it("refuses an import file that is a link to a file outside the workspace tree", async () => {
+    const h = await boot();
+    await mkdir(h.paths.workspaceTree, { recursive: true });
+    const outside = await mkdtemp(join(tmpdir(), "pi-sec-import-outside-"));
+    try {
+      await writeFile(join(outside, "seed.json"), JSON.stringify({ items: [SEED_ITEM] }), "utf8");
+      await symlink(join(outside, "seed.json"), join(h.paths.workspaceTree, "linked.json"));
+      const read = await readImportFile(h.paths.workspaceTree, "linked.json");
+      expect(read.ok).toBe(false);
+      expect(read.ok === false && read.reason).toContain("outside the workspace tree");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
   it("scans entries held in file-backed sqlite storage, not just in memory", async () => {
     // The scan enumerates through `Storage.scanConversations`/`scanEntries`, so it
