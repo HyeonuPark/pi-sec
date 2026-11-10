@@ -15,7 +15,6 @@ import {
   type StorageWrite,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
-import { renderAsyncOutput } from "../src/async-output.ts";
 import { defaultConfig } from "../src/config/schema.ts";
 import { SecLessonCount } from "../src/documents.ts";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";
@@ -1612,7 +1611,7 @@ describe("lesson scan and import", () => {
         model: [
           {
             role: "user",
-            content: renderAsyncOutput({ title: `call-${id}`, tool: "bash", status, body }),
+            content: `<tool-call-output title="call-${id}" tool="bash" status="${status}">\n${body}\n</tool-call-output>`,
             timestamp: at + id,
           },
         ],

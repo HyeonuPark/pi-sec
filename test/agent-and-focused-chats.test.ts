@@ -25,8 +25,6 @@ import { SUBAGENT_TOOL_REMOVALS, FOCUSED_CHAT_TOOLS } from "../src/agent/tool-pr
 import { NO_RESPONSE_MARKER, isSilentAssistantTurn } from "../src/shared/silent-turn.ts";
 import { isSilentAssistantTurn as pageJudgement } from "../src/ui/chat/transcript/envelope.ts";
 import { ENVELOPE_CLOSE, ENVELOPE_OPEN, MESSAGE_SOURCES, escapeBody, encodeAttribute, envelopeInstant, hasEnvelope, readMessage, sourceLabel, unescapeBody, wrapMessage } from "../src/message-envelope.ts";
-import { renderAsyncOutput } from "../src/async-output.ts";
-import { renderAgentMessage } from "../src/agent-message.ts";
 import { reviewInput } from "../src/review.ts";
 import { zoneIso, zoneMinute } from "../src/time-format.ts";
 import { defaultConfig } from "../src/config/schema.ts";
@@ -815,7 +813,8 @@ describe("message-envelope.test.ts", () => {
     });
 
     it("reads a background result as tool output", () => {
-      const text = renderAsyncOutput({ title: "report.build", tool: "js", status: "done", body: "built ok" });
+      // Trailing white space after the body belongs to no one: the reader trims it.
+      const text = '<tool-call-output title="report.build" tool="js" status="done">\nbuilt ok  \n\n</tool-call-output>';
       const read = readMessage(text);
       expect(read?.source).toBe("tool-output");
       expect(read?.format).toBe("legacy");
@@ -826,15 +825,11 @@ describe("message-envelope.test.ts", () => {
     });
 
     it("reads a message from another agent as agent input", () => {
-      const text = renderAgentMessage({
-        from: "root-agent",
-        fromKind: "root",
-        kind: "order",
-        id: "msg-1",
-        replyToken: "abcd1234",
-        at: 1767225600000,
-        body: "do the thing",
-      });
+      const text = [
+        '<agent-message from="root-agent" from-kind="root" kind="order" id="msg-1" at="2026-01-01T00:00:00Z" reply-token="abcd1234">',
+        "do the thing",
+        "</agent-message>",
+      ].join("\n");
       const read = readMessage(text);
       expect(read?.source).toBe("agent");
       expect(read?.format).toBe("legacy");

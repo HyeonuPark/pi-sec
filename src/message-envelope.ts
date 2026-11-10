@@ -103,8 +103,7 @@ export function unescapeBody(text: string): string {
 /**
  * Escape a value that goes inside an attribute, quoted with double quotes.
  *
- * The same rule as `encodeAttribute` in `src/async-output.ts` and
- * `src/agent-message.ts`, so an attribute reads the same whichever tag it is on.
+ * One rule for every tag, so an attribute reads the same whichever tag it is on.
  */
 export function encodeAttribute(value: string): string {
   return value

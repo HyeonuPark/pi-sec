@@ -3,7 +3,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { Conversation } from "@earendil-works/pi-durable";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";
-import { parseAsyncOutput, renderAsyncOutput } from "../src/async-output.ts";
+import { parseAsyncOutput } from "../src/async-output.ts";
 import { defaultConfig } from "../src/config/schema.ts";
 import { SecAsyncCall } from "../src/documents.ts";
 import { ToolTagCatalog } from "../src/extensions/tool-tags.ts";
@@ -88,21 +88,6 @@ describe("complex tool tags", () => {
     expect(catalog.isComplex("web", "fetch_url")).toBe(true);
     config.agent.tools.complex.remove = ["bash"];
     expect(catalog.isComplex("coding", "bash")).toBe(false);
-  });
-});
-
-describe("background result tag", () => {
-  it("survives a round trip", () => {
-    const rendered = renderAsyncOutput({
-      title: "npm test",
-      tool: "bash",
-      status: "done",
-      args: "command: npm test",
-      body: "all good",
-    });
-    const parsed = parseAsyncOutput(rendered);
-    expect(parsed).toEqual({ title: "npm test", tool: "bash", status: "done", body: "command: npm test\n---\nall good" });
-    expect(parseAsyncOutput("just a message")).toBeUndefined();
   });
 });
 
