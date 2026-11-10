@@ -179,11 +179,3 @@ export function pruneDrafts(): number {
   }
   return removed;
 }
-
-/** The four functions as one store, for a caller that hands them around. */
-export const drafts = {
-  read: readDraft,
-  write: writeDraft,
-  clear: clearDraft,
-  prune: pruneDrafts,
-};

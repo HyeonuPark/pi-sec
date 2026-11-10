@@ -14,7 +14,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "vitest";
-import { DRAFT_PREFIX, DRAFT_REFUSED_NOTICE, clearDraft, draftStorageKey, drafts, pruneDrafts, readDraft, writeDraft } from "../../src/ui/state/drafts.ts";
+import { DRAFT_PREFIX, DRAFT_REFUSED_NOTICE, clearDraft, draftStorageKey, pruneDrafts, readDraft, writeDraft } from "../../src/ui/state/drafts.ts";
 import { hideToast, toast, TOAST_ERROR_MS, TOAST_INFO_MS, showError, showToast } from "../../src/ui/state/toast.ts";
 import { h, render, Component, type ComponentChildren } from "preact";
 import { THEME_KEY, THEME_ORDER, applyTheme, carryStoredTheme, cycleTheme, documentTheme, initTheme, nextTheme, readStoredTheme, theme, themeLabel } from "../../src/ui/state/theme.ts";
@@ -223,16 +223,6 @@ describe("common-drafts.test.ts", () => {
       } finally {
         if (original !== undefined) Object.defineProperty(window, "localStorage", original);
       }
-    });
-  });
-
-  describe("the store as one object", () => {
-    it("hands the four functions to a caller that takes them", () => {
-      drafts.write("composer:root", "one");
-      expect(drafts.read("composer:root")).toBe("one");
-      drafts.clear("composer:root");
-      expect(drafts.read("composer:root")).toBe("");
-      expect(drafts.prune()).toBe(0);
     });
   });
 });

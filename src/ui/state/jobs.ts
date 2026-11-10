@@ -287,8 +287,6 @@ export async function readJobs(): Promise<void> {
 let readInFlight: Promise<void> | null = null;
 /** One more read is wanted once the read in flight ends. */
 let readAgain = false;
-/** A job event arrived while the tab was hidden. */
-let missed = false;
 /** The one-second window, while it is open. */
 let windowTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -321,14 +319,12 @@ export function refreshJobs(): Promise<void> {
  */
 export function applyJobEvent(_type?: string): void {
   if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-    missed = true;
     return;
   }
   if (windowTimer !== undefined) return;
   windowTimer = setTimeout(() => {
     windowTimer = undefined;
     if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-      missed = true;
       return;
     }
     void refreshJobs();
@@ -340,7 +336,6 @@ export function applyJobEvent(_type?: string): void {
  * about and a run that ended under the harness, which publishes no job event.
  */
 export async function jobsTabVisible(): Promise<void> {
-  missed = false;
   await refreshJobs();
 }
 
@@ -482,7 +477,6 @@ export function resetJobsState(): void {
   windowTimer = undefined;
   readInFlight = null;
   readAgain = false;
-  missed = false;
   jobs.value = [];
   legacyScheduleProblem.value = null;
   hiddenJobs.value = new Set();

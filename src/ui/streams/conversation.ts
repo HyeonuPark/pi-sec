@@ -67,9 +67,6 @@ const listeners = new Map<string, Set<StreamListener>>();
 /** Handlers for the connection opening and closing, which is not a frame. */
 const stateListeners = new Set<(connected: boolean) => void>();
 
-/** Whether this page's stream has opened at least once. */
-let hasOpened = false;
-
 /** A marker entry that arrived while the page was hidden: the return opens the stream. */
 let markerPending = false;
 
@@ -307,11 +304,6 @@ function handleOpen(): void {
   // opens with is the drawing the marker asked for. A pending marker that another
   // route opened for (`pageshow`, `online`) must not open a second one.
   markerPending = false;
-  // The first open is the page's own connection; every later one is a reconnect,
-  // and a part that reads its own list uses the difference. A reconnect can mean a
-  // new daemon whose restart state differs from what this page read at load, and
-  // `refreshStatus` above reads it again.
-  hasOpened = true;
   notifyState(true);
 }
 
@@ -429,7 +421,6 @@ export function stopConversation(): void {
   onVisibility = null;
   markerPending = false;
   hiddenAt = 0;
-  hasOpened = false;
 }
 
 /** The rows the transcript draws now, for a caller that reads them without a component. */

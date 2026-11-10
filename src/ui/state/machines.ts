@@ -115,8 +115,6 @@ let readInFlight: Promise<void> | null = null;
 let readAgain = false;
 /** The window timer, while it is open. */
 let windowTimer: ReturnType<typeof setTimeout> | undefined;
-/** Frames arrived while the tab was hidden. */
-let missed = false;
 
 /** Read the list, unless a read is already running. */
 export function refreshMachines(): Promise<void> {
@@ -142,14 +140,12 @@ export function refreshMachines(): Promise<void> {
  */
 export function applyMachineEvent(): void {
   if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-    missed = true;
     return;
   }
   if (windowTimer !== undefined) return;
   windowTimer = setTimeout(() => {
     windowTimer = undefined;
     if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-      missed = true;
       return;
     }
     void refreshMachines();
@@ -158,13 +154,7 @@ export function applyMachineEvent(): void {
 
 /** The tab came back: read the list once, which covers the frames it missed. */
 export async function machinesTabVisible(): Promise<void> {
-  missed = false;
   await refreshMachines();
-}
-
-/** Whether a frame arrived while the tab was hidden, for a caller that asks. */
-export function machinesMissedWhileHidden(): boolean {
-  return missed;
 }
 
 /** One level press, its request, and what the answer did to the panel. */
@@ -206,7 +196,6 @@ export function resetMachinesState(): void {
   windowTimer = undefined;
   readInFlight = null;
   readAgain = false;
-  missed = false;
   machines.value = [];
   machinesEnabled.value = false;
   pendingLevels.value = {};
