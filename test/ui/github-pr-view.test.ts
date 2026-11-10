@@ -20,20 +20,12 @@
  * from `src/web/github-pr-view.html`, the stamps the server writes, the meta block,
  * `base.js`, and the test bundle of the real entry module.
  */
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { JSDOM, VirtualConsole } from "jsdom";
+import type { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildUi, ROOT } from "../../scripts/build-ui.mjs";
+import { META_READ_ONLY, META_WRITES, loadGithubPrPage, type GithubPrPage, type GithubPrPageOptions, type PageAnswer, type PageCall, type PageReply } from "./github-pr-page.ts";
 import { STORE_PREFIX, prStoreKey } from "../../src/ui/state/github-pr.ts";
 
 /* ------------------------------------------------------------------ fixtures */
-
-/** What `github-pr-meta` holds when writes are on. */
-const META_WRITES = { viewer: "octocat", repos: [{ repo: "acme/widgets" }], writes: true };
-
-/** What it holds when writes are off. */
-const META_READ_ONLY = { viewer: "octocat", repos: [{ repo: "acme/widgets" }], writes: false };
 
 /** One reaction count. */
 function reaction(content: string, count: number, mine = false) {
@@ -151,132 +143,14 @@ function prAnswer(over: Partial<Record<string, unknown>> = {}) {
 
 /* -------------------------------------------------------------------- loader */
 
-/** One request the fake `fetch` saw. */
-interface Call {
-  readonly path: string;
-  readonly method: string;
-  readonly body: string;
-}
-
-/** What the fake `fetch` answers with. */
-interface Answer {
-  readonly status?: number;
-  readonly body?: unknown;
-}
-
-/** An answer, or a function that answers when the test says so. */
-type Reply = Answer | (() => Answer | Promise<Answer>);
-
-/** What one loaded page offers a test. */
-interface Page {
-  readonly window: JSDOM["window"];
-  readonly document: Document;
-  readonly calls: Call[];
-  respond(path: string, reply: Reply): void;
-  settle(): Promise<void>;
-  close(): void;
-}
-
-/** The test bundles, built once for the whole file. */
-let bundles: Promise<Record<string, string>> | undefined;
-
-function bundle(): Promise<Record<string, string>> {
-  bundles ??= buildUi({ root: ROOT, mode: "test" }).then((result) => result.code as Record<string, string>);
-  return bundles;
-}
-
-/** A JSON data block, written as the server writes it: `<` escaped, never run. */
-function block(id: string, value: unknown): string {
-  return `<script type="application/json" id="${id}">${JSON.stringify(value).replaceAll("<", "\\u003c")}</script>`;
-}
-
-/** The shell with the server's stamps and the meta block in it. */
-async function shell(options: { readonly base?: string; readonly meta?: unknown; readonly metaBlock?: boolean }): Promise<string> {
-  const base = options.base ?? "";
-  let html = await readFile(join(ROOT, "src/web/github-pr-view.html"), "utf8");
-  html = html
-    .replaceAll("{{base}}", base)
-    .replace(/<meta\s+name="pi-sec-base"\s+content="[^"]*"\s*\/?>/i, `<meta name="pi-sec-base" content="${base}" />`)
-    .replace(/<meta\s+name="pi-sec-timezone"\s+content="[^"]*"\s*\/?>/i, '<meta name="pi-sec-timezone" content="Asia/Tokyo" />');
-  html = html.replace("<!--github-pr-meta-->", options.metaBlock === false ? "" : block("github-pr-meta", options.meta ?? META_WRITES));
-  return html;
-}
+type Answer = PageAnswer;
+type Reply = PageReply;
+type Call = PageCall;
+type Page = GithubPrPage;
 
 /** Load the pull request page with the server faked. */
-async function openView(
-  options: {
-    readonly base?: string;
-    readonly meta?: unknown;
-    readonly metaBlock?: boolean;
-    readonly path?: string;
-    readonly replies?: Readonly<Record<string, Reply>>;
-    /** Run before the page's bundle, so a test can plant what a tab already held. */
-    readonly before?: (window: JSDOM["window"]) => void;
-  } = {},
-): Promise<Page> {
-  const code = await bundle();
-  const source = code["github-pr-view"];
-  if (source === undefined) throw new Error("the test build has no github-pr-view page bundle");
-
-  const virtualConsole = new VirtualConsole();
-  virtualConsole.on("jsdomError", (error) => {
-    if (!String((error as { message?: unknown })?.message ?? error).includes("navigation")) console.error(error);
-  });
-
-  const dom = new JSDOM(await shell(options), {
-    url: `http://localhost${options.path ?? "/github/pr/acme/widgets/12"}`,
-    runScripts: "outside-only",
-    pretendToBeVisual: true,
-    virtualConsole,
-  });
-  const { window } = dom;
-  const document = window.document;
-  const calls: Call[] = [];
-  const replies = new Map<string, Reply>(Object.entries(options.replies ?? {}));
-
-  (window as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string; body?: unknown }) => {
-    const url = new URL(String(input), "http://localhost");
-    calls.push({ path: url.pathname + url.search, method: (init?.method ?? "GET").toUpperCase(), body: typeof init?.body === "string" ? init.body : "" });
-    const reply = replies.get(url.pathname + url.search) ?? replies.get(url.pathname) ?? { status: 200, body: {} };
-    const answer = typeof reply === "function" ? await reply() : reply;
-    const status = answer.status ?? 200;
-    const text = answer.body === undefined ? "" : JSON.stringify(answer.body);
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      statusText: String(status),
-      text: async () => text,
-      json: async () => JSON.parse(text),
-    };
-  };
-  // The page opens no stream of its own; a stand-in is here so a page that
-  // started one would show up rather than throw.
-  (window as unknown as { EventSource: unknown }).EventSource = class {
-    constructor(readonly url: string) {}
-    addEventListener(): void {}
-    removeEventListener(): void {}
-    close(): void {}
-  };
-
-  options.before?.(window);
-  window.eval(await readFile(join(ROOT, "src/web/base.js"), "utf8"));
-  window.eval(source);
-
-  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-  await settle();
-
-  return {
-    window,
-    document,
-    calls,
-    respond(path, reply) {
-      replies.set(path, reply);
-    },
-    settle,
-    close() {
-      dom.window.close();
-    },
-  };
+function openView(options: Omit<GithubPrPageOptions, "page" | "path"> & { readonly path?: string } = {}): Promise<Page> {
+  return loadGithubPrPage({ ...options, page: "github-pr-view", path: options.path ?? "/github/pr/acme/widgets/12" });
 }
 
 /** The text of every thread card's path line, in the order the page drew them. */

@@ -27,21 +27,13 @@
  * `src/web/github-pr-diff.html`, the stamps the server writes, the meta block,
  * `base.js`, and the test bundle of the real entry module.
  */
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { JSDOM, VirtualConsole } from "jsdom";
+import type { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildUi, ROOT } from "../../scripts/build-ui.mjs";
 import { STORE_PREFIX, commitStoreKey, diffStoreKey, pendingStoreKey } from "../../src/ui/state/github-pr.ts";
+import { META_READ_ONLY, META_WRITES, loadGithubPrPage, type GithubPrPage, type GithubPrPageOptions, type PageAnswer, type PageCall, type PageReply } from "./github-pr-page.ts";
 import { buildRows, nextReveal, readDiffRoute, revealRows, subline, type GapRow } from "../../src/ui/github-pr/diff-model.ts";
 
 /* ------------------------------------------------------------------ fixtures */
-
-/** What `github-pr-meta` holds when writes are on. */
-const META_WRITES = { viewer: "octocat", repos: [{ repo: "acme/widgets" }], writes: true };
-
-/** What it holds when writes are off. */
-const META_READ_ONLY = { viewer: "octocat", repos: [{ repo: "acme/widgets" }], writes: false };
 
 /** The path of the diff route, and of the pull request route beside it. */
 const DIFF_PATH = "/api/github/pr/acme/widgets/12/diff";
@@ -214,129 +206,14 @@ function prAnswer(over: Partial<Record<string, unknown>> = {}) {
 
 /* ------------------------------------------------------------------- harness */
 
-type Answer = { status?: number; body?: unknown };
-type Reply = Answer | ((call: Call) => Answer | Promise<Answer>);
-
-interface Call {
-  readonly path: string;
-  readonly method: string;
-  /** The body a write sent, as it was sent. */
-  readonly body: string | null;
-}
-
-interface Page {
-  readonly window: JSDOM["window"];
-  readonly document: Document;
-  readonly calls: Call[];
-  respond(path: string, reply: Reply): void;
-  settle(): Promise<void>;
-  close(): void;
-}
-
-/** The test bundles, built once for the whole file. */
-let bundles: Promise<Record<string, string>> | undefined;
-
-function bundle(): Promise<Record<string, string>> {
-  bundles ??= buildUi({ root: ROOT, mode: "test" }).then((result) => result.code as Record<string, string>);
-  return bundles;
-}
-
-/** A JSON data block, written as the server writes it: `<` escaped, never run. */
-function block(id: string, value: unknown): string {
-  return `<script type="application/json" id="${id}">${JSON.stringify(value).replaceAll("<", "\\u003c")}</script>`;
-}
-
-/** The shell with the server's stamps and the meta block in it. */
-async function shell(options: { readonly base?: string; readonly meta?: unknown; readonly metaBlock?: boolean }): Promise<string> {
-  const base = options.base ?? "";
-  let html = await readFile(join(ROOT, "src/web/github-pr-diff.html"), "utf8");
-  html = html
-    .replaceAll("{{base}}", base)
-    .replace(/<meta\s+name="pi-sec-base"\s+content="[^"]*"\s*\/?>/i, `<meta name="pi-sec-base" content="${base}" />`)
-    .replace(/<meta\s+name="pi-sec-timezone"\s+content="[^"]*"\s*\/?>/i, '<meta name="pi-sec-timezone" content="Asia/Tokyo" />');
-  html = html.replace("<!--github-pr-meta-->", options.metaBlock === false ? "" : block("github-pr-meta", options.meta ?? META_WRITES));
-  return html;
-}
+type Answer = PageAnswer;
+type Reply = PageReply;
+type Call = PageCall;
+type Page = GithubPrPage;
 
 /** Load the diff page with the server faked. */
-async function openDiff(
-  options: {
-    readonly base?: string;
-    readonly meta?: unknown;
-    readonly metaBlock?: boolean;
-    readonly path?: string;
-    readonly replies?: Readonly<Record<string, Reply>>;
-    /** Run before the page's bundle, so a test can plant what a tab already held. */
-    readonly before?: (window: JSDOM["window"]) => void;
-  } = {},
-): Promise<Page> {
-  const code = await bundle();
-  const source = code["github-pr-diff"];
-  if (source === undefined) throw new Error("the test build has no github-pr-diff page bundle");
-
-  const virtualConsole = new VirtualConsole();
-  virtualConsole.on("jsdomError", (error) => {
-    if (!String((error as { message?: unknown })?.message ?? error).includes("navigation")) console.error(error);
-  });
-
-  const dom = new JSDOM(await shell(options), {
-    url: `http://localhost${options.path ?? "/github/pr/acme/widgets/12/diff"}`,
-    runScripts: "outside-only",
-    pretendToBeVisual: true,
-    virtualConsole,
-  });
-  const { window } = dom;
-  const calls: Call[] = [];
-  const replies = new Map<string, Reply>(Object.entries(options.replies ?? {}));
-
-  (window as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string; body?: string }) => {
-    const url = new URL(String(input), "http://localhost");
-    const entry: Call = {
-      path: url.pathname + url.search,
-      method: (init?.method ?? "GET").toUpperCase(),
-      body: init?.body ?? null,
-    };
-    calls.push(entry);
-    const reply = replies.get(url.pathname + url.search) ?? replies.get(url.pathname) ?? { status: 200, body: {} };
-    const answer = typeof reply === "function" ? await reply(entry) : reply;
-    const status = answer.status ?? 200;
-    const text = answer.body === undefined ? "" : JSON.stringify(answer.body);
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      statusText: String(status),
-      text: async () => text,
-      json: async () => JSON.parse(text),
-    };
-  };
-  // This page opens no stream of its own; a stand-in is here so a page that started
-  // one would show up rather than throw.
-  (window as unknown as { EventSource: unknown }).EventSource = class {
-    constructor(readonly url: string) {}
-    addEventListener(): void {}
-    removeEventListener(): void {}
-    close(): void {}
-  };
-
-  options.before?.(window);
-  window.eval(await readFile(join(ROOT, "src/web/base.js"), "utf8"));
-  window.eval(source);
-
-  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-  await settle();
-
-  return {
-    window,
-    document: window.document,
-    calls,
-    respond(path, reply) {
-      replies.set(path, reply);
-    },
-    settle,
-    close() {
-      dom.window.close();
-    },
-  };
+function openDiff(options: Omit<GithubPrPageOptions, "page" | "path"> & { readonly path?: string } = {}): Promise<Page> {
+  return loadGithubPrPage({ ...options, page: "github-pr-diff", path: options.path ?? "/github/pr/acme/widgets/12/diff" });
 }
 
 /** The file headers' status letters, in the order the page drew the files. */

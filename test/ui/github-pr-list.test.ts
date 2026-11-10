@@ -18,15 +18,15 @@
  *
  * The page is loaded the way the server and the browser load it: the real shell
  * from `src/web/github-pr-list.html`, the stamps the server writes, the two JSON
- * blocks, `base.js`, and the test bundle of the real entry module. The harness in
- * `test/ui/harness.ts` knows the four older pages only, so this file carries the
- * small loader it needs.
+ * blocks, `base.js`, and the test bundle of the real entry module. The loader is
+ * `test/ui/github-pr-page.ts`.
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { JSDOM, VirtualConsole } from "jsdom";
+import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildUi, ROOT } from "../../scripts/build-ui.mjs";
+import { ROOT } from "../../scripts/build-ui.mjs";
+import { META_READ_ONLY, META_WRITES, block, loadGithubPrPage, type GithubPrPage, type GithubPrPageOptions, type PageAnswer, type PageCall, type PageReply } from "./github-pr-page.ts";
 import { readMeta, readFirstList, readFirstPending, writesEnabled } from "../../src/ui/github-pr/blocks.ts";
 import { STORE_PREFIX, draftQueueStoreKey, forgetStored, pendingStoreKey, readStored, writeStored } from "../../src/ui/state/github-pr.ts";
 
@@ -113,186 +113,29 @@ function pendingAnswer() {
   };
 }
 
-/** What `github-pr-meta` holds when writes are on. */
-const META_WRITES = { viewer: "octocat", repos: [{ repo: "acme/widgets" }], writes: true };
-
-/** What it holds when writes are off. */
-const META_READ_ONLY = { viewer: "octocat", repos: [{ repo: "acme/widgets" }], writes: false };
-
 /* -------------------------------------------------------------------- loader */
 
-/** One request the fake `fetch` saw. */
-interface Call {
-  readonly path: string;
-  readonly method: string;
-}
+type Answer = PageAnswer;
+type Reply = PageReply;
+type Call = PageCall;
+type Page = GithubPrPage;
 
-/** What the fake `fetch` answers with. */
-interface Answer {
-  readonly status?: number;
-  readonly body?: unknown;
-}
-
-/** An answer, or a function that answers when the test says so. */
-type Reply = Answer | (() => Answer | Promise<Answer>);
-
-/** What one loaded page offers a test. */
-interface Page {
-  readonly window: JSDOM["window"];
-  readonly document: Document;
-  readonly calls: Call[];
-  readonly streams: FakeSource[];
-  /** Answer a path from now on. */
-  respond(path: string, reply: Reply): void;
-  /** Send one frame on the page's current stream. */
-  emit(name: string): void;
-  /** A microtask and a macrotask, so the page's reads can answer. */
-  settle(): Promise<void>;
-  close(): void;
-}
-
-/** An `EventSource` stand-in, which records itself so a test can drive a frame. */
-class FakeSource {
-  static instances: FakeSource[] = [];
-  readonly url: string;
-  readonly listeners = new Map<string, ((event: { data: string }) => void)[]>();
-  readyState = 0;
-  closed = false;
-
-  constructor(url: string | URL) {
-    this.url = String(url);
-    FakeSource.instances.push(this);
-  }
-
-  addEventListener(type: string, listener: (event: { data: string }) => void): void {
-    const list = this.listeners.get(type) ?? [];
-    list.push(listener);
-    this.listeners.set(type, list);
-  }
-
-  removeEventListener(): void {}
-
-  emit(type: string, payload?: unknown): void {
-    const data = payload === undefined ? "" : JSON.stringify(payload);
-    for (const listener of [...(this.listeners.get(type) ?? [])]) listener({ data });
-  }
-
-  close(): void {
-    this.closed = true;
-    this.readyState = 2;
-  }
-}
-
-/** The test bundles, built once for the whole file. */
-let bundles: Promise<Record<string, string>> | undefined;
-
-function bundle(): Promise<Record<string, string>> {
-  bundles ??= buildUi({ root: ROOT, mode: "test" }).then((result) => result.code as Record<string, string>);
-  return bundles;
-}
-
-/** A JSON data block, written as the server writes it: `<` escaped, never run. */
-function block(id: string, value: unknown): string {
-  return `<script type="application/json" id="${id}">${JSON.stringify(value).replaceAll("<", "\\u003c")}</script>`;
-}
-
-/** The shell with the server's stamps and the three blocks in it. */
-async function shell(options: {
-  readonly base?: string;
-  readonly meta?: unknown;
+type ListOptions = Omit<GithubPrPageOptions, "page" | "path" | "blocks"> & {
+  readonly url?: string;
   readonly first?: unknown;
   readonly pending?: unknown;
-  readonly metaBlock?: boolean;
-}): Promise<string> {
-  const base = options.base ?? "";
-  let html = await readFile(join(ROOT, "src/web/github-pr-list.html"), "utf8");
-  html = html
-    .replaceAll("{{base}}", base)
-    .replace(/<meta\s+name="pi-sec-base"\s+content="[^"]*"\s*\/?>/i, `<meta name="pi-sec-base" content="${base}" />`)
-    .replace(/<meta\s+name="pi-sec-timezone"\s+content="[^"]*"\s*\/?>/i, '<meta name="pi-sec-timezone" content="Asia/Tokyo" />');
-  html = html.replace("<!--github-pr-meta-->", options.metaBlock === false ? "" : block("github-pr-meta", options.meta ?? META_WRITES));
-  html = html.replace("<!--github-pr-list-first-->", options.first === undefined ? "" : block("github-pr-list-first", options.first));
-  html = html.replace("<!--github-pr-pending-first-->", options.pending === undefined ? "" : block("github-pr-pending-first", options.pending));
-  return html;
-}
+};
 
 /** Load the list page with the server faked. */
-async function openList(
-  options: {
-    readonly base?: string;
-    readonly meta?: unknown;
-    readonly metaBlock?: boolean;
-    readonly first?: unknown;
-    readonly pending?: unknown;
-    readonly url?: string;
-    readonly replies?: Readonly<Record<string, Reply>>;
-    /** Run before the page's bundle, so a test can plant what a tab already held. */
-    readonly before?: (window: JSDOM["window"]) => void;
-  } = {},
-): Promise<Page> {
-  const code = await bundle();
-  const source = code["github-pr-list"];
-  if (source === undefined) throw new Error("the test build has no github-pr-list page bundle");
-
-  const virtualConsole = new VirtualConsole();
-  virtualConsole.on("jsdomError", (error) => {
-    if (!String((error as { message?: unknown })?.message ?? error).includes("navigation")) console.error(error);
+function openList(options: ListOptions = {}): Promise<Page> {
+  const { url, first, pending, ...rest } = options;
+  return loadGithubPrPage({
+    ...rest,
+    page: "github-pr-list",
+    recordBody: false,
+    path: url ?? "/github/pr/",
+    blocks: { "github-pr-list-first": first, "github-pr-pending-first": pending },
   });
-
-  FakeSource.instances = [];
-  const dom = new JSDOM(await shell(options), {
-    url: `http://localhost${options.url ?? "/github/pr/"}`,
-    runScripts: "outside-only",
-    pretendToBeVisual: true,
-    virtualConsole,
-  });
-  const { window } = dom;
-  const document = window.document;
-  const calls: Call[] = [];
-  const replies = new Map<string, Reply>(Object.entries(options.replies ?? {}));
-
-  (window as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
-    const url = new URL(String(input), "http://localhost");
-    calls.push({ path: url.pathname + url.search, method: (init?.method ?? "GET").toUpperCase() });
-    const reply = replies.get(url.pathname + url.search) ?? replies.get(url.pathname) ?? { status: 200, body: {} };
-    const answer = typeof reply === "function" ? await reply() : reply;
-    const status = answer.status ?? 200;
-    const text = answer.body === undefined ? "" : JSON.stringify(answer.body);
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      statusText: String(status),
-      text: async () => text,
-      json: async () => JSON.parse(text),
-    };
-  };
-  (window as unknown as { EventSource: unknown }).EventSource = FakeSource;
-
-  options.before?.(window);
-  window.eval(await readFile(join(ROOT, "src/web/base.js"), "utf8"));
-  window.eval(source);
-
-  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-  await settle();
-
-  return {
-    window,
-    document,
-    calls,
-    streams: FakeSource.instances,
-    respond(path, reply) {
-      replies.set(path, reply);
-    },
-    emit(name) {
-      const current = FakeSource.instances.at(-1);
-      if (current === undefined) throw new Error("the page opened no stream");
-      current.emit(name);
-    },
-    settle,
-    close() {
-      dom.window.close();
-    },
-  };
 }
 
 /** The titles of the rows the page drew, in the order it drew them. */
