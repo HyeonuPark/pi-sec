@@ -1199,52 +1199,66 @@ function usage(): void {
   );
 }
 
-function extractAssistant(entries: readonly { kind: string; model?: unknown[] }[]): string {
+/** The text of one assistant entry. */
+function extractAssistant(entry: { kind: string; model?: unknown[] }): string {
+  if (entry.kind !== "pi.assistant") return "";
   const texts: string[] = [];
-  for (const entry of entries) {
-    if (entry.kind !== "pi.assistant") continue;
-    for (const message of (entry.model ?? []) as { content?: unknown }[]) {
-      const content = message.content;
-      if (typeof content === "string") texts.push(content);
-      else if (Array.isArray(content)) {
-        texts.push(content.map((block) => (typeof block === "object" && block !== null && "text" in block ? String((block as { text?: unknown }).text ?? "") : "")).join(""));
-      }
+  for (const message of (entry.model ?? []) as { content?: unknown }[]) {
+    const content = message.content;
+    if (typeof content === "string") texts.push(content);
+    else if (Array.isArray(content)) {
+      texts.push(content.map((block) => (typeof block === "object" && block !== null && "text" in block ? String((block as { text?: unknown }).text ?? "") : "")).join(""));
     }
   }
   return texts.join("\n").trim();
 }
 
-/** Send one message to a running daemon and return its reply. */
-async function sendAndWait(origin: string, content: string, timeoutMs: number): Promise<string> {
-  let beforeMax = 0;
-  try {
-    const list = (await (await fetch(`${origin}/api/conversations`)).json()) as { conversations?: { id: number }[] };
-    const id = list.conversations?.[0]?.id;
-    if (id !== undefined) {
-      const snap = (await (await fetch(`${origin}/api/conversations/${id}`)).json()) as { entries?: { id: number }[] };
-      beforeMax = Math.max(0, ...(snap.entries ?? []).map((entry) => entry.id));
-    }
-  } catch {
-    /* fresh daemon */
-  }
+/** What `sendAndWait` reads from the world: a test hands in its own. */
+export interface SendIo {
+  readonly fetch?: typeof fetch;
+  readonly sleep?: (ms: number) => Promise<void>;
+  readonly now?: () => number;
+}
 
-  const post = await fetch(`${origin}/basic-chat/messages`, {
+/**
+ * Send one message to a running daemon and return the answer to that message.
+ *
+ * The daemon names the message's submission, and the submission record says when
+ * the run answered it and which entry is the answer. Reading the transcript
+ * instead would return the answer to some other input, or text the run wrote
+ * beside a tool call.
+ */
+export async function sendAndWait(origin: string, content: string, timeoutMs: number, io: SendIo = {}): Promise<string> {
+  const doFetch = io.fetch ?? fetch;
+  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = io.now ?? (() => Date.now());
+
+  const post = await doFetch(`${origin}/basic-chat/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
   });
   if (!post.ok) throw new Error(`HTTP ${post.status}: ${await post.text()}`);
-  const accepted = (await post.json()) as { conversationId: number };
+  const accepted = (await post.json()) as { conversationId: number; submissionId: number; held?: boolean };
+  if (accepted.held === true) {
+    throw new Error(
+      "the conversation waits for its provider to accept requests again: the message is recorded and answers later, so there is no reply to wait for",
+    );
+  }
 
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const res = await fetch(`${origin}/api/conversations/${accepted.conversationId}`);
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    await sleep(500);
+    const res = await doFetch(`${origin}/api/conversations/${accepted.conversationId}/submissions/${accepted.submissionId}`);
+    if (res.status === 404) throw new Error("the daemon does not know this message (is the daemon the same build as this command?)");
     if (!res.ok) continue;
-    const data = (await res.json()) as { entries?: { id: number; kind: string; model?: unknown[] }[] };
-    const newer = (data.entries ?? []).filter((entry) => entry.id > beforeMax);
-    const answer = extractAssistant(newer);
-    if (answer !== "") return answer;
+    const data = (await res.json()) as {
+      status: string;
+      reason: string | null;
+      answerEntry: { kind: string; model?: unknown[] } | null;
+    };
+    if (data.status === "unanswered") throw new Error(`the message got no answer: ${data.reason ?? "unknown reason"}`);
+    if (data.status === "done" && data.answerEntry !== null) return extractAssistant(data.answerEntry);
   }
   throw new Error("timed out waiting for a reply");
 }

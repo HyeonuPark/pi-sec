@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AgentChange, ConversationId, EntryId, ModelRef } from "@earendil-works/pi-durable";
+import type { AgentChange, ConversationId, EntryId, ModelRef, SubmissionId } from "@earendil-works/pi-durable";
 import { apiError, intParam, json, type RouteContext, type Router } from "../router.ts";
 import { API_VERSION, type AppDeps } from "../deps.ts";
 import {
@@ -122,6 +122,48 @@ export function registerConversations(router: Router, deps: AppDeps): void {
       // read this field draws the transcript it drew before.
       attachments: await attachmentDescriptors(page.items, attachmentLookup(attachmentContext(deps))),
       apiVersion: API_VERSION,
+    });
+  });
+
+  /**
+   * One input's own record: whether it waits, ran, was answered or got no answer.
+   *
+   * `pi-sec send` follows its own message through this route instead of reading
+   * the transcript, where an answer to another input or a message written beside a
+   * tool call looks the same as the answer it waits for. `answerEntry` is the
+   * final assistant entry of the run, so a client needs no second request.
+   * Read-only.
+   */
+  router.get("/api/conversations/:id/submissions/:submissionId", async (route) => {
+    const id = conversationId(route.params["id"]);
+    const submissionId = Number(route.params["submissionId"]);
+    if (id === undefined || !Number.isInteger(submissionId) || submissionId < 0) {
+      apiError(route.res, 400, "invalid_request", "invalid conversation or submission id", route.requestId);
+      return;
+    }
+    const conversation = await deps.runtime.harness.conversation(id, BACKGROUND_CONTEXT);
+    const record =
+      conversation === undefined
+        ? undefined
+        : await deps.runtime.storage.submission(submissionId as SubmissionId, BACKGROUND_CONTEXT);
+    if (conversation === undefined || record === undefined || record.conversationId !== id) {
+      apiError(route.res, 404, "not_found", "submission not found", route.requestId);
+      return;
+    }
+    const answer = record.answer ?? null;
+    let answerEntry: unknown = null;
+    if (answer !== null) {
+      const page = await conversation.entries({ minEntryId: answer, maxEntryId: answer }, 1, undefined, BACKGROUND_CONTEXT);
+      answerEntry = page.items[0] ?? null;
+    }
+    json(route.res, 200, {
+      id: record.id,
+      type: record.type,
+      status: record.status,
+      entry: record.entry ?? null,
+      answer,
+      reason: record.reason ?? null,
+      answerEntry,
     });
   });
 

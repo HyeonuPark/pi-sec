@@ -68,7 +68,7 @@ updating, and rolling back.
 | Command | What it does |
 |---------|--------------|
 | `start` | Runs the daemon. `--port` and `--bind` override `server.port` and `server.bind`, and `--watchdog` reports readiness to systemd. |
-| `send <text>`, `chat <text>` | Sends one message to a running daemon and prints the answer. `--url` sets the daemon (default `http://127.0.0.1:8787`) and `--timeout` the wait in milliseconds (default 180000). With no text, `send` reads lines from standard input. |
+| `send <text>`, `chat <text>` | Sends one message to a running daemon and prints the answer to that message. `--url` sets the daemon (default `http://127.0.0.1:8787`) and `--timeout` the wait in milliseconds (default 180000). With no text, `send` reads lines from standard input. |
 | `status` | Reports from the pid file whether the daemon is running. |
 | `doctor` | Checks the config, each vmodel's model and prompt file, the root's role files, the storage schema version, and the secret store. |
 | `config` | Prints the effective config. `--default` prints the default config instead. |

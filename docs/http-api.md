@@ -507,6 +507,15 @@ not move the API revision (§13).
 | `PATCH` | `/api/conversations/:id/agent` | `configure()` model/thinking/extensions/tools/cwd. |
 | `POST` | `/api/conversations/:id/forks` | Fork at an entry: `{ atEntryId, title? }` → `201 { conversationId, forkedAtEntryId }`. |
 | `GET` | `/api/conversations/:id/tasks` | Task graph. |
+| `GET` | `/api/conversations/:id/submissions/:submissionId` | One input's record: `{ id, type, status, entry, answer, reason, answerEntry }`. |
+
+`GET /api/conversations/:id/submissions/:submissionId` is read-only. `status` is
+`queued`, `placed`, `done` or `unanswered`. A field the record does not have is
+`null`. On `done`, `answerEntry` is the final assistant entry of the run, so a
+client needs no second request. On `unanswered`, `reason` says why. The route
+answers 400 for an id that is not a number, and 404 `not_found` when the
+conversation or the submission does not exist or the submission belongs to
+another conversation. `pi-sec send` follows its own message through this route.
 
 `GET /api/conversations/:id` returns the conversation's agent and its stored
 entries, so clients can render without opening a stream. The answer has seven
