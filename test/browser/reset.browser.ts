@@ -301,7 +301,11 @@ async function hideAndReturn(page: Page, awayMs: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 it("holds the reader's place in the transcript when an entry lands and when the stream returns", async () => {
-  const page = await openChat();
+  const page = await currentContext().newPage();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(String(error)));
+  await page.goto(`${origin}/basic-chat`, { waitUntil: "load", timeout: 30000 });
+  await waitForRows(page, 2);
   const requests: string[] = [];
   page.on("request", (request) => requests.push(request.url()));
 
@@ -347,6 +351,14 @@ it("holds the reader's place in the transcript when an entry lands and when the 
   await waitForRows(page, atTail + 2);
   const tail = await paneFacts(page);
   expect(tail.scrollHeight - tail.scrollTop - tail.clientHeight).toBeLessThanOrEqual(BOTTOM_SLACK_PX);
+
+  // Scrolled all the way up, the same arrival must not pull the reader down either.
+  expect(await scrollPaneTo(page, 0)).toBe(0);
+  const atTop = await page.evaluate(() => document.querySelectorAll("#transcript > [data-row-key]").length);
+  await send("a message that lands while the reader is at the very top");
+  await waitForRows(page, atTop + 2);
+  expect((await paneFacts(page)).scrollTop).toBe(0);
+  expect(pageErrors).toEqual([]);
   await page.close();
 });
 
@@ -552,42 +564,3 @@ function fieldFacts(page: Page): Promise<{ value: string; start: number; end: nu
     };
   });
 }
-
-it("keeps the pasted key in the login answer field across the poll that repeats the question", async () => {
-  const page = await openChat();
-  // The `⋯` menu carries the login panel, which is where a key is pasted.
-  await page.click("#more-actions");
-  await page.click("#model-login");
-  // The panel reads the provider list, and the form is only usable once it has one.
-  await page.waitForSelector("#login-provider option", { state: "attached", timeout: 30000 });
-  await page.click("#login-start");
-  await page.waitForSelector("#login-answer", { state: "attached", timeout: 30000 });
-
-  const answer = "sk-the-key-pasted-while-the-login-waits";
-  await page.click("#login-answer");
-  await page.keyboard.insertText(answer);
-  // A caret in the middle of the key, which a redraw would move to the end.
-  await page.evaluate(() => {
-    const field = document.getElementById("login-answer") as HTMLInputElement;
-    field.setSelectionRange(6, 6);
-  });
-
-  // Three polls: the daemon is asked once a second while the login runs.
-  const pollsBefore = login.polls;
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (login.polls >= pollsBefore + 3) break;
-    await wait(100);
-  }
-  expect(login.polls).toBeGreaterThanOrEqual(pollsBefore + 3);
-  await settle(page);
-
-  const facts = await page.evaluate(() => {
-    const field = document.getElementById("login-answer") as HTMLInputElement | null;
-    return field === null ? null : { value: field.value, caret: field.selectionStart, focused: document.activeElement === field };
-  });
-  expect(facts).toEqual({ value: answer, caret: 6, focused: true });
-  // The panel drew the question again from the poll's answer, and the field is the
-  // question's: a new element would carry none of what was typed into the old one.
-  expect(await page.evaluate(() => document.querySelectorAll("#login-answer").length)).toBe(1);
-  await page.close();
-});

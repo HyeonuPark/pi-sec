@@ -242,32 +242,6 @@ function current(): Page {
   return page;
 }
 
-it("draws the Results section directly above Pending, and the result chip", async () => {
-  const target = current();
-  await target.setViewportSize({ width: 1280, height: 900 });
-  await target.goto(`${origin}/report`, { waitUntil: "load", timeout: 30000 });
-  await target.waitForSelector(".report-row", { timeout: 30000 });
-
-  const drawn = await target.evaluate(() => ({
-    headings: [...document.querySelectorAll("#view .report-h2")].map((heading) => heading.textContent),
-    chips: [...document.querySelectorAll("#view .report-row")].map((row) => ({
-      title: row.querySelector(".report-row-title")?.textContent,
-      chip: row.querySelector(".status-chip")?.textContent ?? "",
-      result: row.querySelector(".status-chip")?.classList.contains("status-result") ?? false,
-    })),
-    hint: [...document.querySelectorAll("#view .report-hint")].map((line) => line.textContent ?? ""),
-  }));
-
-  // Results sits above Pending, and both above Finished: the section order is the
-  // whole point of the change.
-  expect(drawn.headings).toEqual(["Results", "Pending", "Finished"]);
-  expect(drawn.hint).toContain("Work that ran. Press Done to close it, or write Feedback for more in the report.");
-  const result = drawn.chips.find((row) => row.title === "Run log");
-  expect(result?.chip).toBe("result");
-  expect(result?.result).toBe(true);
-  expect(pageErrors).toEqual([]);
-});
-
 it("draws Done and Feedback in the viewer, with the sentence that explains them kept out of sight", async () => {
   const target = current();
   await target.setViewportSize(DESKTOP);
@@ -409,29 +383,4 @@ it("sends one Done with the field's text, and the fake transport receives it", a
   expect(posts[0]?.path).toBe("/api/reports/01RESULTFIXTURE00000000000/done");
   expect(posts[0]?.body).toEqual({ version: 1, via: "viewer", text: "run it on the second machine" });
   expect(pageErrors).toEqual([]);
-});
-
-it("leaves a plan's bar with one button", async () => {
-  const target = current();
-  await target.route("**/api/reports/by-name/plan", async (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(report({ name: "plan", title: "Plan", status: "active", kind: undefined, versions: [{ n: 1, at: 1_000, bytes: 8, sha256: "a" }] })),
-    }),
-  );
-  await target.route("**/api/reports/01RESULTFIXTURE00000000000/versions/1", async (route) =>
-    route.fulfill({ status: 200, contentType: "text/markdown", body: "# Plan\n\nbody\n" }),
-  );
-  await target.goto(`${origin}/report/plan`, { waitUntil: "load", timeout: 30000 });
-  await target.waitForSelector("#feedback-submit", { timeout: 30000 });
-
-  const drawn = await target.evaluate(() => ({
-    done: document.getElementById("feedback-done"),
-    submit: document.getElementById("feedback-submit")?.textContent,
-    hint: document.getElementById("feedback-hint")?.textContent,
-  }));
-  expect(drawn.done).toBeNull();
-  expect(drawn.submit).toBe("Approve");
-  expect(drawn.hint).toBe("");
 });

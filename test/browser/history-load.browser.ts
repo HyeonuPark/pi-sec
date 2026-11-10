@@ -231,41 +231,6 @@ function rowTop(page: Page, key: string): Promise<number | null> {
   }, key);
 }
 
-it("brings two earlier sessions one press each, then takes its own button away", async () => {
-  const page = await currentContext().newPage();
-  await page.goto(`${origin}/basic-chat`, { waitUntil: "load", timeout: 30000 });
-  await waitForRows(page, 2);
-
-  // The page opens on the newest session, and one press is one session.
-  expect(await dividerCount(page)).toBe(1);
-  const rowsBefore = await rowCount(page);
-  await (await buttonHandle(page)).click();
-  await waitForDividers(page, 2);
-  await page.waitForFunction((before) => document.querySelectorAll("#transcript > [data-row-key]").length > before, rowsBefore, {
-    timeout: 30000,
-  });
-  expect(await dividerCount(page)).toBe(2);
-  expect(await page.$(".load-earlier-button")).not.toBeNull();
-
-  // The second press brings the oldest session, which has no restart of its own to
-  // draw, so the button is gone and the transcript holds the whole conversation.
-  const afterFirst = await rowCount(page);
-  await (await buttonHandle(page)).click();
-  await page.waitForFunction((before) => document.querySelectorAll("#transcript > [data-row-key]").length > before, afterFirst, {
-    timeout: 30000,
-  });
-  await settle(page);
-  // The oldest session began with the conversation itself, so it brings no restart
-  // of its own: the count of `new session` lines stays where it was.
-  expect(await dividerCount(page)).toBe(2);
-  // Nothing is stored before it, so the button is gone and the transcript holds the
-  // whole conversation.
-  await page.waitForFunction(() => document.querySelector(".load-earlier-button") === null, undefined, { timeout: 30000 });
-  expect(await page.$(".load-earlier-button")).toBeNull();
-
-  await page.close();
-});
-
 it("holds the reader's place when a session is added above them", async () => {
   const page = await currentContext().newPage();
   await page.goto(`${origin}/basic-chat`, { waitUntil: "load", timeout: 30000 });

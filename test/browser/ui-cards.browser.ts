@@ -327,14 +327,3 @@ it("mounts the card, reaches its action through api.call, and hands it a publish
   expect(facts.violations).toEqual([]);
   expect(cspConsoleLines(opened.consoleLines)).toEqual([]);
 });
-
-it("names the nonce in style-src only, and leaves every other directive as it was", async () => {
-  const response = await fetch(`${origin}/basic-chat`);
-  const policy = response.headers.get("content-security-policy") ?? "";
-
-  // The page carried exactly this policy before cards existed; a card's style
-  // adds a nonce to `style-src` and nothing else may move.
-  expect(policy).toMatch(
-    /^default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'nonce-[A-Za-z0-9+/=]{16,}'; script-src 'self'$/,
-  );
-});

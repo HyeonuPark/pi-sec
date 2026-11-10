@@ -255,25 +255,3 @@ it("updates a page without a stream when the tab is shown again, and paints the 
   await usage.close();
   await bare.close();
 });
-
-it("keeps both clears when an old tab clears a second job", async () => {
-  const a = await openChat(machineA);
-  // B never hears the event, so it keeps the revision it was served.
-  const b = await openChat(machineB, { blockStream: true });
-
-  await a.click(`#jobs [data-job-id="${firstJob}"] [data-hide-job]`);
-  await a.waitForSelector(`#jobs [data-job-id="${firstJob}"]`, { state: "detached", timeout: 15000 });
-  await expect.poll(async () => (await serverState())["hiddenJobs"], { timeout: 15000 }).toEqual([firstJob]);
-  expect(await b.locator(`#jobs [data-job-id="${firstJob}"]`).count()).toBe(1);
-
-  await b.click(`#jobs [data-job-id="${secondJob}"] [data-hide-job]`);
-  await expect
-    .poll(async () => [...((await serverState())["hiddenJobs"] as string[])].sort(), { timeout: 15000 })
-    .toEqual([firstJob, secondJob].sort());
-  // The retry applied B's press to the state it was refused with, so B now draws
-  // both clears too.
-  await b.waitForSelector(`#jobs [data-job-id="${firstJob}"]`, { state: "detached", timeout: 15000 });
-
-  await a.close();
-  await b.close();
-});

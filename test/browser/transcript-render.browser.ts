@@ -346,38 +346,6 @@ it("skips layout for rows far from the viewport", async () => {
   expect(facts!.containIntrinsicSize).toContain("80px");
 });
 
-it("holds the tail while at the tail, and holds its place while scrolled up", async () => {
-  const opened = await openPage();
-  const { page } = opened;
-
-  await page.evaluate(() => {
-    const pane = document.querySelector<HTMLElement>(".transcript-pane");
-    if (pane !== null) pane.scrollTop = pane.scrollHeight;
-  });
-  await settle(page);
-  expect(await distanceFromBottom(page)).toBeLessThanOrEqual(24);
-  const atTail = await rowCount(page);
-  expect(atTail).toBeGreaterThanOrEqual(3);
-
-  await send("a second message that arrives while the reader is at the tail");
-  await waitForRow(page, atTail + 2);
-  // The pane followed the new rows instead of leaving them below the fold.
-  expect(await distanceFromBottom(page)).toBeLessThanOrEqual(24);
-
-  // Scrolled up, the same arrival must not pull the reader down.
-  await page.evaluate(() => {
-    const pane = document.querySelector<HTMLElement>(".transcript-pane");
-    if (pane !== null) pane.scrollTop = 0;
-  });
-  await settle(page);
-  const before = await rowCount(page);
-  await send("a third message that arrives while the reader is reading above");
-  await waitForRow(page, before + 2);
-  expect(await page.evaluate(() => document.querySelector<HTMLElement>(".transcript-pane")?.scrollTop)).toBe(0);
-
-  expect(opened.pageErrors).toEqual([]);
-});
-
 it("holds the tail while an open live tool panel grows, and holds the place while scrolled up", async () => {
   const opened = await openFramePage();
   const { page, emit } = opened;

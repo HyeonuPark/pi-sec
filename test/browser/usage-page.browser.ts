@@ -275,19 +275,9 @@ interface PageFacts {
   readonly notes: Readonly<Record<string, string>>;
   /** The two subscription cards' own daily columns, with their heights. */
   readonly subscriptionDays: Readonly<Record<string, readonly number[]>>;
-  /** The OpenAI card's balance row: its sentence, and the link it draws with it. */
-  readonly openaiBalance: {
-    readonly note: string;
-    readonly linkText: string;
-    readonly linkHref: string;
-    /** True when the row draws no number and no `WIP`. */
-    readonly numberAbsent: boolean;
-  } | null;
-  /** The decision models card: its name, its note and its rows. */
+  /** The decision models card: its chip and its rows. */
   readonly judges: {
-    readonly name: string;
     readonly chip: string;
-    readonly note: string;
     readonly rows: readonly { readonly title: string; readonly lines: readonly string[] }[];
     readonly top: number;
     readonly bottom: number;
@@ -552,25 +542,9 @@ async function readFacts(page: Page): Promise<PageFacts> {
       );
     }
 
-    const openai = document.querySelector('#usage-cards article.usage-card[data-provider="openai"]');
-    const openaiField = fieldOf(openai, "Prepaid balance");
-    const link = openaiField?.querySelector("a") ?? null;
-    const openaiBalance =
-      openaiField === null
-        ? null
-        : {
-            note: (openaiField.querySelector(".usage-balance-note")?.textContent ?? "").trim(),
-            linkText: (link?.textContent ?? "").trim(),
-            linkHref: link?.getAttribute("href") ?? "",
-            numberAbsent:
-              openaiField.querySelector(".usage-balance") === null && openaiField.querySelector(".usage-wip") === null,
-          };
-
     const judgesCard = document.querySelector('#usage-cards article.usage-card[data-card="judges"]');
     const judges = {
-      name: (judgesCard?.querySelector(".usage-card-name")?.textContent ?? "").trim(),
       chip: (judgesCard?.querySelector(".usage-chip")?.textContent ?? "").trim(),
-      note: (judgesCard?.querySelector(".usage-note")?.textContent ?? "").trim(),
       rows: [...(judgesCard?.querySelectorAll('[data-judge]') ?? [])].map((row) => ({
         title: (row.querySelector(".usage-field-name")?.textContent ?? "").trim(),
         lines: [...row.querySelectorAll(".usage-line")].map((line) => (line.textContent ?? "").trim()),
@@ -593,7 +567,6 @@ async function readFacts(page: Page): Promise<PageFacts> {
       rowNames,
       notes,
       subscriptionDays,
-      openaiBalance,
       judges,
       violations: probeWindow.__csp ?? [],
     };
@@ -676,26 +649,13 @@ function expectEveryCondition(facts: PageFacts, opened: OpenedPage, width: numbe
   expect(days.count).toBe(30);
   for (const height of days.heights) expect(height).toBeGreaterThan(0);
 
-  // 5. The two subscription cards draw pi-sec's own rows under the provider's:
-  //    four on synthetic.new, one on Anthropic, each with thirty columns. The
-  //    provider's own rows keep their place above them, and each card states what
-  //    its cost is.
+  // 5. The synthetic.new and OpenAI cards draw their rows, and OpenAI states its
+  //    cost line. The Anthropic and DeepSeek rows and the other cost lines are
+  //    held by test/ui/usage-subscription-windows.test.ts and
+  //    test/ui/usage-page.test.ts. The two subscription cards each have thirty columns.
   expect(facts.rowNames["synthetic"]).toEqual([
     "Weekly limit",
     "Credits",
-    "Last 24 hours",
-    "Last 7 days",
-    "Last 30 days",
-    "Usage per day",
-  ]);
-  expect(facts.rowNames["anthropic"]).toEqual([
-    "5-hour limit",
-    "Weekly limit",
-    "Credits",
-    "Usage per day",
-  ]);
-  expect(facts.rowNames["deepseek"]).toEqual([
-    "Prepaid balance",
     "Last 24 hours",
     "Last 7 days",
     "Last 30 days",
@@ -708,9 +668,6 @@ function expectEveryCondition(facts: PageFacts, opened: OpenedPage, width: numbe
     "Last 30 days",
     "Usage per day",
   ]);
-  expect(facts.notes["synthetic"]).toBe("pi-sec calls only · estimated credit use at subscription rates");
-  expect(facts.notes["anthropic"]).toBe("pi-sec calls only · API-equivalent cost");
-  expect(facts.notes["deepseek"]).toBe("pi-sec calls only · estimated cost · Peak/off-peak rates applied · holidays ignored");
   expect(facts.notes["openai"]).toBe("pi-sec calls only · estimated cost");
   for (const provider of ["synthetic", "anthropic"]) {
     const heights = facts.subscriptionDays[provider] ?? [];
@@ -718,19 +675,9 @@ function expectEveryCondition(facts: PageFacts, opened: OpenedPage, width: numbe
     for (const height of heights) expect(height, provider).toBeGreaterThan(0);
   }
 
-  // 6. The OpenAI card states the sentence and the billing link in its balance
-  //    row, and draws no number and no `WIP` there. It sits on its own row with
-  //    the same left edge as every other card.
-  const balance = facts.openaiBalance;
-  if (balance === null) throw new Error("the OpenAI card drew no balance row");
-  expect(balance.note).toBe("No API for the balance");
-  expect(balance.linkText).toBe("OpenAI billing page");
-  expect(balance.linkHref).toBe("https://platform.openai.com/settings/organization/billing");
-  expect(balance.numberAbsent).toBe(true);
-
-  // 7. The decision models card names the judge and its model, states the three
-  //    windows of it, and says what its numbers are not.
-  expect(judges.name).toBe("Decision models");
+  // 6. The decision models card names the judge and its model, and states the
+  //    windows summed from the audit trail. Its name, its note and the balance
+  //    sentence of the OpenAI card are held by test/ui/usage-judges.test.ts.
   expect(judges.chip).toBe("judges");
   expect(judges.rows).toHaveLength(1);
   expect(judges.rows[0]?.title).toBe("report-check · openai/gpt-6-luna");
@@ -739,54 +686,33 @@ function expectEveryCondition(facts: PageFacts, opened: OpenedPage, width: numbe
   // them failed.
   expect(judges.rows[0]?.lines[0]).toBe("Last 24 hours: 3 calls · 1,200 tokens · $0.0012 · 1 unanswered");
   expect(judges.rows[0]?.lines[2]).toBe("Last 30 days: 3 calls · 1,200 tokens · $0.0012 · 1 unanswered");
-  expect(judges.note).toBe("pi-sec's own judgement calls · not counted in the provider cards");
 
-  // 8. Nothing on the page was refused by its own policy.
+  // 7. Nothing on the page was refused by its own policy.
   expect(facts.violations).toEqual([]);
   expect(cspConsoleLines(opened.consoleLines)).toEqual([]);
 }
 
-it("draws one card per row in one column at 1280 wide, with the bars the values state", async () => {
-  const viewport = VIEWPORTS[0];
-  const opened = await openUsage(viewport.width, viewport.height);
-  const facts = await readFacts(opened.page);
+for (const viewport of VIEWPORTS) {
+  it(`draws one card per row in one column, with the bars the values state, at ${viewport.width} wide`, async () => {
+    const opened = await openUsage(viewport.width, viewport.height);
+    const facts = await readFacts(opened.page);
 
-  expect(opened.status).toBe(200);
-  expectEveryCondition(facts, opened, viewport.width);
+    expect(opened.status).toBe(200);
+    expectEveryCondition(facts, opened, viewport.width);
 
-  console.log(
-    `[${viewport.name}] cards: ` +
-      facts.cards.map((card) => `${card.label} left=${card.left.toFixed(2)} width=${card.width.toFixed(2)} top=${card.top.toFixed(2)} bottom=${card.bottom.toFixed(2)}`).join(" | "),
-  );
-  console.log(
-    `[${viewport.name}] five-hour fill=${facts.fiveHour?.fill.toFixed(2)} track=${facts.fiveHour?.track.toFixed(2)} ` +
-      `days=${facts.days?.count} scrollWidth=${facts.documentScrollWidth} scrollArea=${facts.scrollWidth}/${facts.scrollClientWidth} violations=${facts.violations.length}`,
-  );
-  console.log(`[${viewport.name}] console: ${opened.consoleLines.length === 0 ? "(none)" : opened.consoleLines.join(" | ")}`);
-  console.log(`[${viewport.name}] page errors: ${opened.pageErrors.length === 0 ? "(none)" : opened.pageErrors.join(" | ")}`);
-  expect(opened.pageErrors, "the page threw").toEqual([]);
-});
-
-it("keeps the same column inside a phone's width at 390 wide", async () => {
-  const viewport = VIEWPORTS[1];
-  const opened = await openUsage(viewport.width, viewport.height);
-  const facts = await readFacts(opened.page);
-
-  expect(opened.status).toBe(200);
-  expectEveryCondition(facts, opened, viewport.width);
-
-  console.log(
-    `[${viewport.name}] cards: ` +
-      facts.cards.map((card) => `${card.label} left=${card.left.toFixed(2)} width=${card.width.toFixed(2)} top=${card.top.toFixed(2)} bottom=${card.bottom.toFixed(2)}`).join(" | "),
-  );
-  console.log(
-    `[${viewport.name}] five-hour fill=${facts.fiveHour?.fill.toFixed(2)} track=${facts.fiveHour?.track.toFixed(2)} ` +
-      `days=${facts.days?.count} scrollWidth=${facts.documentScrollWidth} scrollArea=${facts.scrollWidth}/${facts.scrollClientWidth} violations=${facts.violations.length}`,
-  );
-  console.log(`[${viewport.name}] console: ${opened.consoleLines.length === 0 ? "(none)" : opened.consoleLines.join(" | ")}`);
-  console.log(`[${viewport.name}] page errors: ${opened.pageErrors.length === 0 ? "(none)" : opened.pageErrors.join(" | ")}`);
-  expect(opened.pageErrors, "the page threw").toEqual([]);
-});
+    console.log(
+      `[${viewport.name}] cards: ` +
+        facts.cards.map((card) => `${card.label} left=${card.left.toFixed(2)} width=${card.width.toFixed(2)} top=${card.top.toFixed(2)} bottom=${card.bottom.toFixed(2)}`).join(" | "),
+    );
+    console.log(
+      `[${viewport.name}] five-hour fill=${facts.fiveHour?.fill.toFixed(2)} track=${facts.fiveHour?.track.toFixed(2)} ` +
+        `days=${facts.days?.count} scrollWidth=${facts.documentScrollWidth} scrollArea=${facts.scrollWidth}/${facts.scrollClientWidth} violations=${facts.violations.length}`,
+    );
+    console.log(`[${viewport.name}] console: ${opened.consoleLines.length === 0 ? "(none)" : opened.consoleLines.join(" | ")}`);
+    console.log(`[${viewport.name}] page errors: ${opened.pageErrors.length === 0 ? "(none)" : opened.pageErrors.join(" | ")}`);
+    expect(opened.pageErrors, "the page threw").toEqual([]);
+  });
+}
 
 it("catches a style its own policy refuses, so an empty violation list means something", async () => {
   const viewport = VIEWPORTS[0];
