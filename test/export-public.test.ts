@@ -108,7 +108,12 @@ describe("export-public", () => {
     expect(result.text).toContain("export-public: commit ");
     expect(git(f, out, ["rev-list", "--count", "--all"])).toBe("1");
     expect(git(f, out, ["rev-parse", "HEAD^{tree}"])).toBe(git(f, f.source, ["rev-parse", "main^{tree}"]));
-    expect(git(f, out, ["log", "-1", "--format=%ad|%cd", "--date=iso-strict"])).toBe("2030-01-15T00:00:00+00:00|2030-01-15T00:00:00+00:00");
+    // `--date=raw` is the form that does not depend on the git that reads it: the
+    // instant, then the offset. `iso-strict` prints `Z` for UTC on git 2.56 and
+    // `+00:00` on the versions before it, and `user-tools/export-public` checks
+    // its own commit with this same raw format (its line that refuses a date that
+    // differs from the one asked for).
+    expect(git(f, out, ["log", "-1", "--format=%ad|%cd", "--date=raw"])).toBe("1894665600 +0000|1894665600 +0000");
     expect(git(f, out, ["log", "-1", "--format=%an <%ae>|%cn <%ce>|%s"])).toBe(`${LISTED_IDENTITY}|${LISTED_IDENTITY}|release 1`);
     expect(git(f, out, ["remote"])).toBe("");
     const clone = join(f.dir, "clone");

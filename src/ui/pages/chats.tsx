@@ -29,7 +29,7 @@ function takeOver(id: string, vnode: VNode<unknown>): void {
 
 installChatsBridge();
 mountPage("#view", ChatsView);
-takeOver("theme-toggle", <ThemeToggle />);
+takeOver("theme-toggle", <ThemeToggle live />);
 takeOver("toast", <Toast />);
 
 // The hand-written page reported a page-level failure in its own notice, and so

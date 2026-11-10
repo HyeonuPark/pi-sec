@@ -67,7 +67,7 @@ interface Assembled {
 function assemble(): Assembled {
   // The one notice and the appearance button belong to the page, not to a part.
   takeOver("#toast", <Toast />);
-  takeOver("#theme-toggle", <ThemeToggle />);
+  takeOver("#theme-toggle", <ThemeToggle live />);
 
   // The wiring first: it is the registration the composer's carry reads.
   const wiring = mountChatWiring(document);

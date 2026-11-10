@@ -26,7 +26,7 @@ export default defineConfig({
   test: {
     pool: "forks",
     isolate: true,
-    setupFiles: ["test/setup-tmpdir.ts"],
+    setupFiles: ["test/setup-tmpdir.ts", "test/setup-effects.ts"],
     // Node 25 and later have their own global localStorage, which hides the one
     // that jsdom provides. Start the workers without it. Node 22 and 24 accept
     // this option too, while `--no-webstorage` is refused by them.

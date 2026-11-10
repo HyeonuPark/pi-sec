@@ -100,10 +100,16 @@ export interface LoadUiPageOptions {
   /** The registered name the server would stamp. */
   readonly name?: string;
   /**
-   * The shared preferences record the server would stamp into the page. Absent
-   * leaves the stamp empty, so the page reads `GET /api/preferences` at startup.
+   * The shared preferences record the server would stamp into the page.
+   *
+   * The server stamps one into every page it serves, because `pagePreferences`
+   * answers a record whenever its read succeeds. So the harness stamps an empty
+   * record unless a test says otherwise: a page loaded here then behaves like a
+   * served page and does not read the record at startup. `null` is the page a
+   * failed read leaves, which a cached copy is too: that page reads
+   * `GET /api/preferences` once, after its first paint.
    */
-  readonly preferences?: Readonly<Record<string, unknown>>;
+  readonly preferences?: Readonly<Record<string, unknown>> | null;
   /**
    * Answers by route, without the mount: `/api/jobs` answers the request the
    * page made to `/sec/api/jobs`. A path with no answer gets `200 {}`.
@@ -324,6 +330,12 @@ function stamp(
     .replace(/<meta\s+name="pi-sec-name"\s+content="[^"]*"\s*\/?>/i, `<meta name="pi-sec-name" content="${name}" />`);
 }
 
+/**
+ * The record every served page carries: a store with no theme and no fold list,
+ * which the page draws as it would any other.
+ */
+const DEFAULT_PREFERENCES: Readonly<Record<string, unknown>> = { uiRevision: 0 };
+
 /** One response object of the shape the page's `request` function reads. */
 function responseFor(answer: FakeResponse): {
   ok: boolean;
@@ -349,6 +361,27 @@ export function settle(): Promise<void> {
 }
 
 /**
+ * Wait for the page's first paint, which is when Preact runs its effects.
+ *
+ * `useEffect` is deferred: Preact flushes it after one `requestAnimationFrame`,
+ * which jsdom fires about 16 ms later. A page's startup read of the shared record
+ * is one of those effects, so it lands well after {@link settle} returns, at a
+ * point that moves with the machine's load. Four page tests in four files
+ * compared a request count taken at load against the same count later, and that
+ * read arrived inside the window they measured. Waiting for one animation frame
+ * here puts every read a page starts at mount before any test reads its requests.
+ *
+ * No test here installs a fake clock before loading a page, so the wait is a real
+ * frame.
+ */
+async function flushPaint(window: JSDOM["window"]): Promise<void> {
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+  await settle();
+}
+
+/**
  * Load one page.
  *
  * The page's own scripts from the shell are not run: the bundle stands in for
@@ -365,7 +398,7 @@ export async function loadUiPage(page: UiPageName, options: LoadUiPageOptions = 
     base,
     options.timezone ?? "Asia/Tokyo",
     options.name ?? "",
-    options.preferences,
+    options.preferences === null ? undefined : (options.preferences ?? DEFAULT_PREFERENCES),
   );
   const withBlock =
     options.firstPaint === undefined
@@ -448,7 +481,7 @@ export async function loadUiPage(page: UiPageName, options: LoadUiPageOptions = 
   }
   window.eval(await readFile(join(root, "src/web/base.js"), "utf8"));
   window.eval(source);
-  await settle();
+  await flushPaint(window);
 
   const currentStream = (): FakeEventSource => {
     const source_ = FakeEventSource.instances.at(-1);
