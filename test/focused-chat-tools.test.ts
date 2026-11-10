@@ -3,7 +3,8 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AgentDoc, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import { SUBAGENT_TOOL_REMOVALS } from "../src/agent/tool-profile.ts";
 import { SecAgent, SecAgentChild, SecAgentHub } from "../src/documents.ts";
-import { FocusedChatError } from "../src/focused/service.ts";
+import { FocusedChatError, archiveFocusedChat, deleteFocusedChat } from "../src/focused/service.ts";
+import { readAuditTail } from "../src/runtime/audit.ts";
 import { conversationOf, depsOf, focusedHarness, openChat, runTool } from "./focused-helpers.ts";
 import type { TestHarness } from "./helpers.ts";
 
@@ -243,6 +244,84 @@ describe("focused chat tools", () => {
       reportId,
     });
     expect(again).toContain("deleted");
+  });
+
+  /** The harness of these deps, except that its first commit throws, as a failing write would. */
+  function failingFirstCommit(deps: ReturnType<typeof depsOf>): ReturnType<typeof depsOf> {
+    let failed = false;
+    const wrapped = new Proxy(deps.harness, {
+      get(target, property) {
+        if (property === "commit") {
+          return (...args: unknown[]) => {
+            if (!failed) {
+              failed = true;
+              return Promise.reject(new Error("simulated commit failure"));
+            }
+            return (target.commit as (...rest: unknown[]) => unknown)(...args);
+          };
+        }
+        const value = Reflect.get(target, property) as unknown;
+        return typeof value === "function" ? (value as (...rest: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    return { ...deps, harness: wrapped };
+  }
+
+  it("finishes an archive that failed after the store write when it is called again", async () => {
+    harness = await focusedHarness();
+    const row = await openChat(harness, "a chat to archive");
+
+    await expect(archiveFocusedChat(failingFirstCommit(depsOf(harness)), row.conversationId, CTX)).rejects.toThrow(
+      "simulated commit failure",
+    );
+    // The store says archived, but the name is still taken.
+    expect(harness.runtime.focusedChats.get(row.conversationId)?.archivedAt).toEqual(expect.any(Number));
+    expect(
+      await harness.runtime.harness.snapshot(SecAgentChild, ROOT_CONVERSATION_ID, row.name, CTX),
+    ).toBeDefined();
+
+    const finished = await archiveFocusedChat(depsOf(harness), row.conversationId, CTX);
+    expect(finished.conversationId).toBe(row.conversationId);
+    expect(
+      await harness.runtime.harness.snapshot(SecAgentChild, ROOT_CONVERSATION_ID, row.name, CTX),
+    ).toBeUndefined();
+    const record = await harness.runtime.harness.snapshot(SecAgent, String(row.conversationId), CTX);
+    expect(record?.status).toBe("stopped");
+    expect(record?.note).toBe("archived");
+    const rows = (await readAuditTail(harness.runtime.paths.auditLog, undefined, 50)).filter(
+      (entry) => entry["type"] === "focused_chat_archived",
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("still refuses a second archive of a chat that was archived in full", async () => {
+    harness = await focusedHarness();
+    const row = await openChat(harness, "a chat to archive");
+    await archiveFocusedChat(depsOf(harness), row.conversationId, CTX);
+
+    await expect(archiveFocusedChat(depsOf(harness), row.conversationId, CTX)).rejects.toThrow("already archived");
+  });
+
+  it("finishes a delete that failed after the store write when it is called again", async () => {
+    harness = await focusedHarness();
+    const row = await openChat(harness, "a test chat", { test: true });
+    const reportId = await reportNaming(row.conversationId, true);
+    const input = { conversationId: row.conversationId, reportId };
+
+    await expect(deleteFocusedChat(failingFirstCommit(depsOf(harness)), input, CTX)).rejects.toThrow(
+      "simulated commit failure",
+    );
+    expect(harness.runtime.focusedChats.isDeleted(row.conversationId)).toBe(true);
+    expect(await harness.runtime.harness.snapshot(SecAgent, String(row.conversationId), CTX)).toBeDefined();
+
+    await deleteFocusedChat(depsOf(harness), input, CTX);
+    expect(
+      await harness.runtime.harness.snapshot(SecAgentChild, ROOT_CONVERSATION_ID, row.name, CTX),
+    ).toBeUndefined();
+    expect(await harness.runtime.harness.snapshot(SecAgent, String(row.conversationId), CTX)).toBeUndefined();
+
+    // Nothing is left to finish, so a third call is refused as before.
+    await expect(deleteFocusedChat(depsOf(harness), input, CTX)).rejects.toThrow("was deleted");
   });
 
   it("refuses an approval of a revision the text has moved past", async () => {

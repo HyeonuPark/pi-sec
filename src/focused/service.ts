@@ -453,13 +453,52 @@ export async function archiveFocusedChat(
   const found = lookupFocusedChat(deps.store, conversationId);
   if (found.state === "deleted") throw new FocusedChatError("chat_deleted", "this focused chat was deleted");
   if (found.state === "none") throw new FocusedChatError("not_found", "this conversation is not a focused chat");
-  if (found.state === "archived") throw new FocusedChatError("chat_archived", "this focused chat is already archived");
+  if (found.state === "archived") {
+    // An archive that failed after the store write left its name on the root's
+    // index. A second call finishes the steps that are left. When the index no
+    // longer holds this chat, the archive was complete and the call is refused.
+    if (!(await indexHolds(deps, found.row.name, conversationId, ctx))) {
+      throw new FocusedChatError("chat_archived", "this focused chat is already archived");
+    }
+    return await finishArchive(deps, hub, found.row, ctx);
+  }
 
   await stopRun(deps, conversationId, ctx);
   const row = deps.store.archive(conversationId, Date.now());
   if (row === undefined) throw new FocusedChatError("chat_archived", "this focused chat is already archived");
   await hub.setStatus(ctx, conversationId as ConversationId, "stopped", { note: "archived", endedAt: Date.now() });
   await retireChild(deps, { conversationId, name: row.name, holdsSlot: true, retireRecord: false }, ctx);
+  deps.audit.append({ type: "focused_chat_archived", conversationId: String(conversationId), name: row.name });
+  publishFocusedChatChange(deps, row, "archived");
+  return row;
+}
+
+/** Whether the root's name index still holds this chat under its name. */
+async function indexHolds(deps: FocusedDeps, name: string, conversationId: number, ctx: Context): Promise<boolean> {
+  const entry = await deps.harness.snapshot(SecAgentChild, ROOT_CONVERSATION_ID, name, ctx);
+  return entry !== undefined && entry.conversationId === String(conversationId);
+}
+
+/**
+ * The steps of an archive after the store write, for a second call.
+ *
+ * It never gives the slot back. The first call did not get that far, and the
+ * sweep of the subagent hub counts the slots again from the store row, which
+ * already says archived. Lowering the counter here would count one slot too few.
+ */
+async function finishArchive(
+  deps: FocusedDeps,
+  hub: NonNullable<FocusedDeps["hub"]>,
+  row: FocusedChatRow,
+  ctx: Context,
+): Promise<FocusedChatRow> {
+  const { conversationId } = row;
+  const record = await deps.harness.snapshot(SecAgent, String(conversationId), ctx);
+  // The status call is a no-op when the record already says stopped with this note.
+  if (record !== undefined) {
+    await hub.setStatus(ctx, conversationId as ConversationId, "stopped", { note: "archived", endedAt: Date.now() });
+  }
+  await retireChild(deps, { conversationId, name: row.name, holdsSlot: false, retireRecord: false }, ctx);
   deps.audit.append({ type: "focused_chat_archived", conversationId: String(conversationId), name: row.name });
   publishFocusedChatChange(deps, row, "archived");
   return row;
@@ -536,7 +575,36 @@ export async function deleteFocusedChat(
   const hub = requireHub(deps);
   const { conversationId, reportId } = input;
   const found = lookupFocusedChat(deps.store, conversationId);
-  if (found.state === "deleted") throw new FocusedChatError("chat_deleted", "this focused chat was deleted");
+  if (found.state === "deleted") {
+    // A delete that failed after the store write left the agent record and the
+    // name on the index. A second call finishes it. When the record is gone, the
+    // delete was complete and the call is refused.
+    const record = await deps.harness.snapshot(SecAgent, String(conversationId), ctx);
+    if (record === undefined || record.kind !== "focused") {
+      throw new FocusedChatError("chat_deleted", "this focused chat was deleted");
+    }
+    await requireApprovalNaming(deps, conversationId, reportId, ctx);
+    // The slot counter is not lowered: the sweep of the subagent hub corrects it.
+    await retireChild(deps, { conversationId, name: record.name, holdsSlot: false, retireRecord: true }, ctx);
+    deps.audit.append({
+      type: "focused_chat_deleted",
+      conversationId: String(conversationId),
+      name: record.name,
+      reportId,
+    });
+    // The row is gone from the store, so the title is not known any more.
+    const finished: FocusedChatRow = {
+      seq: 0,
+      conversationId,
+      name: record.name,
+      title: null,
+      openedAt: record.createdAt,
+      archivedAt: null,
+      test: true,
+    };
+    publishFocusedChatChange(deps, finished, "deleted");
+    return finished;
+  }
   if (found.state === "none") throw new FocusedChatError("not_found", "this conversation is not a focused chat");
 
   if (!found.row.test) {
