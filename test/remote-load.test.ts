@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createRunFixture, settle } from "./remote-run-helpers.ts";
+import { createRunFixture } from "./remote-run-helpers.ts";
 import { parseLoad } from "../src/remote/machines.ts";
 
 /**
@@ -46,19 +46,6 @@ describe("reading a machine's load", () => {
       const listed = await fixture.runtime.remoteMachines.list(BACKGROUND_CONTEXT);
       expect(listed.machines.length).toBe(1);
       expect((await fixture.calls()).length).toBe(before);
-    } finally {
-      await fixture.close();
-    }
-  });
-
-  it("refuses at off, without asking the machine", async () => {
-    const fixture = await createRunFixture();
-    try {
-      await fixture.pinHostKey();
-      const load = await fixture.runtime.remoteMachines.load("box-a");
-      expect(load.kind).toBe("refused");
-      await settle();
-      expect(await fixture.calls()).toEqual([]);
     } finally {
       await fixture.close();
     }

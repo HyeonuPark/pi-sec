@@ -158,6 +158,7 @@ describe("remote_machines", () => {
   it("refuses a machine at off with the core's sentence, and calls no ssh", async () => {
     const fixture = await createRunFixture();
     try {
+      await fixture.pinHostKey();
       const refused = await toolOf(fixture, "remote_machines").execute(
         { machine: "box-a" },
         callApi(ROOT_CONVERSATION_ID),
@@ -362,6 +363,7 @@ describe("the file tools", () => {
       );
       expect(refused.isError).toBe(true);
       expect(textOf(refused)).toContain("more than the 4-byte cap");
+      expect(textOf(refused)).toContain("8 bytes");
     } finally {
       await fixture.close();
     }

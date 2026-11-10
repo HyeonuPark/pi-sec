@@ -278,47 +278,6 @@ describe("lockfileHash", () => {
 });
 
 describe("fillBuildDir on a copy-mode file system", () => {
-  it("installs, caches, refills from the cache, and keeps the copies independent", async () => {
-    const root = tempRoot("buildfs-flow");
-    const worktree = join(root, "worktrees", "demo");
-    mkdirSync(worktree, { recursive: true });
-    writeFileSync(join(worktree, "package-lock.json"), '{"lockfileVersion": 3}\n');
-    const hash = lockfileHash(join(worktree, "package-lock.json"));
-    const cacheParent = join(root, "buildfs", "local", "demo", "node_modules");
-    const install = ["sh", "-c", "mkdir -p node_modules/pkg && echo v1 > node_modules/pkg/f"];
-    const target = join(worktree, "node_modules");
-
-    const first = await fillBuildDir({ mode: "copy", target, cacheParent, lockHash: hash, install, cwd: worktree });
-    expect(first.installed).toBe(true);
-    expect(first.filledFrom).toBeUndefined();
-    expect(first.mode).toBe("copy");
-    expect(readFileSync(join(target, "pkg", "f"), "utf8")).toBe("v1\n");
-
-    const cache = await snapshotToCache({
-      mode: "copy",
-      source: target,
-      cacheParent,
-      meta: { repo: "local/demo", buildDir: "node_modules", sourceWorktree: worktree, lockfileHash: hash },
-    });
-    expect(cache.readOnly).toBe(false);
-    expect(cache.meta?.createdAt).toBe(cache.createdAt);
-
-    const second = join(root, "worktrees", "demo-two");
-    mkdirSync(second);
-    const target2 = join(second, "node_modules");
-    const refilled = await fillBuildDir({ mode: "copy", target: target2, cacheParent, lockHash: hash, install, cwd: second });
-    expect(refilled.installed).toBe(false);
-    expect(refilled.filledFrom).toBe(cache.path);
-    expect(readFileSync(join(target2, "pkg", "f"), "utf8")).toBe("v1\n");
-    expect(existsSync(join(target2, "pi-sec-cache.json"))).toBe(true);
-
-    // One worktree's edit and delete must not reach the other worktree or the cache.
-    writeFileSync(join(target2, "pkg", "f"), "changed\n");
-    rmSync(join(target2, "pkg", "f"));
-    expect(readFileSync(join(target, "pkg", "f"), "utf8")).toBe("v1\n");
-    expect(readFileSync(join(cache.path, "pkg", "f"), "utf8")).toBe("v1\n");
-  });
-
   it("installs again when the lockfile hash does not match the newest cache", async () => {
     const root = tempRoot("buildfs-mismatch");
     const worktree = join(root, "worktree");
@@ -532,28 +491,6 @@ describe("removeBuildfs path checks", () => {
     const result = await removeBuildfs(cache, { allowedRoot: root, mode: "copy" });
     expect(result).toEqual({ removed: true, method: "rm" });
     expect(existsSync(cache)).toBe(false);
-  });
-});
-
-describe("pruneCaches", () => {
-  it("removes everything after the newest keep", async () => {
-    const root = tempRoot("buildfs-prune");
-    const source = join(root, "node_modules");
-    mkdirSync(source);
-    writeFileSync(join(source, "f"), "x");
-    const cacheParent = join(root, "caches");
-    const base = { repo: "local/demo", buildDir: "node_modules", sourceWorktree: "/w", lockfileHash: "h" };
-    const old = await snapshotToCache({ mode: "copy", source, cacheParent, meta: { ...base, createdAt: "2026-01-01T00:00:00.000Z" } });
-    const middle = await snapshotToCache({ mode: "copy", source, cacheParent, meta: { ...base, createdAt: "2026-01-02T00:00:00.000Z" } });
-    const newest = await snapshotToCache({ mode: "copy", source, cacheParent, meta: { ...base, createdAt: "2026-01-03T00:00:00.000Z" } });
-
-    const removed = await pruneCaches(cacheParent, 2, { allowedRoot: root, mode: "copy" });
-    expect(removed).toEqual([old.path]);
-    expect(existsSync(middle.path)).toBe(true);
-    expect(existsSync(newest.path)).toBe(true);
-
-    const again = await pruneCaches(cacheParent, 2, { allowedRoot: root, mode: "copy" });
-    expect(again).toEqual([]);
   });
 });
 

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { writeFile } from "node:fs/promises";
 import { createRemoteFixture } from "./remote-helpers.ts";
 import { createRunFixture, settle } from "./remote-run-helpers.ts";
 
@@ -272,28 +271,5 @@ describe("the step check: the one list of ssh options", () => {
     const quoted = sshShellWrapper("ssh", ["-o", "X=a'b"]);
     expect(quoted).toBe(`#!/bin/sh\nexec 'ssh' '-o' 'X=a'\\''b' "$@"\n`);
     void sshArguments;
-  });
-});
-
-describe("the file tools: the read cap", () => {
-  it("refuses a file larger than the cap rather than cutting it", async () => {
-    const fixture = await createRunFixture();
-    try {
-      await fixture.pinHostKey();
-      await fixture.setLevel("box-a", "on");
-      await writeFile(`${fixture.remote}/big.txt`, "x".repeat(5_000), "utf8");
-      const read = await fixture.runtime.remoteMachines.files().read({
-        machine: "box-a",
-        path: `${fixture.remote}/big.txt`,
-        maxBytes: 1_000,
-      });
-      expect(read.kind).toBe("refused");
-      if (read.kind === "refused") {
-        expect(read.reason).toContain("5000");
-        expect(read.reason).toContain("1000");
-      }
-    } finally {
-      await fixture.close();
-    }
   });
 });

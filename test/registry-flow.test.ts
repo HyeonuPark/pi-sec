@@ -355,6 +355,7 @@ describe("the registry flow on a temporary directory", () => {
     expect(existsSync(firstCache)).toBe(true);
     expect(existsSync(join(firstCache, "pi-sec-cache.json"))).toBe(true);
     expect(entry.cache?.readOnly).toBe(false);
+    expect(entry.cache?.meta?.createdAt).toBe(entry.cache?.createdAt);
     expect(entry.cache?.meta?.repo).toBe("local/demo");
     expect(entry.cache?.meta?.buildDir).toBe("node_modules");
     expect(entry.cache?.meta?.sourceWorktree).toBe(a.path);
@@ -368,6 +369,7 @@ describe("the registry flow on a temporary directory", () => {
     b = await addWorktree(settings, "local/demo", "b");
     expect(b.buildDirs).toEqual([{ dir: "node_modules", filledFrom: firstCache, installed: false }]);
     expect(readFileSync(join(b.path, "node_modules", "pkg", "value"), "utf8")).toBe("v1\n");
+    expect(existsSync(join(b.path, "node_modules", "pi-sec-cache.json"))).toBe(true);
     expect(installsIn(root)).toEqual([a.path]);
 
     const listing = await listRegistry(settings, { repo: "local/demo" });
@@ -690,6 +692,9 @@ describe("the registry flow on a temporary directory", () => {
     const left = await listCaches(cacheParent(root, "local/demo", "node_modules"));
     expect(left).toHaveLength(1);
     expect(left[0]?.path).toBe(kept[0]?.path);
+
+    const again = entryOf(await pruneAll({ ...settings, cacheKeep: 1 }), "local/demo", "node_modules");
+    expect(again.pruned).toEqual([]);
   });
 
   it("empties and fills the build directory again", async () => {
