@@ -62,8 +62,18 @@ async function userEntries(conversation: Conversation): Promise<EntryRecord[]> {
   return page.items.filter((entry) => entry.kind === "pi.user");
 }
 
+/**
+ * The zone the producer harness runs in. It is neither UTC nor the zone of the
+ * machine that runs the suite, so an offset that comes from anywhere but the
+ * configured zone fails the pattern below.
+ */
+const HARNESS_ZONE = "Asia/Kolkata";
+
 /** The envelope's instant: to the second, in the harness zone, with its offset. */
-const SECOND_PRECISION = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
+const SECOND_PRECISION = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+05:30$/;
+
+/** The same shape in any zone, for the doors that are handed a zone of their own. */
+const SECOND_PRECISION_ANY_ZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
 
 /**
  * The stamp on one entry: second precision, and not after the instant the
@@ -78,7 +88,7 @@ const SECOND_PRECISION = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
  * bound below keeps a full second for the write on top of the truncation, and
  * the first check holds the direction the truncation implies.
  */
-function expectOperatorStamp(entry: EntryRecord, where: string): void {
+function expectStamp(entry: EntryRecord, where: string): void {
   const parsed = readMessage(entryText(entry));
   const at = parsed?.attrs["at"];
   expect(at, `${where}: at`).toMatch(SECOND_PRECISION);
@@ -141,6 +151,7 @@ describe("the envelope at every producer", () => {
       ...options,
       config: {
         ...(options.config ?? {}),
+        timezone: HARNESS_ZONE,
         server: { ...defaultConfig().server, ...(options.config?.server ?? {}), port: 0 },
       },
     });
@@ -213,6 +224,7 @@ describe("the envelope at every producer", () => {
     harness = await createTestHarness({
       responses: answers(4),
       config: {
+        timezone: HARNESS_ZONE,
         scheduler: {
           enabled: true,
           tickMs: 30_000,
@@ -399,12 +411,13 @@ describe("the envelope at every producer", () => {
       const found = page.items.filter((candidate) => candidate.kind === "pi.reset");
       return found.length >= 1 ? page.items : undefined;
     }, "the reset entry");
-    const parsed = readMessage(entryText(resets.find((entry) => entry.kind === "pi.reset")!));
+    const firstReset = resets.find((entry) => entry.kind === "pi.reset")!;
+    const parsed = readMessage(entryText(firstReset));
     expect(parsed?.source).toBe("restart");
     expect(parsed?.attrs["via"]).toBe("handoff");
     expect(parsed?.body).toContain("start again");
     // A restart is its own source, and it carries the instant it was written.
-    expect(parsed?.attrs["at"]).toMatch(SECOND_PRECISION);
+    expectStamp(firstReset, "the handoff of the REST reset");
 
     const chat = await fetch(`${origin}/basic-chat/reset`, {
       method: "POST",
@@ -421,10 +434,12 @@ describe("the envelope at every producer", () => {
     expect(second?.source).toBe("restart");
     expect(second?.attrs["via"]).toBe("handoff");
     expect(second?.body).toContain("once more");
+    expectStamp(both[1]!, "the handoff of the chat reset");
   });
 
   it("labels a background result as tool output", async () => {
     harness = await createTestHarness({
+      config: { timezone: HARNESS_ZONE },
       responses: [
         fauxAssistantMessage([fauxToolCall("async_call", { title: "greet", tool: "bash", args: { command: "echo hi" } })], {
           stopReason: "toolUse",
@@ -436,21 +451,21 @@ describe("the envelope at every producer", () => {
     const submitted = await conversation.submit({ type: "input", content: "start it" }, ctx);
     await submitted.wait(ctx);
 
-    const text = await until(async () => {
-      const found = await userTexts(conversation);
-      return found.map(readMessage).find((parsed) => parsed?.source === "tool-output") === undefined
-        ? undefined
-        : found[found.length - 1]!;
+    const entry = await until(async () => {
+      const found = await userEntries(conversation);
+      return found.some((each) => readMessage(entryText(each))?.source === "tool-output")
+        ? found[found.length - 1]!
+        : undefined;
     }, "the background result to arrive");
 
-    const parsed = readMessage(text);
+    const parsed = readMessage(entryText(entry));
     expect(parsed?.source).toBe("tool-output");
     expect(parsed?.attrs["title"]).toBe("greet");
     expect(parsed?.attrs["tool"]).toBe("bash");
     expect(parsed?.attrs["status"]).toBe("done");
     expect(parsed?.body).toContain("hi");
     // The harness wrote the result, so it carries the instant it was written.
-    expect(parsed?.attrs["at"]).toMatch(SECOND_PRECISION);
+    expectStamp(entry, "the background result");
   });
 
   it("labels an agent's brief as kind=brief and the note it gets later", async () => {
@@ -463,6 +478,7 @@ describe("the envelope at every producer", () => {
         ? callTool("await_orders", { note: "parked" })
         : fauxAssistantMessage([fauxText("ok")]);
     harness = await createTestHarness({
+      config: { timezone: HARNESS_ZONE },
       responses: [callTool("spawn_subagent", brief), ...Array.from({ length: 30 }, scripted)],
     });
     const conversation = await defaultConversation(harness);
@@ -477,11 +493,12 @@ describe("the envelope at every producer", () => {
     const child = await harness.runtime.harness.conversation(childId, ctx);
     expect(child).toBeDefined();
 
-    const briefText = await until(async () => (await userTexts(child!))[0], "the brief to reach the child");
-    const first = readMessage(briefText);
+    const briefEntry = await until(async () => (await userEntries(child!))[0], "the brief to reach the child");
+    const first = readMessage(entryText(briefEntry));
     expect(first?.source).toBe("agent");
     expect(first?.attrs["kind"]).toBe("brief");
     expect(first?.body).toBe("find the thing");
+    expectStamp(briefEntry, "the spawn brief");
 
     // The child is parked now, so the root's next answer is the only one in the
     // queue and the note is what the root sends.
@@ -491,10 +508,11 @@ describe("the envelope at every producer", () => {
     ]);
     await conversation.submit({ type: "input", content: "send it" }, ctx);
 
-    const noteText = await until(async () => {
-      const found = (await userTexts(child!)).map(readMessage).find((parsed) => parsed?.attrs["kind"] === "note");
-      return found === undefined ? undefined : found;
+    const noteEntry = await until(async () => {
+      return (await userEntries(child!)).find((each) => readMessage(entryText(each))?.attrs["kind"] === "note");
     }, "the note to reach the child");
+    const noteText = readMessage(entryText(noteEntry))!;
+    expectStamp(noteEntry, "the agent note");
 
     expect(noteText.source).toBe("agent");
     expect(noteText.attrs["from"]).toBe("root-agent");
@@ -507,7 +525,10 @@ describe("the envelope at every producer", () => {
     const brief = { name: "researcher", vmodel: "faux", roles: [], initialPrompt: "find the thing" };
     // The child answers instead of parking, so the discipline hook nudges it. The
     // nudge's return value is the entry's content, so the envelope has to be there.
-    harness = await createTestHarness({ responses: [callTool("spawn_subagent", brief), ...answers(40)] });
+    harness = await createTestHarness({
+      config: { timezone: HARNESS_ZONE },
+      responses: [callTool("spawn_subagent", brief), ...answers(40)],
+    });
     const conversation = await defaultConversation(harness);
     await (await conversation.submit({ type: "input", content: "go" }, ctx)).wait(ctx);
 
@@ -532,7 +553,7 @@ describe("the envelope at every producer", () => {
     const base = defaultConfig();
     harness = await createTestHarness({
       responses: [callTool("restart_session", { reason: "the prompt moved", roundId: "R1", continuation: "continue the round" }), ...answers(10)],
-      config: { agent: { extensions: { enabled: [...base.agent.extensions.enabled, "session-restart"] } } },
+      config: { timezone: HARNESS_ZONE, agent: { extensions: { enabled: [...base.agent.extensions.enabled, "session-restart"] } } },
     });
     const conversation = await defaultConversation(harness);
     const submission = await conversation.submit({ type: "input", content: "go" }, ctx);
@@ -545,12 +566,14 @@ describe("the envelope at every producer", () => {
     expect(handoff?.source).toBe("restart");
     expect(handoff?.attrs["via"]).toBe("handoff");
     expect(handoff?.attrs["round"]).toBe("R1");
+    expectStamp(reset!, "the session-restart handoff");
 
     const continuation = await until(async () => {
       const after = await conversation.entries({ minEntryId: (reset!.id + 1) as never, order: "ascending" }, 200, undefined, ctx);
-      return after.items.find((entry) => entry.kind === "pi.user") === undefined ? undefined : after.items;
+      return after.items.find((entry) => entry.kind === "pi.user");
     }, "the continuation to be stored");
-    const parsed = readMessage(entryText(continuation.find((entry) => entry.kind === "pi.user")!));
+    const parsed = readMessage(entryText(continuation));
+    expectStamp(continuation, "the continuation");
     expect(parsed?.source).toBe("restart");
     expect(parsed?.attrs["via"]).toBe("continuation");
     expect(parsed?.attrs["round"]).toBe("R1");
@@ -599,7 +622,7 @@ describe("the envelope at every producer", () => {
     expect(chat.status).toBe(202);
 
     const entry = await until(async () => (await userEntries(conversation))[0], "the chat input to be stored");
-    expectOperatorStamp(entry, "basic-chat");
+    expectStamp(entry, "basic-chat");
     expect(readMessage(entryText(entry))?.body).toBe("typed in the box");
   });
 
@@ -615,7 +638,7 @@ describe("the envelope at every producer", () => {
     expect(rest.status).toBe(202);
 
     const entry = await until(async () => (await userEntries(conversation))[0], "the REST input to be stored");
-    expectOperatorStamp(entry, "conversation route");
+    expectStamp(entry, "conversation route");
     expect(readMessage(entryText(entry))?.body).toBe("sent over REST");
   });
 
@@ -640,7 +663,7 @@ describe("the envelope at every producer", () => {
     expect(sent.status).toBe(202);
 
     const answer = await until(async () => entryVia(conversation, "ask-user"), "the answer entry");
-    expectOperatorStamp(answer, "ask-user answer");
+    expectStamp(answer, "ask-user answer");
   });
 
   it("stamps the input an approval press writes", async () => {
@@ -656,7 +679,7 @@ describe("the envelope at every producer", () => {
 
     const conversation = await defaultConversation(harness!);
     const approval = await until(async () => entryVia(conversation, "approval"), "the approval input");
-    expectOperatorStamp(approval, "approval input");
+    expectStamp(approval, "approval input");
   });
 
   it("stamps a note written in the report viewer", async () => {
@@ -672,7 +695,7 @@ describe("the envelope at every producer", () => {
 
     const conversation = await defaultConversation(harness!);
     const feedback = await until(async () => entryVia(conversation, "report-feedback"), "the review note");
-    expectOperatorStamp(feedback, "report feedback");
+    expectStamp(feedback, "report feedback");
   });
 
   it("reads a delivered agent message's instant to the second", async () => {
@@ -684,6 +707,7 @@ describe("the envelope at every producer", () => {
         ? callTool("await_orders", { note: "parked" })
         : fauxAssistantMessage([fauxText("ok")]);
     harness = await createTestHarness({
+      config: { timezone: HARNESS_ZONE },
       responses: [callTool("spawn_subagent", brief), ...Array.from({ length: 20 }, scripted)],
     });
     const conversation = await defaultConversation(harness);
@@ -926,7 +950,7 @@ describe("the labelled submission interface", () => {
     // finds must not find one that the forged text supplied.
     // The door adds its instant, and the attributes stay in name order.
     const stamped = readMessage(content);
-    expect(stamped?.attrs["at"]).toMatch(SECOND_PRECISION);
+    expect(stamped?.attrs["at"]).toMatch(SECOND_PRECISION_ANY_ZONE);
     expect(content).toBe(
       wrapMessage("tool-output", forge, { ...stamped?.attrs, title: "bash", tool: "bash", status: "ok" }),
     );
@@ -1000,7 +1024,7 @@ describe("the labelled submission interface", () => {
       body: "the note",
       format: "envelope",
     });
-    expect(written?.attrs["at"]).toMatch(SECOND_PRECISION);
+    expect(written?.attrs["at"]).toMatch(SECOND_PRECISION_ANY_ZONE);
   });
 
   it("labels a message that carries text parts", async () => {

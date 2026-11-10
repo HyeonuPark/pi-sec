@@ -82,6 +82,7 @@ describe("P4: js nested calls", () => {
       const out = {};
       try { out.property = "no throw: " + typeof tools.js; } catch (e) { out.property = "throw: " + e.message; }
       try { out.invoke = "no throw: " + JSON.stringify(await invoke("js", { code: "return 1" })); } catch (e) { out.invoke = "throw: " + e.message; }
+      try { out.unknown = "no throw: " + (await tools.no_such_tool({})); } catch (e) { out.unknown = "throw: " + e.message; }
       out.allTools = ALL_TOOLS.filter((t) => t.name === "js").length;
       return JSON.stringify(out);
       `,
@@ -90,6 +91,7 @@ describe("P4: js nested calls", () => {
     expect(result).toContain('"property":"throw: tools.js does not exist');
     expect(result).toContain('"invoke":"throw: unknown tool: js"');
     expect(result).toContain('"allTools":0');
+    expect(result).toContain('"unknown":"throw: tools.no_such_tool does not exist');
   });
 
   it("runs two overlapping nested calls at once and keeps their output apart", async () => {

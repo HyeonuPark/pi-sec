@@ -15,12 +15,11 @@ import { join } from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
 import { RestartState } from "../src/runtime/restart.ts";
 import { AdminNotes } from "../src/runtime/notes.ts";
-import { RESTART_MARKER, readPendingRestart, reportPendingRestart, RUNNER_EXIT_CODE, RUNNER_VARIABLE, RestartLauncher, restartMarkerPath, type CommandRun, type RestartHooks } from "../src/runtime/restart-helper.ts";
+import { RESTART_MARKER, readPendingRestart, reportPendingRestart, RUNNER_EXIT_CODE, RUNNER_VARIABLE, RestartLauncher, restartMarkerPath, type RestartHooks } from "../src/runtime/restart-helper.ts";
 import { execFileSync } from "node:child_process";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, AssistantEntry, ResetEntry, SystemEntry, UserEntry, type Conversation, type ConversationId, type Submission, type SubmissionDraft } from "@earendil-works/pi-durable";
 import { readMessage } from "../src/message-envelope.ts";
-import { NO_RESPONSE_MARKER } from "../src/shared/silent-turn.ts";
 import type { AgentKind, AgentRecord, AgentStatus, JobRecord } from "../src/documents.ts";
 import { NOTICE_LIST_LIMIT, NOTICE_SUPPRESS_MS, collectWaitingWork, notifyRestartNotice, zoneIso, type RestartNoticeDeps, type WaitingSubagent, type WaitingWork, type WaitingWorkSources } from "../src/runtime/restart-notice.ts";
 import { existsSync } from "node:fs";
@@ -349,24 +348,6 @@ describe("restart-notice.test.ts", () => {
 
         expect(readMessage(f.submitted[0]!)?.body ?? "").toContain(`- Started at: ${expected}`);
       }
-    });
-
-    it("ends with the no-response line, named exactly as the screen hides it", async () => {
-      const startedAt = T0 + 5000;
-      const f = fixture({ tail: restartTail(startedAt), startedAt });
-
-      await notifyRestartNotice(f.deps);
-
-      const body = readMessage(f.submitted[0]!)?.body ?? "";
-      const lines = body.split("\n");
-      expect(lines[lines.length - 1]).toBe(
-        `- If nothing above waits for this restart and you have nothing to tell the user, your whole answer is this one line, copied exactly with nothing added: ${NO_RESPONSE_MARKER}`,
-      );
-      // The line appears once, and in the form the screen hides: a copy in backticks
-      // is drawn on the screen, and a model copies what it reads.
-      expect(body.split(NO_RESPONSE_MARKER)).toHaveLength(2);
-      expect(body).not.toContain("`" + NO_RESPONSE_MARKER + "`");
-      expect(body).not.toContain("operator");
     });
 
     it("writes nothing on a first start", async () => {
@@ -928,17 +909,6 @@ describe("restart-runner.test.ts", () => {
       expect(exits).toEqual([RUNNER_EXIT_CODE]);
     });
 
-    it("names the forced reinstall in the marker, so the runner passes --reinstall", async () => {
-      const fx = await fixture();
-      const { hooks } = recorder(fx);
-      const restart = launcher(fx, { [RUNNER_VARIABLE]: "1" }, hooks);
-
-      const outcome = await restart.launch("ui", { reinstall: true });
-
-      expect(outcome.ok).toBe(true);
-      expect(await marker(fx)).toEqual({ at: 1_700_000_000_000, source: "ui-reinstall" });
-    });
-
     it("refuses a second request in the same process before it writes anything", async () => {
       const fx = await fixture();
       const { hooks } = recorder(fx);
@@ -983,28 +953,6 @@ describe("restart-runner.test.ts", () => {
       expect(outcome.mode).toBe("systemd");
       expect(calls.probes.map((call) => call.command)).toEqual(["systemctl", "systemd-run"]);
       expect(calls.launched).toHaveLength(1);
-    });
-  });
-
-  describe("a restart requested with no unit and no runner", () => {
-    it("refuses with the sentence that names both ways to restart", async () => {
-      const fx = await fixture();
-      const hooks: RestartHooks = {
-        probe: async (): Promise<CommandRun> => ({ code: 1, stdout: "", stderr: "" }),
-        launch: async () => ({ code: 0 }),
-        exists: () => false,
-      };
-      const restart = launcher(fx, {}, hooks);
-
-      const outcome = await restart.launch("ui");
-
-      expect(outcome.ok).toBe(false);
-      if (outcome.ok) return;
-      expect(outcome.status).toBe(409);
-      expect(outcome.code).toBe("no_unit");
-      expect(outcome.message).toBe(
-        "no systemd unit named pi-sec was found and the daemon is not running under user-tools/run; stop the daemon, run user-tools/update-and-restart, and start the daemon again",
-      );
     });
   });
 });

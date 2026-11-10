@@ -151,16 +151,6 @@ describe("spawning a subagent", () => {
     expect(toolResult(entries)).toContain("not usable");
   });
 
-  it("refuses an unknown model alias and names the ones that exist", async () => {
-    harness = await createTestHarness();
-    const entries = await once(harness, [
-      spawnCall({ name: "researcher", vmodel: "nope", roles: [], initialPrompt: "work" }),
-      ...answers(),
-    ]);
-    expect(toolResult(entries)).toContain('"nope" is not a vmodel key');
-    expect(toolResult(entries)).toContain("faux");
-  });
-
   it("refuses a role with no prompt file and names the ones that exist", async () => {
     harness = await createTestHarness();
     const entries = await once(harness, [

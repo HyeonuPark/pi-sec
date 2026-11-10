@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
-import { getSystemMessageText } from "@earendil-works/pi-ai/utils/text";
 import type {
   Conversation,
   ConversationId,
@@ -20,11 +19,6 @@ import type { ExtensionContext } from "../src/extensions/context.ts";
 import { createSelfEditExtension } from "../src/extensions/self-edit.ts";
 import { readMessage } from "../src/message-envelope.ts";
 import { notifyRestartNotice } from "../src/runtime/restart-notice.ts";
-import { AdminNotes } from "../src/runtime/notes.ts";
-import { defaultWebDir, startServer, type StartedServer } from "../src/server/server.ts";
-import type { AppDeps } from "../src/server/deps.ts";
-import { SseHub } from "../src/server/sse.ts";
-import { StreamHub } from "../src/server/streams.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 
 /**
@@ -36,10 +30,14 @@ import { createTestHarness, type TestHarness } from "./helpers.ts";
  * producer that forgets the instant fails here rather than in a transcript
  * nobody re-reads.
  *
- * The zones are three. Every producer runs in `Asia/Tokyo`,
- * and the producers that are cheap and deterministic run in `UTC` and
- * `America/Los_Angeles` as well, which is what pins the offset to the configured
- * zone instead of to the machine's own.
+ * The offset is pinned to the configured zone instead of to the machine's own,
+ * in three zones, for the two producers that no other test reaches: the
+ * scheduled prompt (the scheduler's zone is fixed) and the cold-start notice (it
+ * takes its zone as an argument). The status check of a running background call
+ * and the one-shot episodes run in `Asia/Tokyo` only. The five other producers of
+ * the harness zone, the chat input, the reset handoff, the background result,
+ * the agent brief and note, and the session restart, are guarded by
+ * `test/message-tags-emit.test.ts`.
  *
  * The gate of `request_restart` runs `tsc` and `vitest` in a tree that is empty
  * here, so it is replaced for this file alone. What is under test is the note the
@@ -135,15 +133,6 @@ function expectStamp(entry: EntryRecord, zone: Zone, where: string): void {
   expect(recorded! - instant, `${where}: at against the record`).toBeLessThanOrEqual(1999);
 }
 
-/** The offset at a moment near now, for a subject that carries no entry timestamp. */
-function expectStampNear(text: string, zone: Zone, where: string, reference: number): void {
-  const at = readMessage(text)?.attrs["at"];
-  expect(at, `${where}: at`).toMatch(ZONE_INSTANT);
-  const instant = Date.parse(at!);
-  expect(at!.endsWith(zoneOffset(instant, zone)), `${where}: the offset of ${zone}`).toBe(true);
-  expect(Math.abs(instant - reference), `${where}: at against the clock`).toBeLessThanOrEqual(1000);
-}
-
 async function until<T>(check: () => Promise<T | undefined>, what: string, timeoutMs = 15_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -157,11 +146,8 @@ async function until<T>(check: () => Promise<T | undefined>, what: string, timeo
 // ------------------------------------------------------------------ machinery
 
 let open: TestHarness | undefined;
-let started: StartedServer | undefined;
 
 afterEach(async () => {
-  await started?.close();
-  started = undefined;
   await open?.close();
   open = undefined;
 });
@@ -194,66 +180,9 @@ async function harnessIn(zone: Zone, options: Parameters<typeof createTestHarnes
   return open;
 }
 
-/** The HTTP server over the current harness, the way the daemon runs it. */
-async function bootServer(h: TestHarness): Promise<string> {
-  const sse = new SseHub({ heartbeatMs: 15_000, queueBytes: 1_000_000, bufferMs: 60_000 });
-  const deps: AppDeps = {
-    runtime: h.runtime,
-    bus: h.events,
-    sse,
-    streams: new StreamHub({ runtime: h.runtime, bus: h.events, sse }),
-    startedAt: Date.now(),
-    version: "test",
-    webDir: defaultWebDir(),
-    adminState: { restart: h.runtime.restart, notes: new AdminNotes() },
-  };
-  started = await startServer(deps, { webDir: defaultWebDir() });
-  return started.origin;
-}
-
 // ------------------------------------------------------------------ the rows
 
 describe.each(ZONES)("a message the harness stores, in the zone %s", (zone) => {
-  it("operator: the input the operator typed in the chat", async () => {
-    const h = await harnessIn(zone, { responses: answers(4) });
-    const origin = await bootServer(h);
-    const conversation = await defaultConversation(h);
-
-    const sent = await fetch(`${origin}/basic-chat/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: "typed in the box" }),
-    });
-    expect(sent.status).toBe(202);
-
-    const entry = await until(async () => (await userEntries(conversation))[0], "the input to be stored");
-    expect(readMessage(entryText(entry))?.body).toBe("typed in the box");
-    expectStamp(entry, zone, "the chat input");
-  });
-
-  it("restart: the handoff a reset writes", async () => {
-    const h = await harnessIn(zone, { responses: answers(8) });
-    const origin = await bootServer(h);
-    const conversation = await defaultConversation(h);
-
-    const reset = await fetch(`${origin}/basic-chat/reset`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ handoff: "start again" }),
-    });
-    expect(reset.status).toBe(202);
-
-    const entry = await until(async () => {
-      const page = await conversation.entries({ order: "ascending" }, 200, undefined, ctx);
-      return page.items.find((candidate) => candidate.kind === "pi.reset");
-    }, "the reset entry");
-    const parsed = readMessage(entryText(entry));
-    expect(parsed?.source).toBe("restart");
-    expect(parsed?.attrs["via"]).toBe("handoff");
-    expect(parsed?.body).toContain("start again");
-    expectStamp(entry, zone, "the reset handoff");
-  });
-
   it("operator-scheduled: the prompt a routine sends", async () => {
     const h = await harnessIn(zone, {
       responses: answers(4),
@@ -300,123 +229,6 @@ describe.each(ZONES)("a message the harness stores, in the zone %s", (zone) => {
     expect(parsed?.attrs["occurrence"]).toBeDefined();
     expectStamp(entry, zone, "the scheduled prompt");
   });
-
-  it("tool-output: the result of a background call", async () => {
-    const h = await harnessIn(zone, {
-      responses: [
-        fauxAssistantMessage([fauxToolCall("async_call", { title: "greet", tool: "bash", args: { command: "echo hi" } })], {
-          stopReason: "toolUse",
-        }),
-        ...answers(4),
-      ],
-    });
-    const conversation = await defaultConversation(h);
-    const submitted = await conversation.submit({ type: "input", content: "start it" }, ctx);
-    await submitted.wait(ctx);
-
-    const entry = await until(async () => {
-      const found = (await userEntries(conversation)).reverse();
-      return found.find((candidate) => readMessage(entryText(candidate))?.source === "tool-output");
-    }, "the background result to arrive");
-    const parsed = readMessage(entryText(entry));
-    expect(parsed?.attrs["status"]).toBe("done");
-    expectStamp(entry, zone, "the background result");
-  });
-
-  it("tool-output: the status check of a call that keeps running", { timeout: 30_000 }, async () => {
-    const base = defaultConfig();
-    const h = await harnessIn(zone, {
-      config: { agent: { ...base.agent, tools: { ...base.agent.tools, backgroundCheckMs: 300 } } },
-      responses: [
-        fauxAssistantMessage(
-          [fauxToolCall("async_call", { title: "longer", tool: "bash", args: { command: "sleep 1.2; echo CALLED-OK" } })],
-          { stopReason: "toolUse" },
-        ),
-        ...answers(4),
-      ],
-    });
-    const conversation = await defaultConversation(h);
-    const submitted = await conversation.submit({ type: "input", content: "start it" }, ctx);
-    await submitted.wait(ctx);
-
-    const entry = await until(async () => {
-      return (await userEntries(conversation)).find((candidate) => {
-        const parsed = readMessage(entryText(candidate));
-        return parsed?.source === "tool-output" && parsed.attrs["status"] === "running";
-      });
-    }, "the status check to arrive", 30_000);
-    expect(readMessage(entryText(entry))?.body).toContain("[background call check]");
-    expectStamp(entry, zone, "the status check");
-  });
-
-  it("agent: the brief and the note a parent sends", async () => {
-    const brief = { name: "researcher", vmodel: "faux", roles: [], initialPrompt: "find the thing" };
-    // Two conversations share one scripted queue, so each answer is chosen by who
-    // is asking: the child parks, and the root answers.
-    const scripted = () => (context: { messages: unknown[] }) =>
-      getSystemMessageText(context.messages as never).includes("You are a subagent")
-        ? callTool("await_orders", { note: "parked" })
-        : fauxAssistantMessage([fauxText("ok")]);
-    const h = await harnessIn(zone, {
-      responses: [callTool("spawn_subagent", brief), ...Array.from({ length: 20 }, scripted)],
-    });
-    const conversation = await defaultConversation(h);
-    await (await conversation.submit({ type: "input", content: "go" }, ctx)).wait(ctx);
-
-    const index = await until(
-      async () => await h.runtime.harness.snapshot(SecAgentChild, conversation.id, "researcher", ctx),
-      "the child index entry",
-    );
-    const child = await h.runtime.harness.conversation(Number(index.conversationId) as ConversationId, ctx);
-    expect(child).toBeDefined();
-
-    const briefEntry = await until(async () => (await userEntries(child!))[0], "the brief to reach the child");
-    expect(readMessage(entryText(briefEntry))?.attrs["kind"]).toBe("brief");
-    expectStamp(briefEntry, zone, "the spawn brief");
-
-    // The child is parked now, so the root's next answer is the note it sends.
-    h.faux.setResponses([
-      callTool("send_message", { to: "researcher", body: "keep going", kind: "note" }),
-      ...answers(20),
-    ]);
-    await conversation.submit({ type: "input", content: "send it" }, ctx);
-
-    const noteEntry = await until(async () => {
-      return (await userEntries(child!)).find(
-        (candidate) => readMessage(entryText(candidate))?.attrs["kind"] === "note",
-      );
-    }, "the note to reach the child");
-    expectStamp(noteEntry, zone, "the agent note");
-  });
-
-  it("restart: the continuation and the handoff of a session restart", async () => {
-    const base = defaultConfig();
-    const h = await harnessIn(zone, {
-      responses: [
-        callTool("restart_session", { reason: "the prompt moved", roundId: "R1", continuation: "continue the round" }),
-        ...answers(10),
-      ],
-      config: { agent: { extensions: { enabled: [...base.agent.extensions.enabled, "session-restart"] } } },
-    });
-    const conversation = await defaultConversation(h);
-    await (await conversation.submit({ type: "input", content: "go" }, ctx)).wait(ctx);
-
-    const page = await conversation.entries({ order: "ascending" }, 500, undefined, ctx);
-    const reset = page.items.find((entry) => entry.kind === "pi.reset");
-    expect(reset).toBeDefined();
-    const handoff = readMessage(entryText(reset!));
-    expect(handoff?.source).toBe("restart");
-    expect(handoff?.attrs["round"]).toBe("R1");
-    expectStamp(reset!, zone, "the session-restart handoff");
-
-    const continuation = await until(async () => {
-      const after = await conversation.entries({ minEntryId: (reset!.id + 1) as never, order: "ascending" }, 200, undefined, ctx);
-      return after.items.find((entry) => entry.kind === "pi.user");
-    }, "the continuation to be stored");
-    expect(readMessage(entryText(continuation))?.attrs["via"]).toBe("continuation");
-    expectStamp(continuation, zone, "the continuation");
-  });
-
   it("restart: the cold-start notice a boot writes", async () => {
     const h = await harnessIn(zone, { responses: answers(10) });
     const conversation = await defaultConversation(h);
@@ -448,6 +260,37 @@ describe.each(ZONES)("a message the harness stores, in the zone %s", (zone) => {
       );
     }, "the cold-start notice to be stored");
     expectStamp(entry, zone, "the cold-start notice");
+  });
+});
+
+/** The status check of a call that keeps running needs a second of waiting, so it runs in one zone. */
+describe("the status check of a background call, in Asia/Tokyo", () => {
+  const zone: Zone = "Asia/Tokyo";
+
+  it("tool-output: the status check of a call that keeps running", { timeout: 30_000 }, async () => {
+    const base = defaultConfig();
+    const h = await harnessIn(zone, {
+      config: { agent: { ...base.agent, tools: { ...base.agent.tools, backgroundCheckMs: 300 } } },
+      responses: [
+        fauxAssistantMessage(
+          [fauxToolCall("async_call", { title: "longer", tool: "bash", args: { command: "sleep 1.2; echo CALLED-OK" } })],
+          { stopReason: "toolUse" },
+        ),
+        ...answers(4),
+      ],
+    });
+    const conversation = await defaultConversation(h);
+    const submitted = await conversation.submit({ type: "input", content: "start it" }, ctx);
+    await submitted.wait(ctx);
+
+    const entry = await until(async () => {
+      return (await userEntries(conversation)).find((candidate) => {
+        const parsed = readMessage(entryText(candidate));
+        return parsed?.source === "tool-output" && parsed.attrs["status"] === "running";
+      });
+    }, "the status check to arrive", 30_000);
+    expect(readMessage(entryText(entry))?.body).toContain("[background call check]");
+    expectStamp(entry, zone, "the status check");
   });
 });
 
@@ -586,28 +429,5 @@ describe("the notes that exist only during an episode, in Asia/Tokyo", () => {
     // A nudge is one entry the harness stores, not text rebuilt on every request,
     // which is why it may carry an instant at all.
     expectStamp(entry, ZONE, "the nudge");
-  });
-});
-
-/** The helper that reads a text with no entry of its own is used once, and checked. */
-describe("the stamp helper", () => {
-  it("accepts a hand-written zone instant and rejects a UTC one", () => {
-    const now = Date.now();
-    const tokyo = new Intl.DateTimeFormat("en-US", {
-      timeZone: "Asia/Tokyo",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(new Date(now));
-    const field = (type: string): string => tokyo.find((part) => part.type === type)?.value ?? "";
-    const good = `${field("year")}-${field("month")}-${field("day")}T${field("hour")}:${field("minute")}:${field("second")}+09:00`;
-    expectStampNear(`<pi-message src="agent" at="${good}">\nbody\n</pi-message>`, "Asia/Tokyo", "a built instant", now);
-    expect(() =>
-      expectStampNear(`<pi-message src="agent" at="${good.slice(0, 19)}Z">\nbody\n</pi-message>`, "Asia/Tokyo", "a UTC instant", now),
-    ).toThrow();
   });
 });

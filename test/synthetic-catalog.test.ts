@@ -319,6 +319,7 @@ describe("the stored list", () => {
     catalog.registerStoredOrFallback();
     // Nothing stored yet: the one model the code carries.
     expect(first.registrations.at(-1)?.map((entry) => entry.id)).toEqual([SYNTHETIC_MODEL_ID]);
+    expect(first.registrations).toHaveLength(1);
 
     await expect(catalog.refresh()).resolves.toBe(true);
     expect(answer.calls).toEqual([SYNTHETIC_MODELS_URL]);
@@ -380,14 +381,6 @@ describe("the stored list", () => {
     expect(lines.filter((line) => line.startsWith("warn"))).toHaveLength(2);
     // The warning names the reason, never a credential.
     expect(lines.join("\n")).not.toContain("test-key");
-  });
-
-  it("is the one model of the code when nothing is stored", async () => {
-    const dir = await stateDir();
-    const target = host();
-    createSyntheticCatalog({ models: target.host, stateDir: dir }).registerStoredOrFallback();
-    expect(target.registrations).toHaveLength(1);
-    expect(target.registrations[0]?.map((entry) => entry.id)).toEqual([SYNTHETIC_MODEL_ID]);
   });
 
   it("is read again six hours after the last read, and not after stop", async () => {

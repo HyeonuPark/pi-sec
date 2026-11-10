@@ -759,7 +759,7 @@ describe("user-tools/install: system dependencies", () => {
     expect(result.code, result.stdout).toBe(0);
     const allPresent = result.stdout.split("\n").filter((line) => line.includes("all present:"));
     expect(allPresent).toHaveLength(1);
-    expect(allPresent[0]).toContain("Korean font");
+    expect(allPresent[0]).toBe("  all present: headless Chromium libraries and browser, Korean font, ssh, sftp, rsync, gh");
     expect(result.stdout).not.toContain("apt-get");
     expect(result.stdout).not.toContain("browser download");
     expect(await exists(join(home, "playwright.log"))).toBe(false);
@@ -1001,15 +1001,5 @@ describe("user-tools/install: system dependencies", () => {
       expect(fedora.stdout).toContain("Install a font that covers Korean, as root.");
       expect(fedora.stdout).not.toContain("fonts-nanum");
     }, 120_000);
-
-    it("names the font in the all-present line", async () => {
-      const tree = await makeTree("font-all", "real");
-      const browsers = join(root, "browsers-font-all");
-      await placeBrowser(browsers);
-      const result = await helper("font-all", tree, await makeStubs("font-all", { commands: ALL_COMMANDS }), {
-        env: { PLAYWRIGHT_BROWSERS_PATH: browsers },
-      });
-      expect(result.stdout).toContain("all present: headless Chromium libraries and browser, Korean font");
-    }, 60_000);
   });
 });

@@ -117,26 +117,6 @@ describe("js tool", () => {
     expect(toolResult(entries)).toContain("deadline: none");
   });
 
-  it("keeps its own name out of the namespace and reports an unknown tool", async () => {
-    harness = await createTestHarness({
-      responses: [
-        fauxAssistantMessage([fauxToolCall("js", { code: 'return `self:${typeof tools.js}`;' })], { stopReason: "toolUse" }),
-        fauxAssistantMessage([fauxText("done")]),
-      ],
-    });
-    const first = await run(harness, "does the namespace hold js");
-    // The prelude throws for a member that does not exist, which is the answer
-    // we want: the js tool is not reachable from a script.
-    expect(toolResult(first.entries)).toContain("tools.js does not exist");
-
-    harness.faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("js", { code: 'await tools.no_such_tool({}); return "unreachable";' })], { stopReason: "toolUse" }),
-      fauxAssistantMessage([fauxText("done")]),
-    ]);
-    const second = await run(harness, "call a tool that does not exist");
-    expect(toolResult(second.entries)).toContain("no_such_tool does not exist");
-  });
-
   it("stops a spinning script when a deadline is given", async () => {
     harness = await createTestHarness({
       responses: [

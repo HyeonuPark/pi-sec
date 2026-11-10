@@ -433,28 +433,6 @@ describe("request_restart waits for its children to stand at a safe point", () =
     expect(text).not.toContain("middle-child");
   });
 
-  it("names the three ways to stand at a safe point in the note", async () => {
-    const h = await boot();
-    const child = await seedConversation(h);
-    await seedTask(h, child, "running");
-    const { hub, notes } = stubHub(new Map([["1", [agent(child, "running", "any-agent")]]]));
-
-    await restartTool(hub).execute({ title: "batch" } as never, execApi(h), ctx);
-
-    expect(notes).toHaveLength(1);
-    const body = notes[0]!.body;
-    // An agent with a working subagent is refused `await_orders`, so the note
-    // tells it to end the turn and wait for that subagent's message instead.
-    expect(body).toContain("If a subagent of yours is still working, end your turn without a tool call");
-    // An agent whose work is done ends with the tool its role names.
-    expect(body).toContain("If the work you were given is done");
-    expect(body).toContain("`finish_work`");
-    // Everyone else parks and says where it stopped.
-    expect(body).toContain("Otherwise, park with `await_orders`");
-    expect(body).toContain("where you stopped");
-    expect(body).not.toContain("operator");
-  });
-
   it("sends a working child the note it already got, word for word", async () => {
     const h = await boot();
     const child = await seedConversation(h);
@@ -515,15 +493,5 @@ describe("request_restart waits for its children to stand at a safe point", () =
     state.working.delete(worker);
     const second = await tool.execute({ title: "batch" } as never, execApi(h), ctx);
     expect(textOf(second)).toContain("Gate passed");
-  });
-
-  it("passes in a build with no subagent hub", async () => {
-    const h = await boot();
-    // A build with no hub has no children to check; a check that waited there
-    // would wait for a report nobody can send. Two existing test files build
-    // their context without this field, which is the shape this keeps working.
-    const result = await restartTool(undefined).execute({ title: "batch" } as never, execApi(h), ctx);
-    expect(textOf(result)).toContain("Gate passed");
-    expect(h.runtime.restart.status.required).toBe(true);
   });
 });

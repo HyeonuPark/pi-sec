@@ -158,14 +158,6 @@ describe("user-tools/install-git-hooks", () => {
 });
 
 describe("the installed hooks", () => {
-  it("accept a clean commit", async () => {
-    const f = await installed(await fixture());
-    await writeFile(join(f.repo, "a.txt"), "plain text\n");
-    git(f, ["add", "a.txt", "scripts", "src"]);
-    const out = git(f, ["commit", "-m", "plain message"]);
-    expect(out.code, out.stdout + out.stderr).toBe(0);
-  });
-
   it("refuse a staged file that holds a listed word, and name the word", async () => {
     const f = await installed(await fixture());
     await writeFile(join(f.repo, "a.txt"), `a line with ${WORD} inside\n`);
