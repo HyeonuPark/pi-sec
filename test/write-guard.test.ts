@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "n
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { ToolExecutionApi, ToolRegistration } from "@earendil-works/pi-durable";

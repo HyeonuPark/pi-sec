@@ -1,6 +1,6 @@
 import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Harness, Storage } from "@earendil-works/pi-durable";
 import { DOC_KINDS, SecAgent, type AgentRecord } from "../documents.ts";
 import type { Paths } from "../runtime/paths.ts";

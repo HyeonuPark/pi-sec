@@ -6,7 +6,7 @@ import {
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { arr, bool, lit, nul, num, obj, opt, str, union } from "@earendil-works/pi-schema";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import {
   JOB_STATUSES,
   TERMINAL_JOB_STATUSES,

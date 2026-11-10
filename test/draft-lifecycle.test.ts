@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi, ToolRegistration } from "@earendil-works/pi-durable";
 import { defaultConfig } from "../src/config/schema.ts";
 import { SecReportDraft } from "../src/documents.ts";

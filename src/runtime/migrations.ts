@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Session, Storage } from "@earendil-works/pi-durable";
 import { SecInbox, SecMigration, SecReport, type JobRecord } from "../documents.ts";
 import { JobRegistry } from "../jobs/registry.ts";

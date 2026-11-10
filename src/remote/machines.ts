@@ -34,7 +34,7 @@ import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, type Harness, type Session, type Storage } from "@earendil-works/pi-durable";
 import type { Config, RemoteMachineConfig, RemoteMachinesConfig } from "../config/schema.ts";
 import {

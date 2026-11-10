@@ -13,7 +13,7 @@ import {
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { arr, lit, obj, opt, str, union } from "@earendil-works/pi-schema";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { SecCandidate, SecSelfEdit, type AgentRecord } from "../documents.ts";
 import { checkApprovedReport, type ApprovalWording } from "../jobs/registry.ts";
@@ -128,7 +128,7 @@ const RESTART_WORDING: ApprovalWording = {
 
 async function approvalRefusal(
   context: ExtensionContext,
-  ctx: import("@earendil-works/chord").Context,
+  ctx: import("@earendil-works/chord/context").Context,
   reportId: string | undefined,
 ): Promise<RestartRefusal | undefined> {
   const reports = context.reports;
@@ -239,7 +239,7 @@ function toolNameOf(entry: EntryRecord): string | undefined {
 async function readLiveTasks(
   storage: Storage,
   conversationId: ConversationId,
-  ctx: import("@earendil-works/chord").Context,
+  ctx: import("@earendil-works/chord/context").Context,
 ): Promise<number> {
   let cursor: Cursor | undefined;
   let read = 0;
@@ -260,7 +260,7 @@ async function readLiveTasks(
 async function readLastTool(
   storage: Storage,
   conversationId: ConversationId,
-  ctx: import("@earendil-works/chord").Context,
+  ctx: import("@earendil-works/chord/context").Context,
 ): Promise<string | undefined> {
   let cursor: Cursor | undefined;
   let read = 0;
@@ -335,7 +335,7 @@ async function loadTree(
   context: ExtensionContext,
   hub: SubagentHub,
   conversationId: ConversationId,
-  ctx: import("@earendil-works/chord").Context,
+  ctx: import("@earendil-works/chord/context").Context,
 ): Promise<ConversationLoad[]> {
   const storage: Storage = context.storage;
   const harness = context.harness;
@@ -481,7 +481,7 @@ interface SafePointOutcome {
  */
 async function safePointCheck(
   context: ExtensionContext,
-  ctx: import("@earendil-works/chord").Context,
+  ctx: import("@earendil-works/chord/context").Context,
   conversationId: ConversationId,
   title: string,
   allowBusyReason: string | undefined,
@@ -855,7 +855,7 @@ export function createSelfEditExtension(context: ExtensionContext): Extension<To
 
   const record = async (
     api: import("@earendil-works/pi-durable").ToolExecutionApi,
-    ctx: import("@earendil-works/chord").Context,
+    ctx: import("@earendil-works/chord/context").Context,
     input: SelfEditInput,
   ) => {
     const id = ulid();

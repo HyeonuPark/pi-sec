@@ -54,16 +54,16 @@ published package ships the built bundle rather than the packages themselves.
 | @aws-sdk/xml-builder | 3.972.41 | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3/tree/HEAD/packages-internal/xml-builder |
 | @aws/lambda-invoke-store | 0.3.0 | Apache-2.0 | https://github.com/awslabs/aws-lambda-invoke-store |
 | @babel/runtime | 7.29.10 | MIT | https://github.com/babel/babel/tree/HEAD/packages/babel-runtime |
-| @earendil-works/chord | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/chord |
-| @earendil-works/pi-agent-core | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/agent |
-| @earendil-works/pi-ai | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/ai |
-| @earendil-works/pi-codemode | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/codemode |
-| @earendil-works/pi-coding-agent | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/coding-agent |
-| @earendil-works/pi-durable | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/durable |
-| @earendil-works/pi-mcp | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/mcp |
-| @earendil-works/pi-schema | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/schema |
-| @earendil-works/pi-telemetry | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/telemetry |
-| @earendil-works/pi-tui | 1.5.0 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/tui |
+| @earendil-works/chord | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/chord |
+| @earendil-works/pi-agent-core | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/agent |
+| @earendil-works/pi-ai | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/ai |
+| @earendil-works/pi-codemode | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/codemode |
+| @earendil-works/pi-coding-agent | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/coding-agent |
+| @earendil-works/pi-durable | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/durable |
+| @earendil-works/pi-mcp | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/mcp |
+| @earendil-works/pi-schema | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/schema |
+| @earendil-works/pi-telemetry | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/telemetry |
+| @earendil-works/pi-tui | 1.5.2 | MIT | https://github.com/earendil-works/pi/tree/HEAD/packages/tui |
 | @google/genai | 2.21.0 | Apache-2.0 | https://github.com/googleapis/js-genai |
 | @isaacs/nonrecursive-glob-match | 1.0.3 | BlueOak-1.0.0 |  |
 | @protobufjs/aspromise | 1.1.2 | BSD-3-Clause | https://github.com/dcodeIO/protobuf.js |
@@ -111,7 +111,6 @@ published package ships the built bundle rather than the packages themselves.
 | google-auth-library | 10.9.1 | Apache-2.0 | https://github.com/googleapis/google-cloud-node/tree/HEAD/core/packages/google-auth-library-nodejs |
 | google-logging-utils | 1.1.3 | Apache-2.0 | https://github.com/googleapis/google-cloud-node-core/tree/HEAD/dev-packages/logging-utils |
 | graceful-fs | 4.2.11 | ISC | https://github.com/isaacs/node-graceful-fs |
-| grok-mermaid | 0.2.3 | Apache-2.0 | https://github.com/xl0/grok-mermaid |
 | highlight.js | 10.7.3 | BSD-3-Clause | https://github.com/highlightjs/highlight.js |
 | hosted-git-info | 9.0.3 | ISC | https://github.com/npm/hosted-git-info |
 | http-proxy-agent | 9.1.0 | MIT | https://github.com/TooTallNate/proxy-agents/tree/HEAD/packages/http-proxy-agent |
@@ -125,6 +124,7 @@ published package ships the built bundle rather than the packages themselves.
 | jwa | 2.0.1 | MIT | https://github.com/brianloveswords/node-jwa |
 | jws | 4.0.1 | MIT | https://github.com/brianloveswords/node-jws |
 | long | 5.3.2 | Apache-2.0 | https://github.com/dcodeIO/long.js |
+| lovely-mermaid | 0.3.3 | Apache-2.0 | https://github.com/xl0/lovely-mermaid/tree/HEAD/packages/lovely-mermaid |
 | lru-cache | 11.5.3 | BlueOak-1.0.0 | https://github.com/isaacs/node-lru-cache |
 | marked | 18.0.11 | MIT | https://github.com/markedjs/marked |
 | marked-cjk-friendly | 0.1.2 | MIT | https://github.com/tats-u/markdown-cjk-friendly |

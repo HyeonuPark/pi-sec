@@ -1,4 +1,5 @@
-import type { Context, Draft } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
+import type { Draft } from "@earendil-works/chord/delta";
 import type { Session, Storage, Tx } from "@earendil-works/pi-durable";
 import {
   SecJob,

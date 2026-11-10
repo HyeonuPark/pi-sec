@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, type Harness } from "@earendil-works/pi-durable";
 import type { Config } from "../config/schema.ts";
 import { SecAgent } from "../documents.ts";

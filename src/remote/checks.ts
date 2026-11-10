@@ -40,7 +40,7 @@
  */
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Tx } from "@earendil-works/pi-durable";
 import { zoneMinute } from "../time-format.ts";
 import type { MachineLevel } from "../shared/wire/remote-machines.ts";

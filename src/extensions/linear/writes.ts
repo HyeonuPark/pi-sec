@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { defineTool, type ToolExecutionApi, type ToolRegistration } from "@earendil-works/pi-durable";
 import { arr, int, num, obj, opt, str, unknown } from "@earendil-works/pi-schema";
 import { checkApprovedReport } from "../../jobs/registry.ts";

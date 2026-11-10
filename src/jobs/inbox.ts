@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Session, Storage, Tx } from "@earendil-works/pi-durable";
 import { SecInbox, type InboxItem } from "../documents.ts";
 import { ulid } from "../runtime/ids.ts";

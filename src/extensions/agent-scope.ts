@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, type ConversationId } from "@earendil-works/pi-durable";
 import type { ExtensionContext } from "./context.ts";
 

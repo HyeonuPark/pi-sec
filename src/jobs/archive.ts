@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Session, Storage } from "@earendil-works/pi-durable";
 import { TERMINAL_JOB_STATUSES, type JobRecord } from "../documents.ts";
 import { JobRegistry, type JobFilter } from "./registry.ts";

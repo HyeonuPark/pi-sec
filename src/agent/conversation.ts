@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { AgentDoc, ROOT_CONVERSATION_ID, type Conversation, type Harness } from "@earendil-works/pi-durable";
 import type { Config } from "../config/schema.ts";
 import type { Paths } from "../runtime/paths.ts";

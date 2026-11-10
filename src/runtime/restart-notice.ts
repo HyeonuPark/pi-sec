@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, AssistantEntry, ToolResultEntry, UserEntry, type Conversation, type ConversationId, type Cursor, type Harness } from "@earendil-works/pi-durable";
 import type { AgentRecord, JobRecord, JobStatus } from "../documents.ts";
 import { NO_RESPONSE_MARKER } from "../shared/silent-turn.ts";

@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, type ConversationId, type Harness, type Tx } from "@earendil-works/pi-durable";
 import { ensureContextFile, subagentContextBriefing } from "../agent/context-file.ts";

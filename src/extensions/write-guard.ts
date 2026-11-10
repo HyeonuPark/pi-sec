@@ -1,6 +1,6 @@
 import { chmod, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { wrapTool, type ToolExecutionApi, type ToolRegistration, type Wrap } from "@earendil-works/pi-durable";
 import { ok, type ExecutionEnv, type FileError, type Result } from "@earendil-works/pi-durable/env";
 import { CodingTools } from "@earendil-works/pi-durable/tools";

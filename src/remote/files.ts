@@ -39,7 +39,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Access, RemotePlumbing } from "./plumbing.ts";
 import { sftpArguments, sftpQuote, sshOptions, sshShellWrapper } from "./ssh.ts";
 

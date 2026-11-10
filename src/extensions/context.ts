@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Harness, Storage } from "@earendil-works/pi-durable";
 import type { Models } from "@earendil-works/pi-ai";
 import type { Config } from "../config/schema.ts";

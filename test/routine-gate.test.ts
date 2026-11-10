@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { JobOnceSpec, JobRoutineSpec } from "../src/documents.ts";
 import type { ExtensionContext } from "../src/extensions/context.ts";

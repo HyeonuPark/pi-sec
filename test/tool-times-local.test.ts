@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, type ConversationId, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { SecAgent, SecAgentChild, SecAsyncCall, SecUserQueryList, userQueryKey } from "../src/documents.ts";
 import { createAttachmentsExtension } from "../src/extensions/attachments.ts";

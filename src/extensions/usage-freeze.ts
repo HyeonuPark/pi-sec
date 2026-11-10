@@ -48,7 +48,7 @@
  * holds that path, so a library upgrade that changes it fails there first.
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import {
   GenerationTask,

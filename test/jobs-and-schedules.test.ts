@@ -9,7 +9,7 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { cronMatches, parseCron, previousOccurrence, Scheduler } from "../src/extensions/scheduler.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi, Conversation, ConversationId, EntryRecord } from "@earendil-works/pi-durable";
 import type { ExtensionContext } from "../src/extensions/context.ts";
 import { createJobsExtension } from "../src/extensions/jobs.ts";

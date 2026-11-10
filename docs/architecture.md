@@ -87,8 +87,8 @@ const harness = await Harness.open(storage, {
 harness.resume(); // continue work left unfinished by a previous process
 ```
 
-> **Verified against `@earendil-works/pi-durable@1.5.0`** (and `pi-ai@1.5.0`,
-> `pi-coding-agent@1.5.0`): `Harness.open(storage, options, context)`,
+> **Verified against `@earendil-works/pi-durable@1.5.2`** (and `pi-ai@1.5.2`,
+> `pi-coding-agent@1.5.2`): `Harness.open(storage, options, context)`,
 > `harness.root()/resume()/close(context)`, `createRegistry().install()`,
 > `openNodeSqliteStorage`, `NodeExecutionEnv({ cwd, shellPath?, shellEnv?, watch? })`,
 > `defineDoc`/`defineDocFamily`, `defineExtension`/`defineTool`/`section`,

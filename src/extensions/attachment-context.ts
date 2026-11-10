@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ImageContent, Message, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import {
   GenerationTask,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Message, TextContent, ImageContent } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { ROOT_CONVERSATION_ID, type HookApi, type ToolExecutionApi } from "@earendil-works/pi-durable";

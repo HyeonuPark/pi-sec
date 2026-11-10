@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { defaultConfig } from "../src/config/schema.ts";
 import { APPROVAL_MARKER, approvalInput, approvalRequestId, parseApproval } from "../src/approvals/input.ts";
 import { readMessage, wrapMessage } from "../src/message-envelope.ts";

@@ -1,6 +1,6 @@
 import { CURRENT_SQLITE_SCHEMA_VERSION } from "@earendil-works/pi-durable/storage/sqlite";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Storage } from "@earendil-works/pi-durable";
 import { readFile, writeFile } from "node:fs/promises";
 import type { Paths } from "./paths.ts";

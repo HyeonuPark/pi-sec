@@ -26,7 +26,7 @@ import { existsSync } from "node:fs";
 import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 import type { ToolExecutionApi, ToolRegistration } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { createSelfEditExtension } from "../src/extensions/self-edit.ts";
 import type { ExtensionContext } from "../src/extensions/context.ts";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";

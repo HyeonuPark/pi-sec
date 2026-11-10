@@ -22,7 +22,7 @@ import type { StartedServer } from "../src/server/server.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 import { injectName, jsonDataBlock } from "../src/server/static.ts";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { createAttachment, type AttachmentContext, type AttachmentRecord } from "../src/attachments/store.ts";
 import { attachmentRefsInText } from "../src/extensions/attachment-context.ts";

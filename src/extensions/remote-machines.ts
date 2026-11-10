@@ -8,7 +8,7 @@ import {
   type Extension,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { DEFAULT_READ_MAX_BYTES, READ_MAX_BYTES_LIMIT } from "../remote/files.ts";
 import type { LoadResult } from "../remote/machines.ts";
 import { isMachineLevel, type MachineUserState, type RemoteMachineState } from "../shared/wire/remote-machines.ts";

@@ -4,7 +4,7 @@ import { chmod, mkdir, open, readdir, rename, rm, stat, writeFile } from "node:f
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { defineDocFamily, type Harness, type Storage } from "@earendil-works/pi-durable";
 import { defaultConfig, type Config } from "../config/schema.ts";
 import type { AuditLog } from "../runtime/audit.ts";

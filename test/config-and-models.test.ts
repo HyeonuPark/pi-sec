@@ -20,7 +20,7 @@ import { createLiveSettings } from "../src/agent/settings.ts";
 import { createTestHarness, type TestHarness } from "./helpers.ts";
 import { VmodelError, VmodelResolver } from "../src/agent/vmodel.ts";
 import { buildPaths, ensureLayout, type Paths, expandPath, resolveHome } from "../src/runtime/paths.ts";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { rootVmodelProblem } from "../src/cli.ts";
 import type { JobRoutineSpec } from "../src/documents.ts";

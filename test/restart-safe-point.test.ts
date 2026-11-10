@@ -1,7 +1,7 @@
 import { commitWrites } from "@earendil-works/pi-durable/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type {
   ConversationId,
   StorageWrite,

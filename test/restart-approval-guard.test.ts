@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ToolExecutionApi, ToolRegistration } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { createSelfEditExtension } from "../src/extensions/self-edit.ts";
 import type { ExtensionContext } from "../src/extensions/context.ts";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";

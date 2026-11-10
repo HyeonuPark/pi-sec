@@ -18,7 +18,7 @@
  * module can start a real one by accident.
  */
 
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Session, Storage } from "@earendil-works/pi-durable";
 import type { AuditEvent } from "../runtime/audit.ts";
 import type { Logger } from "../runtime/logger.ts";

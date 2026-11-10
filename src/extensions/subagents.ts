@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT, withoutAbortSignal } from "@earendil-works/chord/context";
 import { arr, bool, lit, num, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { type ToolCall } from "@earendil-works/pi-ai";

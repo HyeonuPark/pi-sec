@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { num, obj, str } from "@earendil-works/pi-schema";
 import {
   defineTool,

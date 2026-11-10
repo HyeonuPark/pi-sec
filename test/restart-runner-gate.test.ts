@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionApi, ToolRegistration } from "@earendil-works/pi-durable";
 import { resolveDefaultConversation } from "../src/agent/conversation.ts";
 import type { ExtensionContext } from "../src/extensions/context.ts";

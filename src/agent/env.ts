@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ExecutionEnv, Result } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { EnvTarget } from "@earendil-works/pi-durable";
