@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -709,48 +709,40 @@ describe("github-pr routes", () => {
     expect(JSON.parse(await readFile(file, "utf8")).comments).toEqual(JSON.parse(before).comments);
   }, 40_000);
 
-  it("deletes the draft of a listed pull request that a successful read no longer lists", async () => {
+  it("keeps every saved review after successful list reads", async () => {
     const responses = await mkdtemp(join(tmpdir(), "fake-gh-responses-"));
     await cp(SHARED_RESPONSES, responses, { recursive: true });
     const gh = await fakeGhFixture({ responsesDir: responses });
     const draftsDir = join(await mkdtemp(join(tmpdir(), "drafts-routes-")), "drafts");
     await mkdir(draftsDir, { recursive: true });
-    // Seeded as if an earlier daemon had saved it: 12345 was listed, and the
-    // list this daemon reads never shows it, which is the daemon-was-down case.
-    await writeFile(join(draftsDir, "acme+widgets+12345.json"), seededDraft(12345, true));
+    // 12345 was listed once and the list never shows it. The second file is
+    // never listed and 31 days old. The third belongs to a repository that is
+    // not in the settings. The fourth is a set-aside file 31 days old.
+    const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+    const names = [
+      "acme+widgets+12345.json",
+      "acme+widgets+8.json",
+      "gone+tool+4.json",
+      "acme+widgets+9.json.unreadable",
+    ];
+    await writeFile(join(draftsDir, names[0] ?? ""), seededDraft(12345, true));
+    await writeFile(
+      join(draftsDir, names[1] ?? ""),
+      seededDraft(8, false).replace('"updatedAt":"2026-01-01T00:00:00.000Z"', `"updatedAt":"${old.toISOString()}"`),
+    );
+    await writeFile(join(draftsDir, names[2] ?? ""), seededDraft(4, false).replace("acme/widgets", "gone/tool"));
+    await writeFile(join(draftsDir, names[3] ?? ""), "{ not json");
+    await utimes(join(draftsDir, names[3] ?? ""), old, old);
     const { origin } = await boot({ githubPr: { writes: false, repos: ["acme/widgets"] }, gh, routeOptions: { draftsDir } });
-    const cold = await get(origin, "/api/github/pr/list");
-    expect(cold.status).toBe(200);
-    expect(await readdir(draftsDir)).toEqual([]);
 
-    const listed = (cold.json as { sections: { prs: { number: number }[] }[] }).sections.flatMap((s) => s.prs.map((p) => p.number));
-    expect(listed.length).toBeGreaterThan(0);
-    const number = listed[0] ?? 0;
-    const draftPath = `/api/github/pr/acme/widgets/${number}/draft`;
-    const file = join(draftsDir, `acme+widgets+${number}.json`);
-    await postJson(origin, draftPath, { op: "add", comment: DRAFT_COMMENT });
-    expect(JSON.parse(await readFile(file, "utf8"))).toMatchObject({ listed: true });
-
-    // A refresh whose list still has it keeps it.
+    expect((await get(origin, "/api/github/pr/list")).status).toBe(200);
     expect((await get(origin, "/api/github/pr/list?refresh=1")).status).toBe(200);
-    expect(await readdir(draftsDir)).toEqual([`acme+widgets+${number}.json`]);
-
-    // A failed refresh deletes nothing.
-    const saved = await mkdtemp(join(tmpdir(), "fake-gh-saved-"));
-    await cp(responses, saved, { recursive: true });
-    await writeFile(join(responses, "routes.json"), JSON.stringify({ routes: [], default: "not-authenticated.json" }));
-    await writeFile(join(responses, "not-authenticated.json"), JSON.stringify({ stderr: "gh auth login", exit: 1 }));
-    expect((await get(origin, "/api/github/pr/list?refresh=1")).status).toBe(502);
-    expect(await readdir(draftsDir)).toEqual([`acme+widgets+${number}.json`]);
-
-    // A successful refresh whose list is empty deletes it.
-    await cp(saved, responses, { recursive: true });
     const empty = JSON.stringify({ json: { data: { search: { nodes: [] } } } });
     for (const name of ["search-mentions", "search-need-review", "search-opened", "search-draft", "search-involves", "search-reviewed"]) {
       await writeFile(join(responses, `${name}.json`), empty);
     }
     expect((await get(origin, "/api/github/pr/list?refresh=1")).status).toBe(200);
-    expect(await readdir(draftsDir)).toEqual([]);
+    expect((await readdir(draftsDir)).sort()).toEqual([...names].sort());
   }, 40_000);
 
   /* ---------------------------------------------------------------- cache */

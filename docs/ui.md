@@ -1337,10 +1337,12 @@ the last key press, when its field loses focus and when the page closes, and the
 verdict is sent at once. When a request fails, the comment stays on the page and in
 the tab, the review panel says `Not saved to server` with a Retry button, and the
 next change, the Retry press or the next page load sends what waited. A review that
-the page submits removes its comments from the draft. Discard all deletes the draft.
-The server also deletes a draft when its pull request leaves the dashboard list, and
-after 30 days when the list never showed that pull request. Another open tab sees
-the change at its next change or load, not at once.
+the page submits removes its comments from the draft. Discard all removes the
+comments and sends the overall comment again, so the draft stays while that comment
+is not empty. The draft file goes away when nothing is left in it. The server never
+deletes a draft on a timer, when its pull request leaves the dashboard list, or when
+its repository leaves the settings. Another open tab sees the change at its next
+change or load, not at once.
 
 **A comment keeps the text of its line.** Each comment saves the head commit of the
 diff it was written on and the text of its first and last line. When the diff has

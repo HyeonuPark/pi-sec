@@ -1,4 +1,4 @@
-import { chmod, mkdir, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "../../secrets/model-credentials.ts";
 import { isSafeNamePart } from "./network.ts";
@@ -17,21 +17,22 @@ import { isSafeNamePart } from "./network.ts";
  *
  * Rules that hold for every change:
  *
- *   - One promise chain per pull request runs every change to its file, from a
- *     request and from the deletion rule alike, so two changes never overlap.
- *     Two pull requests run side by side.
+ *   - One promise chain per pull request runs every change to its file, so two
+ *     changes never overlap. Two pull requests run side by side.
  *   - The file is written with `writeFileAtomic`: a reader sees the old content
  *     or the new content.
  *   - A draft with no comment and an empty overall comment has no file.
+ *   - Nothing here deletes a draft on a timer or after a list read. A file goes
+ *     away when the reader submits the review, removes its last comment, or
+ *     deletes it in the UI. A file that does not parse is set aside under a name
+ *     of its own (`<name>.json.unreadable-<ms>`) and is never deleted here.
  *   - Nothing here reaches GitHub, so the write switch does not guard it.
  */
 
 export const MAX_COMMENTS = 500;
 export const MAX_TEXT = 65536;
 export const DRAFT_VERSION = 1;
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const UNREADABLE = ".unreadable";
-const FILE_NAME = /^([a-z0-9-]+)\+([a-z0-9._-]+)\+(\d{1,18})\.json$/;
 
 export type DraftSide = "LEFT" | "RIGHT";
 export type DraftEvent = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
@@ -100,37 +101,27 @@ export interface ReviewDraftStoreOptions {
   readonly logger?: DraftLogger;
 }
 
-/** What the deletion rule reads: the pull requests on the list and the repositories configured. */
-export interface SweepInput {
-  /** Keys made by {@link listKey}, one per pull request on the dashboard list. */
-  readonly listed: ReadonlySet<string>;
-  /** The configured repositories, any spelling. */
-  readonly repos: readonly string[];
-}
-
 export interface ReviewDraftStore {
   get(target: DraftTarget): Promise<Draft>;
-  /** Apply one change and answer the whole draft after it. `listedNow` is used only when the change creates the file. */
-  apply(target: DraftTarget, op: DraftOp, listedNow: boolean): Promise<Draft>;
+  /** Apply one change and answer the whole draft after it. */
+  apply(target: DraftTarget, op: DraftOp): Promise<Draft>;
   /** Remove the submitted comments and the overall comment, after GitHub accepted the review. */
   removeSubmitted(target: DraftTarget, ids: readonly string[]): Promise<void>;
-  /** The deletion rule. Call it after each successful read of the dashboard list. */
-  sweep(input: SweepInput): Promise<void>;
   /** Resolves when the start-up cleanup is done. */
   ready(): Promise<void>;
 }
 
-/** The key of one pull request in {@link SweepInput.listed}. */
-export function listKey(repo: string, number: number): string {
-  return `${repo.trim().toLowerCase()}#${number}`;
-}
-
-function emptyDraft(target: DraftTarget, listed: boolean, at: string): Draft {
+/**
+ * A new draft. `listed` stays in the file and is always false in a new one:
+ * nothing reads it any more, and an older build refuses a file without it as
+ * unreadable, so a revert of this rule does not set new drafts aside.
+ */
+function emptyDraft(target: DraftTarget, at: string): Draft {
   return {
     version: DRAFT_VERSION,
     repo: target.repo,
     number: target.number,
-    listed,
+    listed: false,
     createdAt: at,
     updatedAt: at,
     summary: "",
@@ -308,8 +299,9 @@ export function createReviewDraftStore(options: ReviewDraftStoreOptions): Review
     }
     const draft = readStored(text);
     if (draft !== undefined) return draft;
-    await rename(path, `${path}${UNREADABLE}`).catch(() => undefined);
-    logger?.warn("github-pr draft file is not readable and was set aside", { file: `${path.split("/").pop() ?? ""}${UNREADABLE}` });
+    const aside = `${path}${UNREADABLE}-${now()}`;
+    await rename(path, aside).catch(() => undefined);
+    logger?.warn("github-pr draft file is not readable and was set aside", { file: aside.split("/").pop() ?? "" });
     return undefined;
   };
 
@@ -323,16 +315,16 @@ export function createReviewDraftStore(options: ReviewDraftStoreOptions): Review
   };
   const isEmpty = (draft: Draft): boolean => draft.comments.length === 0 && draft.summary === "";
 
-  const apply = async (target: DraftTarget, change: DraftOp, listedNow: boolean): Promise<Draft> => {
+  const apply = async (target: DraftTarget, change: DraftOp): Promise<Draft> => {
     const { key, path } = keyOf(target);
     await ensure();
     return await enqueue(key, async () => {
       const stored = await load(path);
       const at = iso();
-      const base = stored ?? emptyDraft(target, listedNow, at);
+      const base = stored ?? emptyDraft(target, at);
       if (change.op === "discard") {
         await remove(path);
-        return emptyDraft(target, base.listed, at);
+        return emptyDraft(target, at);
       }
       let next: Draft = base;
       if (change.op === "add") {
@@ -359,37 +351,12 @@ export function createReviewDraftStore(options: ReviewDraftStoreOptions): Review
     });
   };
 
-  const sweepOne = async (name: string, input: SweepInput, configured: ReadonlySet<string>): Promise<void> => {
-    const match = FILE_NAME.exec(name);
-    if (match === null) return;
-    const owner = match[1] ?? "";
-    const repo = match[2] ?? "";
-    const number = Number.parseInt(match[3] ?? "", 10);
-    const path = join(dir, name);
-    await enqueue(`${owner}+${repo}+${number}`, async () => {
-      const draft = await load(path);
-      if (draft === undefined) return;
-      const drop = async (reason: string): Promise<void> => {
-        await remove(path);
-        logger?.info("github-pr draft deleted", { repo: draft.repo, number, reason, comments: draft.comments.length });
-      };
-      if (!configured.has(`${owner}/${repo}`)) return await drop("repository is not configured");
-      const onList = input.listed.has(`${owner}/${repo}#${number}`);
-      if (onList) {
-        if (!draft.listed) await save(path, { ...draft, listed: true });
-        return;
-      }
-      if (draft.listed) return await drop("pull request left the dashboard");
-      if (now() - Date.parse(draft.updatedAt) > THIRTY_DAYS_MS) await drop("never listed and older than 30 days");
-    });
-  };
-
   return {
     ready: ensure,
     async get(target) {
       const { key, path } = keyOf(target);
       await ensure();
-      return await enqueue(key, async () => (await load(path)) ?? emptyDraft(target, false, iso()));
+      return await enqueue(key, async () => (await load(path)) ?? emptyDraft(target, iso()));
     },
     apply,
     async removeSubmitted(target, ids) {
@@ -403,26 +370,6 @@ export function createReviewDraftStore(options: ReviewDraftStoreOptions): Review
         if (isEmpty(next)) await remove(path);
         else await save(path, next);
       });
-    },
-    async sweep(input) {
-      await ensure();
-      const configured = new Set(input.repos.map((repo) => repo.trim().toLowerCase()));
-      const names = await readdir(dir);
-      for (const name of names) {
-        try {
-          if (name.endsWith(`.json${UNREADABLE}`)) {
-            const info = await stat(join(dir, name)).catch(() => undefined);
-            if (info !== undefined && now() - info.mtimeMs > THIRTY_DAYS_MS) {
-              await remove(join(dir, name));
-              logger?.info("github-pr draft deleted", { file: name, reason: "unreadable and older than 30 days" });
-            }
-            continue;
-          }
-          await sweepOne(name, input, configured);
-        } catch (error) {
-          logger?.warn("github-pr draft sweep failed for one file", { file: name, error });
-        }
-      }
     },
   };
 }

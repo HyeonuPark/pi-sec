@@ -70,7 +70,9 @@ Path resolution:
 │       └── <repo>.git/         #   fetched again when a diff is next viewed
 ├── state/github-pr/review-drafts/  # github-pr's saved, unsubmitted reviews (0700): one file per pull
 │                               #   request, named `<owner>+<repo>+<number>.json` in lower case
-│                               #   (0600); a dot-named temporary file is a write in progress
+│                               #   (0600); a dot-named temporary file is a write in progress; a file
+│                               #   that did not parse is `<name>.json.unreadable-<ms>`, kept until
+│                               #   the reader deletes it
 ├── cache/
     └── <timestamp>/
 ```

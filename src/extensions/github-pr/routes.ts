@@ -19,7 +19,7 @@ import {
 import { fetchPrList, type PrListPayload } from "./list.ts";
 import { createPrListCache, type ListCacheTimers, type PrListCache } from "./list-cache.ts";
 import { configuredRepository, createSettingsReader, DISK_LIMIT_DEFAULT_MEGABYTES, splitRepository, type GithubPrSettings } from "./settings.ts";
-import { createReviewDraftStore, DraftInputError, listKey, readOp } from "./review-drafts.ts";
+import { createReviewDraftStore, DraftInputError, readOp } from "./review-drafts.ts";
 import { createRepoStore, DiskLimitError } from "./store.ts";
 import {
   commentOnPullRequest,
@@ -334,31 +334,9 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
     if (active === undefined) throw new GhError("the githubPr settings are missing from the config");
     await reconcileQuietly(active.repos);
     const payload = await fetchPrList(reader, active.repos);
-    // The read succeeded, so the list is whole: the deletion rule of the review
-    // drafts may run. A failed read threw above and deletes nothing.
-    await sweepDrafts(payload, active.repos);
     return payload;
   };
 
-  /** Whether the list this process holds shows one pull request. */
-  const onList = (repo: string, number: number): boolean => {
-    const key = listKey(repo, number);
-    return (cache.current()?.sections ?? []).some((section) =>
-      section.prs.some((pr) => listKey(pr.repo, pr.number) === key),
-    );
-  };
-
-  async function sweepDrafts(payload: PrListPayload, repos: readonly string[]): Promise<void> {
-    const listed = new Set<string>();
-    for (const section of payload.sections) for (const pr of section.prs) listed.add(listKey(pr.repo, pr.number));
-    try {
-      await drafts.sweep({ listed, repos });
-    } catch (error) {
-      logger.warn("github-pr draft sweep failed", { error });
-    }
-  }
-
-  // `cache` is used by `onList` above only when a request runs, after this line.
   const cache: PrListCache = createPrListCache({
     fetch: fetchList,
     // Read at every cycle, so a reload of the interval changes the pace.
@@ -614,7 +592,7 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
   router.post("/api/github/pr/:owner/:repo/:number/draft", async (route) => {
     await draftRoute(route, true, async (target) => {
       const change = readOp(route.body, new Date((options.now ?? Date.now)()).toISOString());
-      return await drafts.apply(target, change, onList(target.repo, target.number));
+      return await drafts.apply(target, change);
     });
   });
 

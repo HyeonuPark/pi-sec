@@ -1972,8 +1972,8 @@ The diff page keeps the review that a reader has collected and not submitted on
 the server, one file per pull request, so the reader finds it again after the tab
 closed and on another browser. The two draft routes never reach GitHub, so
 `githubPr.writes` does not gate them: with the switch off the page draws no review
-control and makes no new draft, and a draft that exists stays until the switch is on
-again or the deletion rule below removes it.
+control and makes no new draft, and a draft that exists stays until the reader submits or
+removes it, as the deletion paragraph below says.
 
 ```jsonc
 // GET /api/github/pr/<owner>/<repo>/<number>/draft
@@ -2002,20 +2002,19 @@ type, more than 500 comments, or a comment body or summary of more than 65536
 characters. Changes to one pull request run one at a time in the order they arrive.
 Changes to two pull requests do not wait for each other.
 
-The server deletes a draft file after each successful read of the dashboard list (the
-poll and `GET /api/github/pr/list?refresh=1`; a failed read deletes nothing):
+The server never deletes a draft on a timer or after a read of the dashboard list. A
+draft file goes away only when the reader submits the review (the review route
+removes the submitted comments and the summary, and the file when nothing is left),
+removes the last comment while the overall comment is empty, or sends `discard`
+while the overall comment is empty. A draft stays when its pull request leaves the
+list, is merged or closed, or when its repository leaves `githubPr.repos`.
 
-- when its repository is no longer in `githubPr.repos`,
-- when the pull request was on the list at an earlier read (`listed` is true) and the
-  list no longer shows it,
-- when it was never on the list and no change touched it for 30 days.
-
-A pull request that the list shows gets `listed: true` and keeps its `updatedAt`.
-A file that does not parse is renamed to `<name>.unreadable` and deleted after 30
-days. Each deletion writes one log line with the repository, the number, the reason
-and the comment count, and never the text. Because `listed` is stored in the file, a
-pull request that left the list while the daemon was down is found by the first
-successful read after the start.
+A file that does not parse is renamed to `<name>.json.unreadable-<epoch
+milliseconds>`, so a second broken file of the same pull request never replaces the
+first, and the pull request can get a new draft. The server never deletes a
+set-aside file. The `listed` field stays in the file and in the answer, and a new
+file gets `listed: false`. Nothing reads it. It stays because an older build refuses
+a file without it as unreadable.
 
 ---
 
