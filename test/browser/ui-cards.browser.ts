@@ -288,6 +288,7 @@ it("makes the server's card a parser shadow root and runs its module script unde
 
   console.log(`[test 1] console: ${opened.consoleLines.length === 0 ? "(none)" : opened.consoleLines.join(" | ")}`);
   console.log(`[test 1] page errors: ${opened.pageErrors.length === 0 ? "(none)" : opened.pageErrors.join(" | ")}`);
+  expect(opened.pageErrors, "the page threw").toEqual([]);
   expect(facts.violations).toEqual([]);
   expect(cspConsoleLines(opened.consoleLines)).toEqual([]);
 });
@@ -322,6 +323,7 @@ it("mounts the card, reaches its action through api.call, and hands it a publish
 
   console.log(`[test 2] console: ${opened.consoleLines.length === 0 ? "(none)" : opened.consoleLines.join(" | ")}`);
   console.log(`[test 2] page errors: ${opened.pageErrors.length === 0 ? "(none)" : opened.pageErrors.join(" | ")}`);
+  expect(opened.pageErrors, "the page threw").toEqual([]);
   expect(facts.violations).toEqual([]);
   expect(cspConsoleLines(opened.consoleLines)).toEqual([]);
 });

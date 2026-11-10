@@ -764,6 +764,7 @@ it("draws one card per row in one column at 1280 wide, with the bars the values 
   );
   console.log(`[${viewport.name}] console: ${opened.consoleLines.length === 0 ? "(none)" : opened.consoleLines.join(" | ")}`);
   console.log(`[${viewport.name}] page errors: ${opened.pageErrors.length === 0 ? "(none)" : opened.pageErrors.join(" | ")}`);
+  expect(opened.pageErrors, "the page threw").toEqual([]);
 });
 
 it("keeps the same column inside a phone's width at 390 wide", async () => {
@@ -784,6 +785,7 @@ it("keeps the same column inside a phone's width at 390 wide", async () => {
   );
   console.log(`[${viewport.name}] console: ${opened.consoleLines.length === 0 ? "(none)" : opened.consoleLines.join(" | ")}`);
   console.log(`[${viewport.name}] page errors: ${opened.pageErrors.length === 0 ? "(none)" : opened.pageErrors.join(" | ")}`);
+  expect(opened.pageErrors, "the page threw").toEqual([]);
 });
 
 it("catches a style its own policy refuses, so an empty violation list means something", async () => {
