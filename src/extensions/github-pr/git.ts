@@ -146,8 +146,8 @@ export async function runGit(
 
   const result = await new Promise<GitResult>((resolve, reject) => {
     const child = spawn("git", [...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
-    const stdout: string[] = [];
-    const stderr: string[] = [];
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let failure: Error | undefined;
@@ -158,7 +158,7 @@ export async function runGit(
     }, timeoutMs);
     timer.unref?.();
 
-    const collect = (chunks: string[], chunk: Buffer, isStdout: boolean): void => {
+    const collect = (chunks: Buffer[], chunk: Buffer, isStdout: boolean): void => {
       if (isStdout) stdoutBytes += chunk.byteLength;
       else stderrBytes += chunk.byteLength;
       if (stdoutBytes > maxOutputBytes || stderrBytes > maxOutputBytes) {
@@ -166,7 +166,8 @@ export async function runGit(
         child.kill("SIGKILL");
         return;
       }
-      chunks.push(chunk.toString("utf8"));
+      // Bytes, not text: a character can be split between two chunks.
+      chunks.push(chunk);
     };
 
     child.stdout.on("data", (chunk: Buffer) => collect(stdout, chunk, true));
@@ -175,17 +176,23 @@ export async function runGit(
       clearTimeout(timer);
       reject(new GitError(args, null, "", `git could not be started: ${error.message}`));
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearTimeout(timer);
       if (failure !== undefined) {
         reject(failure);
         return;
       }
+      if (code === null) {
+        // A signal from outside ended the child (for example the out-of-memory
+        // killer), so its output is partial and the call gave no answer.
+        reject(new GitError(args, null, Buffer.concat(stderr).toString("utf8"), `git ${args.join(" ")} was ended by ${signal ?? "a signal"}`));
+        return;
+      }
       resolve({
         args: [...args],
-        code: code ?? 0,
-        stdout: stdout.join(""),
-        stderr: stderr.join(""),
+        code,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
       });
     });
   });

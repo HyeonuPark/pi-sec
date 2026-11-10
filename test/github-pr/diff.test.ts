@@ -164,6 +164,33 @@ describe("git subcommand gate", () => {
     expect(unchecked.stderr.length).toBeGreaterThan(0);
   });
 
+  /** A directory whose `git` is a shell script, put first on the `PATH` of one call. */
+  function fakeGit(name: string, script: string): { dir: string; env: { PATH: string } } {
+    const bin = join(root, name);
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "git"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    return { dir: bin, env: { PATH: `${bin}:${process.env.PATH ?? ""}` } };
+  }
+
+  it("keeps a character whose bytes arrive in two pieces", async () => {
+    // U+AC00 is the three bytes EA B0 80. The first write holds one byte and the
+    // second the other two, 100 ms apart, so they reach `runGit` as two chunks.
+    const out = fakeGit("fake-split-out", "printf '\\352'; sleep 0.1; printf '\\260\\200'");
+    expect((await runGit(out.dir, ["show", "x"], { env: out.env })).stdout).toBe("\uAC00");
+
+    const err = fakeGit("fake-split-err", "printf '\\352' >&2; sleep 0.1; printf '\\260\\200' >&2; exit 1");
+    const result = await runGit(err.dir, ["show", "x"], { env: err.env, check: false });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe("\uAC00");
+  });
+
+  it("reports a git that a signal ended as a failure", async () => {
+    const killed = fakeGit("fake-killed", "printf partial; kill -KILL $$");
+    await expect(runGit(killed.dir, ["show", "x"], { env: killed.env })).rejects.toBeInstanceOf(GitError);
+    // A killed process gave no answer, so `check: false` does not turn it into one.
+    await expect(runGit(killed.dir, ["show", "x"], { env: killed.env, check: false })).rejects.toBeInstanceOf(GitError);
+  });
+
   it("gives the child the caller's environment with the extra values on top", async () => {
     // Git reads `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and
     // `GIT_CONFIG_VALUE_<n>` from its environment as extra config, so a value
