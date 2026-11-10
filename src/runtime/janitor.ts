@@ -48,10 +48,26 @@ interface FileEntry {
 const SUMMARY_SAMPLE_LIMIT = 10;
 const SUMMARY_PATH_LIMIT = 200;
 
-/** The symbolic links one cleanup root holds, which the walk refused to follow. */
+/**
+ * How many directory levels the walk goes down. It is far deeper than a real
+ * scratch tree, and it still bounds a walk that a directory loop (a bind mount)
+ * would make endless.
+ */
+const MAX_WALK_DEPTH = 64;
+
+/**
+ * The symbolic links one cleanup root holds, which the walk refused to follow,
+ * and the directories at the depth limit that the walk did not enter.
+ */
 interface LinkTally {
   count: number;
   readonly sample: string[];
+  tooDeep: number;
+  readonly deepSample: string[];
+}
+
+function newTally(): LinkTally {
+  return { count: 0, sample: [], tooDeep: 0, deepSample: [] };
 }
 
 /** What one cleanup root produced, for one summary line. */
@@ -60,8 +76,10 @@ interface RootSummary {
   deleted: number;
   bytes: number;
   readonly linksSkipped: number;
+  readonly tooDeep: number;
   readonly sample: string[];
   readonly linkSample: string[];
+  readonly deepSample: string[];
 }
 
 /** Keep one path for a summary, bounded in count and in length. */
@@ -78,9 +96,10 @@ function rememberPath(sample: string[], path: string): void {
  * outside the root can no longer put a file of another tree on the list, and
  * cleanup cannot delete a file the root does not contain. Every link the walk
  * refused to follow is counted in `links`, with a bounded sample of its paths.
+ * A directory below the depth limit is not entered. It is counted in `tooDeep`
+ * with a sample, so the summary says what the walk did not see.
  */
 async function collectFiles(dir: string, out: FileEntry[], links: LinkTally, depth = 0): Promise<void> {
-  if (depth > 4) return;
   let names: string[];
   try {
     names = await readdir(dir);
@@ -96,7 +115,12 @@ async function collectFiles(dir: string, out: FileEntry[], links: LinkTally, dep
         rememberPath(links.sample, path);
         out.push({ path, size: info.size, madeMs: Math.max(info.mtimeMs, info.ctimeMs) });
       } else if (info.isDirectory()) {
-        await collectFiles(path, out, links, depth + 1);
+        if (depth + 1 > MAX_WALK_DEPTH) {
+          links.tooDeep += 1;
+          rememberPath(links.deepSample, path);
+        } else {
+          await collectFiles(path, out, links, depth + 1);
+        }
       } else if (info.isFile()) {
         out.push({ path, size: info.size, madeMs: Math.max(info.mtimeMs, info.ctimeMs) });
       }
@@ -149,7 +173,7 @@ export class Janitor {
         const perRoot: RootSummary[] = [];
         const rootOf = new Map<FileEntry, RootSummary>();
         for (const root of roots) {
-          const links: LinkTally = { count: 0, sample: [] };
+          const links: LinkTally = newTally();
           const found: FileEntry[] = [];
           await collectFiles(root, found, links);
           scannedBytes += found.reduce((sum, file) => sum + file.size, 0);
@@ -158,8 +182,10 @@ export class Janitor {
             deleted: 0,
             bytes: 0,
             linksSkipped: links.count,
+            tooDeep: links.tooDeep,
             sample: [],
             linkSample: [...links.sample],
+            deepSample: [...links.deepSample],
           };
           perRoot.push(summary);
           for (const file of found) {
@@ -199,7 +225,7 @@ export class Janitor {
       }
 
       if (this.options.cacheDir !== undefined && this.options.maxAgeHours > 0) {
-        const links: LinkTally = { count: 0, sample: [] };
+        const links: LinkTally = newTally();
         const cached: FileEntry[] = [];
         await collectFiles(this.options.cacheDir, cached, links);
         const summary: RootSummary = {
@@ -207,8 +233,10 @@ export class Janitor {
           deleted: 0,
           bytes: 0,
           linksSkipped: links.count,
+          tooDeep: links.tooDeep,
           sample: [],
           linkSample: [...links.sample],
+          deepSample: [...links.deepSample],
         };
         for (const file of cached) {
           if (now - file.madeMs > maxAgeMs) {
@@ -238,14 +266,16 @@ export class Janitor {
    * pass logs nothing, so the record stays small and a line means an event.
    */
   private logSummary(summary: RootSummary): void {
-    if (summary.deleted === 0 && summary.linksSkipped === 0) return;
+    if (summary.deleted === 0 && summary.linksSkipped === 0 && summary.tooDeep === 0) return;
     this.options.logger?.info?.("janitor cleanup summary", {
       root: summary.root,
       deleted: summary.deleted,
       bytes: summary.bytes,
       linksSkipped: summary.linksSkipped,
+      tooDeep: summary.tooDeep,
       sample: summary.sample,
       linkSample: summary.linkSample,
+      deepSample: summary.deepSample,
     });
   }
 }

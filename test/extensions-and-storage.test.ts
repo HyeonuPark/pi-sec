@@ -945,6 +945,53 @@ describe("janitor.test.ts", () => {
       expect(remaining).not.toContain("big.txt");
     });
 
+    it("ages out a file nine directories below a cleanup root", async () => {
+      dir = await makeTempTree("pi-sec-janitor-deep-");
+      const now = clockAhead();
+      const deep = join(dir, "a", "b", "c", "d", "e", "f", "g", "h", "i");
+      await mkdir(deep, { recursive: true });
+      await makeFile(deep, "old.txt", "old", 48 * 60 * 60 * 1000, now);
+      await makeFile(deep, "fresh.txt", "fresh", 1000, now);
+
+      const janitor = new Janitor({
+        privateTmp: true,
+        tmpDirs: [dir],
+        maxAgeHours: 6,
+        maxBytes: 1024 * 1024,
+        eagerThresholdBytes: 1024 * 1024,
+        now: () => now,
+      });
+      await janitor.run();
+
+      expect(await readdir(deep)).toEqual(["fresh.txt"]);
+    });
+
+    it("logs a directory too deep to walk", async () => {
+      dir = await makeTempTree("pi-sec-janitor-toodeep-");
+      const now = clockAhead();
+      const levels = Array.from({ length: 66 }, () => "d");
+      await mkdir(join(dir, ...levels), { recursive: true });
+      const lines: Record<string, unknown>[] = [];
+      const janitor = new Janitor({
+        privateTmp: true,
+        tmpDirs: [dir],
+        maxAgeHours: 6,
+        maxBytes: 1024 * 1024,
+        eagerThresholdBytes: 1024 * 1024,
+        now: () => now,
+        logger: {
+          info: (message, fields) => lines.push({ message, ...fields }),
+          warn: () => undefined,
+        },
+      });
+      await janitor.run();
+
+      expect(lines).toHaveLength(1);
+      expect(lines[0]?.message).toBe("janitor cleanup summary");
+      expect(lines[0]?.tooDeep).toBe(1);
+      expect(lines[0]?.deepSample).toEqual([join(dir, ...levels.slice(0, 65))]);
+    });
+
     it("does not follow a directory symlink out of the cleanup root", async () => {
       dir = await makeTempTree("pi-sec-janitor-root-");
       const outside = await makeTempTree("pi-sec-janitor-outside-");

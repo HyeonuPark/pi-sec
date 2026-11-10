@@ -461,6 +461,8 @@ private `/tmp`:
   and `/var/tmp`: delete files older than `tmp.maxAgeHours`, delete files larger
   than `tmp.eagerThresholdBytes` sooner, and enforce `tmp.maxBytes` (oldest
   first). Because the tmp is private and restart-cleared, this is safe.
+  The walk goes 64 directory levels down. It logs a count and a sample of the
+  directories it did not enter (`tooDeep`, `deepSample`) in the cleanup summary.
 - Without a private tmp, skip tmp cleanup entirely — never delete arbitrary
   `/tmp` files.
 - Rotate `app.log` by size/count and `audit.jsonl` by size/age; prune rotated
