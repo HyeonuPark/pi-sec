@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import type { Context } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, withoutAbortSignal } from "@earendil-works/chord/context";
 import { arr, bool, lit, num, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { type ToolCall } from "@earendil-works/pi-ai";
 import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry";
@@ -21,6 +21,7 @@ import {
   type Extension,
   type HookApi,
   type SubmissionId,
+  type TaskId,
   type SubmissionRecord,
   type ToolExecutionResult,
   type ToolRegistration,
@@ -1190,19 +1191,79 @@ export class SubagentHub {
     return out.sort((a, b) => a.createdAt - b.createdAt);
   }
 
-  /** A pending request in one conversation, found by the token it handed out. */
+  /**
+   * A request in one conversation, found by the token it handed out, whatever its
+   * status. The caller decides what `answered` and `cancelled` mean.
+   */
   async requestByToken(
     conversationId: ConversationId,
     token: string,
     ctx: Context,
   ): Promise<Readonly<MessageRecord> | undefined> {
     const inbox = await this.inbox(conversationId, ctx);
-    return inbox.find(
-      (message) =>
-        message.kind === "request" &&
-        message.replyToken === token &&
-        (message.status === "pending" || message.status === "claimed"),
-    );
+    return inbox.find((message) => message.kind === "request" && message.replyToken === token);
+  }
+
+  /**
+   * The requester stops waiting: mark the receiver's copy of the request
+   * `cancelled`, unless a reply already answered it.
+   *
+   * The reply and the `answered` mark are one commit, so exactly one of the two
+   * wins. `answered` tells the caller to read the reply that is now in its inbox.
+   */
+  async withdrawRequest(ctx: Context, receiver: ConversationId, id: string): Promise<"withdrawn" | "answered"> {
+    return await requireHarness(this.#context).commit(async (tx: Tx) => {
+      const draft = await tx.doc(SecMessage, receiver, id, id);
+      if (draft.status === "answered") return "answered";
+      draft.status = "cancelled";
+      return "withdrawn";
+    }, ctx);
+  }
+
+  /**
+   * Whether a request's requester stopped waiting: the request says so, or the
+   * task of its wait ended without a withdrawal (a restart, `async_cancel`).
+   */
+  async #requesterGone(tx: Tx, request: Readonly<MessageRecord>): Promise<boolean> {
+    if (request.status === "cancelled") return true;
+    if (request.waiterTaskId === undefined) return false;
+    const task = await tx.task(Number(request.waiterTaskId) as unknown as TaskId);
+    return task === undefined || task.state.status === "terminal";
+  }
+
+  /**
+   * Answer a request in one commit: write the reply into the requester's inbox and
+   * mark the request `answered`, unless the requester already stopped waiting.
+   */
+  async answerRequest(
+    ctx: Context,
+    receiver: ConversationId,
+    request: Readonly<MessageRecord>,
+    reply: { readonly from: MessagePeer; readonly body: string },
+  ): Promise<{ readonly outcome: "answered"; readonly id: string } | { readonly outcome: "withdrawn" | "closed" }> {
+    const id = ulid();
+    const now = Date.now();
+    return await requireHarness(this.#context).commit(async (tx: Tx) => {
+      const draft = await tx.doc(SecMessage, receiver, request.id, request.id);
+      if (draft.status === "answered") return { outcome: "closed" as const };
+      if (await this.#requesterGone(tx, draft)) {
+        draft.status = "cancelled";
+        return { outcome: "withdrawn" as const };
+      }
+      const answer = await tx.doc(SecMessage, cid(request.from.conversationId), id, id);
+      answer.id = id;
+      answer.from = { ...reply.from };
+      answer.to = { ...request.from };
+      answer.kind = "reply";
+      answer.body = reply.body;
+      answer.bytes = Buffer.byteLength(reply.body, "utf8");
+      answer.inReplyTo = request.id;
+      answer.status = "pending";
+      answer.createdAt = now;
+      draft.status = "answered";
+      draft.answeredAt = now;
+      return { outcome: "answered" as const, id };
+    }, ctx);
   }
 
   /**
@@ -1297,6 +1358,7 @@ export class SubagentHub {
       readonly body: string;
       readonly inReplyTo?: string;
       readonly replyToken?: string;
+      readonly waiterTaskId?: string;
     },
   ): Promise<MessageRecord> {
     const harness = requireHarness(this.#context);
@@ -1314,6 +1376,7 @@ export class SubagentHub {
       draft.bytes = bytes;
       if (input.inReplyTo !== undefined) draft.inReplyTo = input.inReplyTo;
       if (input.replyToken !== undefined) draft.replyToken = input.replyToken;
+      if (input.waiterTaskId !== undefined) draft.waiterTaskId = input.waiterTaskId;
       draft.status = "pending";
       draft.createdAt = now;
     }, ctx);
@@ -1328,6 +1391,7 @@ export class SubagentHub {
       createdAt: now,
       ...(input.inReplyTo === undefined ? {} : { inReplyTo: input.inReplyTo }),
       ...(input.replyToken === undefined ? {} : { replyToken: input.replyToken }),
+      ...(input.waiterTaskId === undefined ? {} : { waiterTaskId: input.waiterTaskId }),
     };
   }
 
@@ -2622,9 +2686,9 @@ export function createSubagentsExtension(context: ExtensionContext): Extension<T
       const notice = await hub.roundTripNotice(self, target.peer.conversationId, ctx);
       const withNotice = (body: string): string => (notice === "" ? body : `${body}\n\n${notice}`);
 
-      // The id is memoised so a replayed call asks once. `replay: unsafe` means
-      // the harness will not repeat it, but a restart mid-wait re-runs the tool
-      // body, and a second request would leave the first unanswered for good.
+      // The id is memoised so a replayed call asks once. `replay: unsafe` means the
+      // harness does not run the body again after a restart: it settles the call as
+      // interrupted, and the receiver finds the wait over by the task it records.
       const id = await api.memo<string>("request:message", ulid(), ctx);
       let mine = (await hub.inbox(self, ctx)).find((message) => message.id === id);
       if (mine === undefined) {
@@ -2637,6 +2701,7 @@ export function createSubagentsExtension(context: ExtensionContext): Extension<T
           kind: "request",
           body: args.body,
           replyToken: token,
+          waiterTaskId: String(api.taskId),
         });
         const delivery = await hub.deliver(ctx, mine);
         if (!delivery.delivered) {
@@ -2680,14 +2745,11 @@ export function createSubagentsExtension(context: ExtensionContext): Extension<T
         }
 
         if (Date.now() >= deadline) {
-          const harness = requireHarness(context);
-          await harness.commit(async (tx: Tx) => {
-            const draft = await tx.doc(SecMessage, self, id, id);
-            draft.status = "cancelled";
-          }, ctx);
+          const withdrawn = await hub.withdrawRequest(ctx, cid(target.peer.conversationId), id);
+          if (withdrawn === "answered") continue;
           return text(
             withNotice(
-              `no answer from ${args.to} within ${budget}ms. The request was cancelled; an answer that arrives later is delivered as a message rather than lost. Run this through async_call next time so nothing blocks.`,
+              `no answer from ${args.to} within ${budget}ms. The request was withdrawn, so ${args.to} can no longer answer it. If you still need the answer, ask again, and run the request through async_call so nothing blocks.`,
             ),
             true,
           );
@@ -2696,10 +2758,10 @@ export function createSubagentsExtension(context: ExtensionContext): Extension<T
         try {
           await hub.waitFor(String(self), REQUEST_POLL_MS, ctx.abortSignal);
         } catch {
+          // The commit runs without the abort signal, or the abort would cancel it.
+          await hub.withdrawRequest(withoutAbortSignal(ctx), cid(target.peer.conversationId), id).catch(() => undefined);
           return text(
-            withNotice(
-              "the call ended before an answer arrived. The request stands, and a late answer arrives as a message.",
-            ),
+            withNotice(`the call ended before an answer arrived. The request was withdrawn, so ${args.to} can no longer answer it.`),
             true,
           );
         }
@@ -2718,23 +2780,24 @@ export function createSubagentsExtension(context: ExtensionContext): Extension<T
       const sizeProblem = hub.sizeProblem(args.body);
       if (sizeProblem !== undefined) return text(sizeProblem, true);
       const found = await hub.requestByToken(self, args.replyToken, ctx);
-      if (found === undefined) {
+      if (found === undefined || found.status === "answered") {
         return text(`no open request with token "${args.replyToken}" in this conversation`, true);
       }
       const selfName = await hub.nameOf(self, ctx);
-      const written = await hub.writeMessage(ctx, {
+      const answered = found.from.agentKind === "root" ? ROOT_LABEL : found.from.name;
+      const written = await hub.answerRequest(ctx, self, found, {
         from: { conversationId: String(self), name: selfName.name, agentKind: selfKind },
-        to: found.from,
-        kind: "reply",
         body: args.body,
-        inReplyTo: found.id,
       });
-      const harness = requireHarness(context);
-      await harness.commit(async (tx: Tx) => {
-        const draft = await tx.doc(SecMessage, self, found.id, found.id);
-        draft.status = "answered";
-        draft.answeredAt = Date.now();
-      }, ctx);
+      if (written.outcome === "closed") {
+        return text(`no open request with token "${args.replyToken}" in this conversation`, true);
+      }
+      if (written.outcome !== "answered") {
+        return text(
+          `the request with token "${args.replyToken}" was withdrawn: ${answered} stopped waiting for the answer. If the answer still matters, send it with send_message.`,
+          true,
+        );
+      }
       hub.wake(found.from.conversationId);
       // The answer is word from another agent, and the asking agent's next park is
       // worth a notice again. A direct `request_message` is running right now, so
@@ -2742,7 +2805,6 @@ export function createSubagentsExtension(context: ExtensionContext): Extension<T
       // result, which never goes through `deliver()`. This is the one point both
       // forms pass, because it is where the answer leaves for its requester.
       hub.forgetWaitTold(cid(found.from.conversationId));
-      const answered = found.from.agentKind === "root" ? ROOT_LABEL : found.from.name;
       return text(`answered ${answered} (${written.id}).`);
     },
   });

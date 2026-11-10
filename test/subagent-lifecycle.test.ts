@@ -675,6 +675,83 @@ describe("finishing a subagent", () => {
     const out = await root(harness, "CMD: ask");
     expect(out).toContain('"c" has ended and its record is gone, so no answer is coming.');
   }, 20_000);
+
+  /** The token a request handed out, read from the message the child received. */
+  function tokenIn(context: Context): string {
+    const message = context.messages.find((m) => m.role === "user" && messageText(m).includes('send_reply("'));
+    return /send_reply\("([^"]+)"/.exec(message === undefined ? "" : messageText(message))?.[1] ?? "no-token";
+  }
+
+  /** A child that parks, and answers the request it holds when told ANSWER-NOW. */
+  function lateAnswerer(timeoutMs: number): FauxResponseFactory[] {
+    return script((context) => {
+      if (hasUser(context, "BRIEF")) {
+        if (!hasUser(context, "ANSWER-NOW") || hasResult(context, "withdrawn")) return park();
+        return call("send_reply", { replyToken: tokenIn(context), body: "THE-LATE-ANSWER" });
+      }
+      const words = command(context);
+      if (words === undefined) return say("ok");
+      return words.includes("ask")
+        ? call("request_message", { to: "c", body: "a question", timeoutMs })
+        : call("spawn_subagent", { name: "c", vmodel: "faux", roles: [], initialPrompt: "BRIEF c" });
+    });
+  }
+
+  async function tellChild(h: TestHarness, childId: ConversationId): Promise<string> {
+    const conversation = await h.runtime.harness.conversation(childId, CTX);
+    const submission = await conversation!.submit({ type: "input", content: "ANSWER-NOW" }, CTX);
+    await submission.wait(CTX);
+    return results(await rowsOf(h, childId));
+  }
+
+  const repliesOfRoot = async (h: TestHarness): Promise<number> =>
+    (await h.runtime.subagents!.inbox(1 as ConversationId, CTX)).filter((message) => message.kind === "reply").length;
+
+  it("withdraws a direct request at its deadline, so a late reply is refused and names send_message", async () => {
+    harness = await createTestHarness();
+    harness.faux.setResponses(lateAnswerer(300));
+    await root(harness, "CMD: spawn");
+    const childId = await childOf(harness, 1 as ConversationId, "c");
+    await reachStatus(harness, childId, "waiting");
+
+    expect(await root(harness, "CMD: ask")).toContain("The request was withdrawn, so c can no longer answer it.");
+    const out = await tellChild(harness, childId);
+    expect(out).toContain("was withdrawn: the root agent stopped waiting for the answer");
+    expect(out).toContain("send_message");
+    expect(out).not.toContain("answered the root agent");
+    expect(await repliesOfRoot(harness)).toBe(0);
+  }, 20_000);
+
+  it("withdraws a direct request when its wait is aborted", async () => {
+    harness = await createTestHarness();
+    harness.faux.setResponses(lateAnswerer(600_000));
+    await root(harness, "CMD: spawn");
+    const childId = await childOf(harness, 1 as ConversationId, "c");
+    await reachStatus(harness, childId, "waiting");
+
+    const conversation = await resolveDefaultConversation(
+      harness.runtime.harness,
+      harness.config,
+      harness.runtime.paths,
+      CTX,
+    );
+    const asking = await conversation.submit({ type: "input", content: "CMD: ask" }, CTX);
+    await until(async () => {
+      const inbox = await harness!.runtime.subagents!.inbox(childId, CTX);
+      return inbox.some((message) => message.kind === "request") ? true : undefined;
+    }, "the request to reach the child");
+    await conversation.abort(CTX);
+    await asking.wait(CTX).catch(() => undefined);
+    await until(async () => {
+      const inbox = await harness!.runtime.subagents!.inbox(childId, CTX);
+      return inbox.some((message) => message.kind === "request" && message.status === "cancelled") ? true : undefined;
+    }, "the withdrawal of the request");
+
+    const out = await tellChild(harness, childId);
+    expect(out).toContain("was withdrawn: the root agent stopped waiting for the answer");
+    expect(out).not.toContain("answered the root agent");
+    expect(await repliesOfRoot(harness)).toBe(0);
+  }, 20_000);
 });
 
 describe("drafts for a job tree", () => {

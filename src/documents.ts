@@ -1415,6 +1415,11 @@ export type MessageRecord = {
   readonly inReplyTo?: string;
   /** Short token the model echoes back with `send_reply`. */
   readonly replyToken?: string;
+  /**
+   * For a `request`: the task of the requester's wait. A reply finds the wait
+   * over when this task ended, even if no withdrawal was written.
+   */
+  readonly waiterTaskId?: string;
   status: MessageStatus;
   claimedBy?: string;
   claimedAt?: number;

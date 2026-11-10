@@ -2276,7 +2276,10 @@ it as a background task — the recommended form, because a directly blocking
 requester is a busy conversation that takes no other messages, and two agents
 blocking on each other stop for good. A request whose target finishes or is
 deleted while the requester waits ends at once with a result that says no answer
-is coming. `await_orders` and `finish_work` refuse to run under `async_call` or
+is coming. A request whose requester stopped waiting (the deadline passed, the
+call was aborted, or its background task ended) is withdrawn: `send_reply` then
+refuses the answer and names `send_message`, so a late answer is never stored
+unread. `await_orders` and `finish_work` refuse to run under `async_call` or
 `js`, because ending the run is the point of them.
 
 **The user's channel is the root's.** A subagent and a scheduled run lack
