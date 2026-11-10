@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { splitRepoSlug } from "./network.ts";
 import { repoInfoEndpoint } from "./queries.ts";
 
 /**
@@ -440,18 +441,6 @@ export interface RepositoryInfo {
   readonly size: number;
 }
 
-/** Split `owner/repo` out of a `full_name`, or undefined for anything else. */
-function splitFullName(value: string | undefined | null): { owner: string; name: string } | undefined {
-  if (value === undefined || value === null) return undefined;
-  const slash = value.indexOf("/");
-  if (slash <= 0 || slash === value.length - 1) return undefined;
-  const owner = value.slice(0, slash);
-  const name = value.slice(slash + 1);
-  // One slash only: a second one would put a path segment into a remote name.
-  if (name.includes("/")) return undefined;
-  return { owner, name };
-}
-
 /** The part of GitHub's REST answer for one repository that this module reads. */
 interface RestRepository {
   readonly full_name?: string;
@@ -487,7 +476,8 @@ export async function fetchRepositoryInfo(reader: GhReader, owner: string, name:
   if (found === null) {
     throw new GhError(`repository ${owner}/${name} not found`);
   }
-  const source = splitFullName(found.source?.full_name);
+  const parts = found.source?.full_name == null ? undefined : splitRepoSlug(found.source.full_name);
+  const source = parts === undefined ? undefined : { owner: parts.owner, name: parts.repo };
   return {
     fork: found.fork === true,
     ...(source === undefined ? {} : { source }),

@@ -24,7 +24,6 @@ import {
 } from "../../src/extensions/github-pr/writes.ts";
 import {
   configuredRepository,
-  dedupeRepositories,
   readSettings,
   splitRepository,
   type GithubPrSettings,
@@ -446,13 +445,6 @@ describe("writes: refused input", () => {
 });
 
 describe("settings", () => {
-  it("folds case-only duplicates and keeps the first spelling", () => {
-    expect(dedupeRepositories(["Acme/Widgets", "acme/widgets", "other/tool", "ACME/WIDGETS"])).toEqual([
-      "Acme/Widgets",
-      "other/tool",
-    ]);
-  });
-
   it("applies the schema defaults of the two numbers", () => {
     const config = {
       ...defaultConfig(),

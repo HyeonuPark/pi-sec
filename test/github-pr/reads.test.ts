@@ -558,9 +558,6 @@ describe("network.test.ts", () => {
       expect(splitRepoSlug("/app")).toBeUndefined();
       expect(splitRepoSlug("acme/")).toBeUndefined();
       expect(splitRepoSlug("a/b/c")).toBeUndefined();
-    });
-
-    it("lowers the case of a slug", () => {
       expect(repoSlug(" Acme/App ")).toBe("acme/app");
     });
 
@@ -579,6 +576,8 @@ describe("network.test.ts", () => {
 
     it("keeps the first spelling of a name and folds case duplicates", () => {
       expect(dedupeRepos(["Acme/App", "acme/app", "other/x", "OTHER/X"])).toEqual(["Acme/App", "other/x"]);
+      // `readSettings` uses this function too, so the trim and empty-name rules count.
+      expect(dedupeRepos([" Acme/App ", "other/x", "", "ACME/APP", "  "])).toEqual(["Acme/App", "other/x"]);
     });
   });
 

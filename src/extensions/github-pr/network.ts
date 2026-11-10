@@ -82,7 +82,11 @@ export interface NetworkResolution {
   readonly grouped: readonly RepoSlug[];
 }
 
-/** Split `owner/repo` into its parts, or `undefined` for anything else. */
+/**
+ * Split `owner/repo` into its parts, or `undefined` for anything else.
+ *
+ * The one parser of repository names: settings.ts and gh.ts call it too.
+ */
 export function splitRepoSlug(name: string): { owner: string; repo: string } | undefined {
   const trimmed = name.trim();
   const at = trimmed.indexOf("/");
@@ -126,7 +130,8 @@ export function isSafeSlug(slug: RepoSlug): boolean {
 /**
  * Fold the configured names into lowercase slugs, keeping the first spelling of
  * each. GitHub compares names without regard to case, so `Owner/Repo` and
- * `owner/repo` name one repository and get one network.
+ * `owner/repo` name one repository and get one network. The one fold of names:
+ * `readSettings` calls it too.
  */
 export function dedupeRepos(repos: readonly string[]): string[] {
   const seen = new Set<string>();

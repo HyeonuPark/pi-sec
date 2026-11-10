@@ -1,4 +1,5 @@
 import type { Config, GithubPrConfig } from "../../config/schema.ts";
+import { dedupeRepos, splitRepoSlug } from "./network.ts";
 
 /**
  * Reading `githubPr` from the config, once per request and once per poll.
@@ -12,8 +13,8 @@ import type { Config, GithubPrConfig } from "../../config/schema.ts";
  *
  * `repos` also loses its case-only duplicates here. GitHub compares owner and
  * repository name without regard to case, so `Foo/Bar` and `foo/bar` name one
- * repository, and the loader deliberately accepts both. The first spelling in the
- * file wins, because that is the spelling the operator wrote first and the one the
+ * repository, and the loader deliberately accepts both. `dedupeRepos` of
+ * network.ts folds them, and the first spelling in the file wins, because that is the spelling the operator wrote first and the one the
  * pages show.
  */
 
@@ -33,30 +34,11 @@ export interface GithubPrSettings {
 export const FETCH_INTERVAL_DEFAULT_SECONDS = 300;
 export const DISK_LIMIT_DEFAULT_MEGABYTES = 2048;
 
-/**
- * Fold entries that differ only in case into the first spelling.
- *
- * Order is kept: `[Foo/Bar, baz/qux, foo/bar]` becomes `[Foo/Bar, baz/qux]`.
- */
-export function dedupeRepositories(repos: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const kept: string[] = [];
-  for (const repo of repos) {
-    const key = repo.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    kept.push(repo);
-  }
-  return kept;
-}
-
 /** Split `owner/repo`; throws on a value the schema should have refused. */
 export function splitRepository(repo: string): { owner: string; name: string } {
-  const slash = repo.indexOf("/");
-  if (slash <= 0 || slash === repo.length - 1) {
-    throw new Error(`not owner/repo: ${repo}`);
-  }
-  return { owner: repo.slice(0, slash), name: repo.slice(slash + 1) };
+  const parts = splitRepoSlug(repo);
+  if (parts === undefined) throw new Error(`not owner/repo: ${repo}`);
+  return { owner: parts.owner, name: parts.repo };
 }
 
 /** The config as the extension sees it, or undefined when the key is absent. */
@@ -77,7 +59,7 @@ export function readSettings(config: Config): GithubPrSettings | undefined {
   if (raw === undefined) return undefined;
   return {
     writes: raw.writes,
-    repos: dedupeRepositories(raw.repos),
+    repos: dedupeRepos(raw.repos),
     fetchIntervalSeconds: raw.fetchIntervalSeconds ?? FETCH_INTERVAL_DEFAULT_SECONDS,
     diskLimitMegabytes: raw.diskLimitMegabytes ?? DISK_LIMIT_DEFAULT_MEGABYTES,
   };
