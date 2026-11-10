@@ -411,6 +411,9 @@ export class ReportStore {
   private readonly audit: AuditLog | undefined;
   private readonly now: () => number;
 
+  /** The tail of the pending `addVersion` calls of each report. */
+  private readonly versionChains = new Map<string, Promise<void>>();
+
   constructor(options: ReportStoreOptions) {
     this.session = options.session;
     this.storage = options.storage;
@@ -542,6 +545,7 @@ export class ReportStore {
   async create(context: Context, input: ReportCreateInput): Promise<ReportRecord> {
     if (input.title.trim() === "") throw new Error("report title must not be empty");
     if (input.jobId.trim() === "") throw new Error("a report must belong to a job");
+    if (input.content.trim() === "") throw new Error("a report body must not be empty");
     const id = ulid(this.now());
     const name = await this.reserveName(context, reportName(input.name ?? input.title, this.now()));
     // The body lands before the record, so a record never points at a file that
@@ -587,6 +591,28 @@ export class ReportStore {
     id: string,
     input: { readonly content: string; readonly note?: string },
   ): Promise<ReportRecord> {
+    if (input.content.trim() === "") throw new Error("a report body must not be empty");
+    // One chain per report: the read of the revision count, the body write and the
+    // commit of two calls on one report run one after the other, so each call takes
+    // its own number. Calls on other reports do not wait for this one.
+    const previous = this.versionChains.get(id) ?? Promise.resolve();
+    const run = previous.then(() => this.appendVersion(context, id, input));
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.versionChains.set(id, tail);
+    void tail.then(() => {
+      if (this.versionChains.get(id) === tail) this.versionChains.delete(id);
+    });
+    return run;
+  }
+
+  private async appendVersion(
+    context: Context,
+    id: string,
+    input: { readonly content: string; readonly note?: string },
+  ): Promise<ReportRecord> {
     const current = await this.get(context, id);
     if (current === undefined) throw new ReportNotFoundError(id);
     const n = current.versions.length + 1;
@@ -594,6 +620,9 @@ export class ReportStore {
     return this.session.commit(async (tx) => {
       const draft = await tx.doc(SecReport, id, id);
       if (draft.createdAt === 0) throw new ReportNotFoundError(id);
+      // A second line of defense for a writer outside the chain: the record must
+      // still hold the revisions this call counted.
+      if (draft.versions.length !== n - 1) throw new Error(`report ${id} changed while its revision was written`);
       draft.versions = [...draft.versions, { ...version, ...(input.note !== undefined ? { note: input.note } : {}) }];
       // The flag says the operator does not have to answer about this report yet.
       // The revision just written takes that back: it is unanswered text, and its

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, ToolExecutionApi, ToolRegistration } from "@earendil-works/pi-durable";
 import { SecAgent, SecAgentChild, SecReport, SecReportDraft, type ReportFeedback, type ReportRecord, type ReportVersion } from "../src/documents.ts";
@@ -701,6 +702,43 @@ describe("report store", () => {
       second.versions[1]!.sha256,
     );
     expect((await h.runtime.reports.get(ctx, report.id))?.versions[0]?.approval).toBeUndefined();
+  });
+
+  it("gives two revisions written at the same time their own numbers and their own bodies", async () => {
+    const h = await boot();
+    const { jobs, reports } = h.runtime;
+    const job = await jobs.create(ctx, { title: "work" });
+    const report = await reports.create(ctx, { jobId: job.id, title: "Findings", content: "one\n" });
+
+    await Promise.all([
+      reports.addVersion(ctx, report.id, { content: "two\n" }),
+      reports.addVersion(ctx, report.id, { content: "three\n" }),
+    ]);
+
+    const record = (await reports.get(ctx, report.id))!;
+    expect(record.versions.map((version) => version.n)).toEqual([1, 2, 3]);
+    for (const version of record.versions) {
+      const body = await reports.readVersion(report.id, version.n);
+      expect(createHash("sha256").update(body!, "utf8").digest("hex")).toBe(version.sha256);
+    }
+  });
+
+  it("refuses an empty body at the store, for a new report and for a new revision", async () => {
+    const h = await boot();
+    const { jobs, reports } = h.runtime;
+    const job = await jobs.create(ctx, { title: "work" });
+
+    await expect(reports.create(ctx, { jobId: job.id, title: "Empty", content: "  \n" })).rejects.toThrow(
+      "a report body must not be empty",
+    );
+    expect(await reports.list(ctx)).toEqual([]);
+
+    const report = await reports.create(ctx, { jobId: job.id, title: "Findings", content: "one\n" });
+    await expect(reports.addVersion(ctx, report.id, { content: "" })).rejects.toThrow(
+      "a report body must not be empty",
+    );
+    expect((await reports.get(ctx, report.id))?.versions).toHaveLength(1);
+    expect(await reports.readVersion(report.id, 2)).toBeUndefined();
   });
 
   it("refuses a report it does not have", async () => {
