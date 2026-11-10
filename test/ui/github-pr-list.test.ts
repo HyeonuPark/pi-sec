@@ -27,8 +27,8 @@ import { join } from "node:path";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildUi, ROOT } from "../../scripts/build-ui.mjs";
-import { readMeta, readFirstList, writesEnabled } from "../../src/ui/github-pr/blocks.ts";
-import { STORE_PREFIX, forgetStored, readStored, writeStored } from "../../src/ui/state/github-pr.ts";
+import { readMeta, readFirstList, readFirstPending, writesEnabled } from "../../src/ui/github-pr/blocks.ts";
+import { STORE_PREFIX, draftQueueStoreKey, forgetStored, pendingStoreKey, readStored, writeStored } from "../../src/ui/state/github-pr.ts";
 
 /* ------------------------------------------------------------------ fixtures */
 
@@ -87,6 +87,28 @@ function listAnswer(over: { title?: string } = {}) {
       { key: "opened", title: "Opened", prs: [pr("acme/widgets", 11, "Add a spinner", { isDraft: false })] },
       { key: "draft", title: "Draft", prs: [pr("acme/widgets", 9, "Spike: sagas", { isDraft: true })] },
       { key: "related", title: "Related", prs: [pr("acme/widgets", 3, "Bump deps", { ciState: "FAILURE" })] },
+    ],
+  };
+}
+
+/** The saved reviews the server wrote into the page: one of each kind of row. */
+function pendingAnswer() {
+  const pr = (title: string, state: string, isDraft = false) => ({
+    title,
+    url: "https://github.com/acme/widgets/pull/1",
+    state,
+    isDraft,
+    author: "octocat",
+    updatedAt: "2026-10-01T00:00:00Z",
+  });
+  return {
+    reviews: [
+      { kind: "draft", repo: "acme/widgets", number: 12, configured: true, comments: 3, summary: true, event: "APPROVE", savedAt: "2026-10-06T00:00:00.000Z", pr: pr("Fix the flux capacitor", "OPEN") },
+      { kind: "draft", repo: "acme/widgets", number: 99, configured: true, comments: 1, summary: false, event: "COMMENT", savedAt: "2026-10-05T00:00:00.000Z", pr: pr("Closed work", "CLOSED") },
+      { kind: "draft", repo: "acme/widgets", number: 98, configured: true, comments: 2, summary: false, event: "REQUEST_CHANGES", savedAt: "2026-10-04T00:00:00.000Z", pr: pr("Merged work", "MERGED") },
+      { kind: "draft", repo: "acme/widgets", number: 97, configured: true, comments: 0, summary: true, event: "COMMENT", savedAt: "2026-10-03T00:00:00.000Z", pr: null },
+      { kind: "draft", repo: "old/tool", number: 4, configured: false, comments: 1, summary: false, event: "COMMENT", savedAt: "2026-10-02T00:00:00.000Z", pr: pr("Left behind", "OPEN", true) },
+      { kind: "unreadable", repo: "acme/widgets", number: 7, file: "acme+widgets+7.json.unreadable-1767000000000", savedAt: "2026-10-01T00:00:00.000Z" },
     ],
   };
 }
@@ -174,11 +196,12 @@ function block(id: string, value: unknown): string {
   return `<script type="application/json" id="${id}">${JSON.stringify(value).replaceAll("<", "\\u003c")}</script>`;
 }
 
-/** The shell with the server's stamps and the two blocks in it. */
+/** The shell with the server's stamps and the three blocks in it. */
 async function shell(options: {
   readonly base?: string;
   readonly meta?: unknown;
   readonly first?: unknown;
+  readonly pending?: unknown;
   readonly metaBlock?: boolean;
 }): Promise<string> {
   const base = options.base ?? "";
@@ -189,6 +212,7 @@ async function shell(options: {
     .replace(/<meta\s+name="pi-sec-timezone"\s+content="[^"]*"\s*\/?>/i, '<meta name="pi-sec-timezone" content="Asia/Tokyo" />');
   html = html.replace("<!--github-pr-meta-->", options.metaBlock === false ? "" : block("github-pr-meta", options.meta ?? META_WRITES));
   html = html.replace("<!--github-pr-list-first-->", options.first === undefined ? "" : block("github-pr-list-first", options.first));
+  html = html.replace("<!--github-pr-pending-first-->", options.pending === undefined ? "" : block("github-pr-pending-first", options.pending));
   return html;
 }
 
@@ -199,6 +223,7 @@ async function openList(
     readonly meta?: unknown;
     readonly metaBlock?: boolean;
     readonly first?: unknown;
+    readonly pending?: unknown;
     readonly url?: string;
     readonly replies?: Readonly<Record<string, Reply>>;
     /** Run before the page's bundle, so a test can plant what a tab already held. */
@@ -413,7 +438,7 @@ describe("the requests the list page makes", () => {
       page.respond("/api/github/pr/list", { body: listAnswer({ title: "Renamed while you watched" }) });
       page.emit("prs");
       await page.settle();
-      expect(page.calls).toHaveLength(2);
+      expect(page.calls.filter((call) => call.path === "/api/github/pr/list")).toHaveLength(2);
       expect(rowTitles(page.document)[0]).toBe("Renamed while you watched");
     } finally {
       page.close();
@@ -452,7 +477,7 @@ describe("the requests the list page makes", () => {
       // The page's own read is still held, and the frame starts a second one.
       page.emit("prs");
       await page.settle();
-      expect(page.calls).toHaveLength(2);
+      expect(page.calls.filter((call) => call.path === "/api/github/pr/list")).toHaveLength(2);
       expect(rowTitles(page.document)[0]).toBe("The newer read");
 
       // The older read answers now, with an older list, and draws nothing.
@@ -699,6 +724,10 @@ describe("the two blocks, read on their own", () => {
     expect(await withBlocks("", readMeta)).toEqual({ viewer: null, repos: [], writes: false });
     expect(await withBlocks(block("github-pr-list-first", listAnswer()), readFirstList)).toEqual(listAnswer());
     expect(await withBlocks("", readFirstList)).toBeUndefined();
+    expect(await withBlocks(block("github-pr-pending-first", pendingAnswer()), readFirstPending)).toEqual(pendingAnswer());
+    expect(await withBlocks(block("github-pr-pending-first", { reviews: "no" }), readFirstPending)).toBeUndefined();
+    expect(await withBlocks(block("github-pr-pending-first", { reviews: [{ kind: "other" }] }), readFirstPending)).toBeUndefined();
+    expect(await withBlocks("", readFirstPending)).toBeUndefined();
   });
 });
 
@@ -743,10 +772,11 @@ describe("the three shells the dashboard is served as", () => {
     }
   });
 
-  it("leaves the two data blocks to the server, and only the list page takes the second", async () => {
+  it("leaves the data blocks to the server, and only the list page takes the second and the third", async () => {
     const list = await shellOf("github-pr-list.html");
     expect(list).toContain("<!--github-pr-meta-->");
     expect(list).toContain("<!--github-pr-list-first-->");
+    expect(list).toContain("<!--github-pr-pending-first-->");
     // The page writes the three elements the script takes over.
     expect(list).toContain('id="topbar"');
     expect(list).toContain('id="error-banner"');
@@ -756,6 +786,7 @@ describe("the three shells the dashboard is served as", () => {
       const html = await shellOf(name);
       expect(html, name).toContain("<!--github-pr-meta-->");
       expect(html, name).not.toContain("github-pr-list-first");
+      expect(html, name).not.toContain("github-pr-pending-first");
     }
   });
 
@@ -771,6 +802,228 @@ describe("the three shells the dashboard is served as", () => {
       // along with the port.
       const outside = [...new Set([...html].filter((character) => character.codePointAt(0) > 0x7f))];
       expect(outside.sort(), name).toEqual(["·", "…"].sort());
+    }
+  });
+});
+
+describe("the Pending reviews section", () => {
+  /** The rows of the section, as the words a reader sees. */
+  function pendingRows(document: Document) {
+    return [...document.querySelectorAll(".pending-section .pending-row")].map((row) => ({
+      state: row.querySelector(".pending-state")?.textContent,
+      title: row.querySelector(".pr-title")?.textContent,
+      href: row.querySelector(".pr-title a")?.getAttribute("href") ?? null,
+      sub: row.querySelector(".pr-sub")?.textContent?.replace(/ · saved .*$/, ""),
+    }));
+  }
+
+  it("draws the saved reviews above the five sections, newest first", async () => {
+    const page = await openList({ first: listAnswer(), pending: pendingAnswer() });
+    try {
+      expect(sectionHeads(page.document).map((head) => head.title)).toEqual([
+        "Pending reviews",
+        "Mentioned",
+        "Need review",
+        "Opened",
+        "Draft",
+        "Related",
+      ]);
+      expect(sectionHeads(page.document)[0]?.count).toBe("6");
+      expect(pendingRows(page.document)).toEqual([
+        { state: "Open", title: "Fix the flux capacitor", href: "/github/pr/acme/widgets/12/diff", sub: "#12 · acme/widgets · 3 comments · overall comment · Approve" },
+        { state: "Closed", title: "Closed work", href: "/github/pr/acme/widgets/99/diff", sub: "#99 · acme/widgets · 1 comment" },
+        { state: "Merged", title: "Merged work", href: "/github/pr/acme/widgets/98/diff", sub: "#98 · acme/widgets · 2 comments · Request changes" },
+        { state: "Unknown", title: "Pull request #97", href: "/github/pr/acme/widgets/97/diff", sub: "#97 · acme/widgets · overall comment" },
+        // A repository that is not in the settings has no dashboard page: the title goes to GitHub.
+        { state: "Draft", title: "Left behind", href: "https://github.com/acme/widgets/pull/1", sub: "#4 · old/tool · 1 comment · not in settings" },
+        { state: "Unknown", title: "This saved review cannot be read", href: null, sub: "#7 · acme/widgets" },
+      ]);
+      // A row is a div with a link and a button, and no button sits inside a link.
+      expect(page.document.querySelectorAll(".pending-row a button, .pending-row button a")).toHaveLength(0);
+      expect(page.document.querySelectorAll(".pending-row .pending-delete")).toHaveLength(6);
+      // The saved reviews came with the page, so the page asked for the list only.
+      expect(page.calls.map((call) => call.path)).toEqual(["/api/github/pr/list"]);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("shows the box with its empty sentence when no saved review exists, and no box when the server sent none", async () => {
+    const empty = await openList({ first: listAnswer(), pending: { reviews: [] } });
+    try {
+      expect(sectionHeads(empty.document)[0]).toEqual({ title: "Pending reviews", count: "0" });
+      expect(empty.document.querySelector(".pending-section .section-empty")?.textContent).toBe("No saved reviews");
+    } finally {
+      empty.close();
+    }
+    const none = await openList({ first: listAnswer() });
+    try {
+      expect(none.document.querySelector(".pending-section")).toBeNull();
+      expect(sectionHeads(none.document)).toHaveLength(5);
+    } finally {
+      none.close();
+    }
+  });
+
+  it("shows a pull request with a saved review in the Pending reviews box only", async () => {
+    // The server leaves the pull request out of the list it sends, so the head
+    // of its section counts one less, and the box holds it.
+    const without = listAnswer();
+    const withRow = listAnswer();
+    withoutRow(without);
+    const page = await openList({ first: without, pending: pendingAnswer() });
+    const before = await openList({ first: withRow });
+    try {
+      expect(sectionHeads(before.document)[0]).toEqual({ title: "Mentioned", count: "1" });
+      expect(sectionHeads(page.document)[1]).toEqual({ title: "Mentioned", count: "0" });
+      expect(rowTitles(page.document)).not.toContain("Fix the flux capacitor");
+      expect(pendingRows(page.document)[0]?.title).toBe("Fix the flux capacitor");
+    } finally {
+      page.close();
+      before.close();
+    }
+  });
+
+  /** Take the first pull request out of the Mentioned section, as the server does for a saved review. */
+  function withoutRow(answer: ReturnType<typeof listAnswer>): void {
+    answer.sections[0]!.prs.length = 0;
+  }
+
+  it("asks before it deletes, and sends nothing when the reader cancels", async () => {
+    const remaining = { reviews: pendingAnswer().reviews.slice(1) };
+    const page = await openList({
+      first: listAnswer(),
+      pending: pendingAnswer(),
+      replies: { "/api/github/pr/drafts/discard": { body: { deleted: true } }, "/api/github/pr/pending": { body: remaining } },
+      before(window) {
+        // The tab holds the review's own copies, which a delete must drop.
+        window.sessionStorage.setItem(STORE_PREFIX + pendingStoreKey("acme/widgets", 12), "[]");
+        window.sessionStorage.setItem(STORE_PREFIX + draftQueueStoreKey("acme/widgets", 12), "[]");
+        window.sessionStorage.setItem(STORE_PREFIX + pendingStoreKey("acme/widgets", 99), "[]");
+      },
+    });
+    try {
+      const asked: string[] = [];
+      let answer = false;
+      (page.window as unknown as { confirm: (message: string) => boolean }).confirm = (message) => {
+        asked.push(message);
+        return answer;
+      };
+      const button = (): HTMLButtonElement => page.document.querySelector(".pending-row .pending-delete") as HTMLButtonElement;
+      const before = page.calls.length;
+
+      button().click();
+      await page.settle();
+      expect(asked).toEqual(["Delete the saved review of acme/widgets #12? It holds 3 comments and an overall comment. This cannot be undone."]);
+      expect(page.calls).toHaveLength(before);
+      expect(pendingRows(page.document)).toHaveLength(6);
+
+      answer = true;
+      button().click();
+      await page.settle();
+      const sent = page.calls.slice(before);
+      expect(sent).toEqual([
+        { path: "/api/github/pr/drafts/discard", method: "POST" },
+        { path: "/api/github/pr/pending", method: "GET" },
+      ]);
+      expect(pendingRows(page.document)).toHaveLength(5);
+      expect(page.window.sessionStorage.getItem(STORE_PREFIX + pendingStoreKey("acme/widgets", 12))).toBeNull();
+      expect(page.window.sessionStorage.getItem(STORE_PREFIX + draftQueueStoreKey("acme/widgets", 12))).toBeNull();
+      // The copies of another pull request stay.
+      expect(page.window.sessionStorage.getItem(STORE_PREFIX + pendingStoreKey("acme/widgets", 99))).toBe("[]");
+    } finally {
+      page.close();
+    }
+  });
+
+  it("sends the repository, the number and the saved time of a draft, and the file name of a set-aside file", async () => {
+    const bodies: unknown[] = [];
+    const page = await openList({
+      first: listAnswer(),
+      pending: pendingAnswer(),
+      replies: { "/api/github/pr/drafts/discard": { body: { deleted: true } }, "/api/github/pr/pending": { body: pendingAnswer() } },
+    });
+    try {
+      const real = (page.window as unknown as { fetch: (input: unknown, init?: { body?: string; method?: string }) => Promise<unknown> }).fetch;
+      (page.window as unknown as { fetch: unknown }).fetch = (input: unknown, init?: { body?: string; method?: string }) => {
+        if (init?.method === "POST") bodies.push(JSON.parse(init.body ?? "null"));
+        return real(input, init);
+      };
+      (page.window as unknown as { confirm: () => boolean }).confirm = () => true;
+      const buttons = [...page.document.querySelectorAll(".pending-row .pending-delete")] as HTMLButtonElement[];
+      buttons[0]!.click();
+      await page.settle();
+      buttons[5]!.click();
+      await page.settle();
+      expect(bodies).toEqual([
+        { repo: "acme/widgets", number: 12, savedAt: "2026-10-06T00:00:00.000Z" },
+        { file: "acme+widgets+7.json.unreadable-1767000000000" },
+      ]);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("keeps the row and shows the server's sentence when the delete is refused", async () => {
+    const page = await openList({
+      first: listAnswer(),
+      pending: pendingAnswer(),
+      replies: {
+        "/api/github/pr/drafts/discard": { status: 409, body: { error: "The saved review changed after this list showed it. Reload the list and try again." } },
+      },
+    });
+    try {
+      (page.window as unknown as { confirm: () => boolean }).confirm = () => true;
+      (page.document.querySelector(".pending-row .pending-delete") as HTMLButtonElement).click();
+      await page.settle();
+      expect(page.document.querySelector("#error-banner")?.textContent).toBe(
+        "The saved review changed after this list showed it. Reload the list and try again.",
+      );
+      expect(pendingRows(page.document)).toHaveLength(6);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("draws the Delete button while writes are off", async () => {
+    const page = await openList({ first: listAnswer(), pending: pendingAnswer(), meta: META_READ_ONLY });
+    try {
+      expect(page.document.querySelectorAll(".pending-row .pending-delete")).toHaveLength(6);
+    } finally {
+      page.close();
+    }
+  });
+
+  it("reads the saved reviews again when the stream says the list changed, and after Reload", async () => {
+    const page = await openList({
+      first: listAnswer(),
+      pending: { reviews: [] },
+      replies: {
+        "/api/github/pr/pending": { body: pendingAnswer() },
+        "/api/github/pr/list?refresh=1": { body: listAnswer() },
+      },
+    });
+    try {
+      expect(pendingRows(page.document)).toHaveLength(0);
+      page.emit("prs");
+      await page.settle();
+      expect(pendingRows(page.document)).toHaveLength(6);
+      expect(sectionHeads(page.document)[0]).toEqual({ title: "Pending reviews", count: "6" });
+
+      page.respond("/api/github/pr/pending", { body: { reviews: pendingAnswer().reviews.slice(0, 2) } });
+      (page.document.querySelector("#reload") as HTMLButtonElement).click();
+      await page.settle();
+      await page.settle();
+      expect(pendingRows(page.document)).toHaveLength(2);
+      expect(page.calls.map((call) => call.path)).toEqual([
+        "/api/github/pr/list",
+        "/api/github/pr/list",
+        "/api/github/pr/pending",
+        "/api/github/pr/list?refresh=1",
+        "/api/github/pr/pending",
+      ]);
+    } finally {
+      page.close();
     }
   });
 });

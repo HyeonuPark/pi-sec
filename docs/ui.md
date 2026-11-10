@@ -1278,12 +1278,14 @@ repository. A label's colour is drawn from a style object the script sets rather
 than from a `style` attribute, because the pages are served under a policy that
 refuses an inline style.
 
-**The page carries what the server already holds.** Two JSON data blocks are in
-the shell and the server fills them. `github-pr-meta` is on all three pages and
+**The page carries what the server already holds.** Three JSON data blocks are in
+the list shell and the server fills them. `github-pr-meta` is on all three pages and
 names the login gh answers as, the repositories the operator configured, and
 whether the write routes answer at all. `github-pr-list-first` is on the list page
 only and holds the list the server had in memory, so the rows are drawn with the
-page rather than one request later. The blocks are data, not code: their type is
+page rather than one request later. `github-pr-pending-first` is on the list page
+only too and holds the saved reviews, so the Pending reviews section is drawn with
+the page. The blocks are data, not code: their type is
 `application/json`, so the browser parses them and never runs them, and the
 policy needs no exception for them. The pull request and diff pages read their
 repository and number from their own address, and draw the answer this tab kept
@@ -1292,7 +1294,8 @@ from the last visit before they ask again.
 **The list draws from the first block, then follows the stream.**
 `/api/github/pr/events` sends one frame, `prs`, when the server's cached list
 changed, which happens when the daemon's own poll found something or when a tab
-asked for a forced refresh. A frame means one more read of the list route, and the
+asked for a forced refresh, and also when a saved review file is created or removed.
+A frame means one more read of the list route and of the saved reviews, and the
 read that started last is the one that draws, so an answer that arrives late
 cannot put an older list over a newer one. `⟳ Reload` in the bar is the one
 control on this page that costs a GitHub request: it reads the list with
@@ -1307,7 +1310,37 @@ watches more than one repository, which one it came from, and finally the head
 commit's CI mark. A section with no row is not hidden: it says `No pull requests`
 in its own box, because an empty `Mentioned` section is the answer to "does
 anything wait on me". The sections are the server's, in its order, and a pull
-request appears in one section only.
+request appears in one section only. A pull request that has a saved review is in
+`Pending reviews` and in no other section: the server leaves it out of the list, so
+the head count of its original section drops with it.
+
+**Pending reviews is the first box of the list page.** It lists every pull request
+that has a review saved on the server, whatever its state (open, closed or merged)
+and whether or not its repository is still in the settings, newest saved first. The
+head shows the count. With no saved review the box stays and says `No saved
+reviews`. A row is a `div` and not an `<a>`, because it holds a link and a button.
+It shows a state mark (Open, Draft, Closed, Merged, or Unknown when the server does
+not know the pull request yet), the title or `Pull request #<number>`, and one line
+with the number, the repository, the count of comments, `overall comment`, the verdict
+when it is Approve or Request changes, `not in settings` for a repository that left
+the settings, and how long ago it was saved. The title links to the diff page, where
+the review panel is. A repository that is not in the settings has no dashboard page,
+so its title links to GitHub when the server knows the address and is plain text
+otherwise. A file that could not be read says `This saved review cannot be read`
+and has no link. The page reads the section again at each stream frame, after
+`⟳ Reload` and after a delete. A page whose server sent no block draws no box.
+
+**Delete removes one saved review.** Each row has a Delete button, drawn whether the
+write switch is on or off, because a delete never reaches GitHub. A press opens the
+browser's confirmation, which names the pull request and what is lost, and a cancel
+sends nothing. On OK the page sends the repository, the number and the saved time
+the row showed, or the file name of a file that could not be read. The server refuses
+when the review changed after the row was drawn, and the server's sentence appears in
+the strip under the bar while the row stays. After a success the page also drops this
+tab's own copies of that review (the collected comments and the unsent changes), so
+the next diff page load does not send them again. Another open tab keeps its own copy,
+and a change that tab still has unsent makes the draft again. A delete cannot be
+undone.
 
 **The bar is on all three pages.** It holds the way back to the list, the
 repository names and the login, `syncing…` while a read runs, and `⟳ Reload`. On a

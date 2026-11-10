@@ -32,7 +32,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -67,6 +67,8 @@ const NEVER_FIRE = {
 const REPO = "acme/widgets";
 /** The pull request the fake `gh` has an answer for, and the local repository too. */
 const NUMBER = 10;
+/** A pull request that has a saved review and that no search lists. The fake `gh` says it is closed. */
+const CLOSED_NUMBER = 99;
 
 /** Where the page pictures go, when the run asked for them. */
 const SHOTS_DIR = process.env["GITHUB_PR_SHOTS_DIR"] ?? "";
@@ -183,6 +185,35 @@ beforeAll(async () => {
     }),
     "utf8",
   );
+  // A second saved review, for a pull request that no search lists. The fake `gh`
+  // answers `CLOSED` for number 99, so the Pending reviews box shows it as closed.
+  await writeFile(
+    join(draftsDir, `${REPO.replace("/", "+")}+${CLOSED_NUMBER}.json`),
+    JSON.stringify({
+      version: 1,
+      repo: REPO,
+      number: CLOSED_NUMBER,
+      listed: false,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      summary: "",
+      event: "COMMENT",
+      comments: [
+        {
+          id: "saved-on-a-closed-pr",
+          path: "src/a.ts",
+          side: "RIGHT",
+          line: 1,
+          startLine: null,
+          body: "left on a closed pull request",
+          headSha: "",
+          anchor: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }),
+    "utf8",
+  );
   gh = await fakeGhFixture();
   roots.push(dirname(gh.logFile));
 
@@ -263,7 +294,10 @@ interface LoadFacts {
 }
 
 /** Open one page with every watcher installed before the first script runs. */
-async function openPage(path: string): Promise<{ page: Page; facts: () => Promise<LoadFacts> }> {
+async function openPage(
+  path: string,
+  options: { readonly recordWrites?: boolean } = {},
+): Promise<{ page: Page; facts: () => Promise<LoadFacts> }> {
   const page = await currentContext().newPage();
   const pageErrors: string[] = [];
   const failedRequests: string[] = [];
@@ -273,10 +307,12 @@ async function openPage(path: string): Promise<{ page: Page; facts: () => Promis
   page.on("requestfailed", (request) => {
     failedRequests.push(`${request.failure()?.errorText ?? "failed"} ${request.url()}`);
   });
-  page.on("request", (request) => {
-    const method = request.method().toUpperCase();
-    if (method !== "GET" && method !== "HEAD") writes.push(`${method} ${request.url()}`);
-  });
+  if (options.recordWrites !== false) {
+    page.on("request", (request) => {
+      const method = request.method().toUpperCase();
+      if (method !== "GET" && method !== "HEAD") writes.push(`${method} ${request.url()}`);
+    });
+  }
   page.on("response", (response) => {
     if (response.status() >= 400) errorResponses.push(`${response.status()} ${response.url()}`);
   });
@@ -328,12 +364,13 @@ async function shoot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(SHOTS_DIR, `${name}.png`), fullPage: false });
 }
 
-it("opens the list page and draws its five sections and a pull request row", async () => {
+it("opens the list page and draws the Pending reviews box, its five sections and a pull request row", async () => {
   const { page, facts } = await openPage("/github/pr/");
   await page.waitForFunction(
     () =>
-      document.querySelectorAll("#view .section").length === 5 &&
-      document.querySelectorAll("#view .section-header").length === 5 &&
+      document.querySelectorAll("#view .section").length === 6 &&
+      document.querySelectorAll("#view .section-header").length === 6 &&
+      document.querySelector("#view .section-header")?.textContent?.startsWith("Pending reviews") === true &&
       document.querySelectorAll("#view .pr-row").length >= 1,
     undefined,
     { timeout: 30000 },
@@ -553,6 +590,43 @@ it("lists a saved review in the panel, and a press or the Enter key brings its c
   expect(await state()).toEqual({ inView: true, focused: true, marked: true, folded: false });
   await shoot(page, "diff-review-links");
   expectClean(await facts(), `/github/pr/${REPO}/${NUMBER}/diff`);
+  await page.close();
+}, 60000);
+
+it("lists the saved reviews at the top, and deletes one after the reader confirms", async () => {
+  // This page is opened without the recorder of the last case, which counts every
+  // write of the other pages. The one delete is a write by design, so this case
+  // counts its own and checks that it is the only one.
+  const { page, facts } = await openPage("/github/pr/", { recordWrites: false });
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.method().toUpperCase() !== "GET") posts.push(`${request.method().toUpperCase()} ${new URL(request.url()).pathname}`);
+  });
+  page.on("dialog", (dialog) => void dialog.accept());
+  await page.waitForFunction(() => document.querySelectorAll("#view .pending-row").length === 2, undefined, { timeout: 30000 });
+  const rows = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("#view .pending-row")].map((row) => ({
+        state: row.querySelector(".pending-state")?.textContent ?? "",
+        sub: row.querySelector(".pr-sub")?.textContent ?? "",
+        href: row.querySelector(".pr-title a")?.getAttribute("href") ?? "",
+      })),
+    );
+  const before = await rows();
+  // Newest saved first: #10 was saved just now, #99 long ago. #10 is on the list, #99 is not.
+  expect(before.map((row) => row.state)).toEqual(["Open", "Closed"]);
+  expect(before[0]?.href).toBe(`/github/pr/${REPO}/${NUMBER}/diff`);
+  expect(before[1]?.sub).toContain(`#${CLOSED_NUMBER} · ${REPO} · 1 comment`);
+  // #10 has a saved review, so no section lists it any more.
+  expect(await page.evaluate((n) => [...document.querySelectorAll("#view .pr-row")].some((row) => row.getAttribute("href")?.endsWith(`/${n}`)), NUMBER)).toBe(false);
+  await shoot(page, "list-pending");
+
+  await page.locator("#view .pending-row", { hasText: `#${CLOSED_NUMBER} ` }).locator(".pending-delete").click();
+  await page.waitForFunction(() => document.querySelectorAll("#view .pending-row").length === 1, undefined, { timeout: 30000 });
+  expect((await rows()).map((row) => row.state)).toEqual(["Open"]);
+  expect(await readdir(draftsDir)).toEqual([`${REPO.replace("/", "+")}+${NUMBER}.json`]);
+  expect(posts).toEqual(["POST /api/github/pr/drafts/discard"]);
+  expectClean(await facts(), "/github/pr/");
   await page.close();
 }, 60000);
 

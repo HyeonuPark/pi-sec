@@ -30,6 +30,7 @@ import {
   type GithubPrDraftOp,
 } from "../api/github-pr.ts";
 import {
+  draftQueueStoreKey,
   legacyComments,
   pendingComments,
   readStored,
@@ -60,7 +61,7 @@ let hooked = false;
 
 /** The store key of the unsent changes of one pull request. */
 export function draftQueueKey(repo: string, number: number): string {
-  return `draftqueue:${repo}:${number}`;
+  return draftQueueStoreKey(repo, number);
 }
 
 function persist(): void {

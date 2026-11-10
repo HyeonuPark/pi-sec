@@ -17,6 +17,11 @@
  *    frame is answered by reading the list again, and the read that started last
  *    is the one that draws, so two answers cannot cross.
  *
+ * The Pending reviews section is the first box. It lists every pull request that
+ * has a saved review on the server, drawn from a third block the server writes
+ * into the page, and it is read again at each frame and after `⟳ Reload` and
+ * after a delete. A pull request with a saved review is in this box only.
+ *
  * `⟳ Reload` asks GitHub itself (`?refresh=1`) and is this page's only control that
  * costs a GitHub request per press. A failed read puts the server's own sentence in
  * the strip under the bar and leaves the rows that are drawn where they are.
@@ -24,17 +29,22 @@
 import { mountAt, mountPage } from "../mount.ts";
 import { ErrorBanner } from "../github-pr/banner.tsx";
 import { PrSections } from "../github-pr/list-rows.tsx";
+import { PendingSection } from "../github-pr/pending-rows.tsx";
 import { TopBar } from "../github-pr/topbar.tsx";
 import { readMeta } from "../github-pr/blocks.ts";
 import { startGithubPrStream } from "../streams/github-pr.ts";
 import {
+  deletePending,
   drawFirstList,
+  drawFirstPending,
   drawStoredList,
   listAnswer,
   listError,
   listForcing,
   listLoading,
   loadList,
+  loadPending,
+  pendingAnswer,
 } from "../state/github-pr.ts";
 
 /** The header's facts, read once: one page does not change them while it is open. */
@@ -49,7 +59,8 @@ function Bar() {
       loading={listLoading.value}
       forcing={listForcing.value}
       onReload={() => {
-        void loadList({ refresh: true });
+        // The facts of the saved reviews change with the read, so they follow it.
+        void loadList({ refresh: true }).then(() => loadPending());
       }}
     />
   );
@@ -60,16 +71,36 @@ function Banner() {
   return <ErrorBanner error={listError.value} />;
 }
 
+/** The saved reviews box, drawn only when the page has the saved reviews. */
+function Pending() {
+  const pending = pendingAnswer.value;
+  if (pending === null) return null;
+  return (
+    <div class="pr-list">
+      <PendingSection reviews={pending.reviews} onDelete={(review) => void deletePending(review)} />
+    </div>
+  );
+}
+
 /** The list: the sections, or the one line that says the page is still reading. */
 function View() {
   const answer = listAnswer.value;
-  if (answer === null) return <div class="empty">Loading pull requests…</div>;
-  return <PrSections sections={answer.sections} repos={meta.repos.length} />;
+  return (
+    <>
+      <Pending />
+      {answer === null ? (
+        <div class="empty">Loading pull requests…</div>
+      ) : (
+        <PrSections sections={answer.sections} repos={meta.repos.length} />
+      )}
+    </>
+  );
 }
 
 // The first answer is drawn before any request: the block the server wrote, and
 // for a page it wrote none into, the list this tab kept.
 drawFirstList();
+drawFirstPending();
 if (listAnswer.value === null) drawStoredList();
 // The bar and the strip are taken over in place: `mountAt` puts the component
 // where the shell drew that one element, so the stylesheet's `.topbar` and
@@ -88,6 +119,7 @@ mountPage("#view", View);
 startGithubPrStream({
   onPrs: () => {
     void loadList();
+    void loadPending();
   },
 });
 

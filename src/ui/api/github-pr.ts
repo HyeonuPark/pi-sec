@@ -144,6 +144,51 @@ export interface GithubPrListAnswer {
   readonly sections: readonly GithubPrSection[];
 }
 
+/** What the Pending reviews section knows about a pull request that has a saved review. */
+export interface GithubPrPendingPr {
+  readonly title: string;
+  readonly url: string;
+  /** `OPEN`, `CLOSED` or `MERGED`. */
+  readonly state: string;
+  readonly isDraft: boolean;
+  readonly author: string | null;
+  readonly updatedAt: string;
+}
+
+/** One row of the Pending reviews section: a saved review, or a file that could not be read. */
+export type GithubPrPendingReview =
+  | {
+      readonly kind: "draft";
+      readonly repo: string;
+      readonly number: number;
+      /** False when the repository is no longer in the settings. */
+      readonly configured: boolean;
+      readonly comments: number;
+      /** True when the overall comment is not empty. */
+      readonly summary: boolean;
+      readonly event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+      readonly savedAt: string;
+      /** `null` when the server does not know the pull request yet. */
+      readonly pr: GithubPrPendingPr | null;
+    }
+  | {
+      readonly kind: "unreadable";
+      readonly repo: string;
+      readonly number: number;
+      readonly file: string;
+      readonly savedAt: string;
+    };
+
+/** What `GET /api/github/pr/pending` answers. */
+export interface GithubPrPendingAnswer {
+  readonly reviews: readonly GithubPrPendingReview[];
+}
+
+/** The body that deletes one saved review, or one file that could not be read. */
+export type GithubPrDraftDeleteBody =
+  | { readonly repo: string; readonly number: number; readonly savedAt: string }
+  | { readonly file: string };
+
 /** One commit of the pull request, as the Commits panel lists it. */
 export interface GithubPrCommit {
   readonly oid: string;
@@ -426,6 +471,16 @@ export function prListPath(): string {
   return "/api/github/pr/list";
 }
 
+/** The path of the saved reviews. */
+export function prPendingPath(): string {
+  return "/api/github/pr/pending";
+}
+
+/** The path that deletes a saved review. */
+export function prDraftDeletePath(): string {
+  return "/api/github/pr/drafts/discard";
+}
+
 /** The path of the event stream. */
 export function prEventsPath(): string {
   return "/api/github/pr/events";
@@ -445,6 +500,23 @@ export async function fetchPrList(
 ): Promise<GithubPrListAnswer> {
   const query = options.refresh === true ? "?refresh=1" : "";
   return await call<GithubPrListAnswer>(`${prListPath()}${query}`, { signal: options.signal });
+}
+
+/** Read the saved reviews. The server never asks GitHub for this. */
+export async function fetchPending(options: { readonly signal?: AbortSignal } = {}): Promise<GithubPrPendingAnswer> {
+  return await call<GithubPrPendingAnswer>(prPendingPath(), { signal: options.signal });
+}
+
+/** Delete one saved review, or one file that could not be read. Nothing reaches GitHub. */
+export async function postDraftDelete(
+  body: GithubPrDraftDeleteBody,
+  options: { readonly signal?: AbortSignal } = {},
+): Promise<{ readonly deleted: boolean }> {
+  return await call<{ readonly deleted: boolean }>(prDraftDeletePath(), {
+    method: "POST",
+    body,
+    signal: options.signal,
+  });
 }
 
 /** Read one pull request: its description, conversation, threads and checks. */

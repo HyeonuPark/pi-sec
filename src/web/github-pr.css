@@ -128,6 +128,46 @@ main { padding: 16px; }
 .pr-sub { color: var(--fg-muted); font-size: 12px; margin-top: 3px; }
 .pr-ci { font-size: 14px; width: 20px; text-align: center; margin-top: 1px; }
 
+/* ---- Pending reviews: a row is a div that holds a link and a button ---- */
+.pending-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.pending-row:last-child { border-bottom: none; }
+.pending-row:hover { background: var(--bg-subtle); }
+.pending-row .pr-title a { color: var(--fg); }
+.pending-row .pr-title a:hover { color: var(--accent); }
+.pending-state {
+  flex: none;
+  min-width: 56px;
+  text-align: center;
+  margin-top: 1px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 2em;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.pending-state-open { color: var(--success); border-color: var(--success); }
+.pending-state-closed { color: var(--danger); border-color: var(--danger); }
+.pending-state-merged { color: var(--accent); border-color: var(--accent); }
+.pending-delete {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--danger);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pending-delete:hover { background: var(--bg-subtle); border-color: var(--danger); }
+
 .label-chip {
   display: inline-block;
   padding: 0 8px;

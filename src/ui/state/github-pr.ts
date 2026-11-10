@@ -26,8 +26,15 @@
  * Timers belong to this folder and to `src/ui/streams/`; this module sets none.
  */
 import { signal } from "@preact/signals";
-import { fetchPrList, type GithubPrListAnswer } from "../api/github-pr.ts";
-import { readFirstList } from "../github-pr/blocks.ts";
+import {
+  fetchPending,
+  fetchPrList,
+  postDraftDelete,
+  type GithubPrListAnswer,
+  type GithubPrPendingAnswer,
+  type GithubPrPendingReview,
+} from "../api/github-pr.ts";
+import { readFirstList, readFirstPending } from "../github-pr/blocks.ts";
 
 /** The prefix of every key this dashboard writes into the tab's session storage. */
 export const STORE_PREFIX = "github-pr:v1:";
@@ -122,6 +129,11 @@ export function commitStoreKey(repo: string, sha: string): string {
 /** The store key of the comments collected on one pull request's diff. */
 export function pendingStoreKey(repo: string, number: number): string {
   return `pending:${repo}:${number}`;
+}
+
+/** The store key of the changes of one pull request that were not sent to the server yet. */
+export function draftQueueStoreKey(repo: string, number: number): string {
+  return `draftqueue:${repo}:${number}`;
 }
 
 /* ------------------------------------------------------------ request order */
@@ -334,4 +346,90 @@ export async function loadList(options: { readonly refresh?: boolean } = {}): Pr
       listForcing.value = false;
     }
   }
+}
+
+/* ---------------------------------------------------------- pending reviews */
+
+/**
+ * The saved reviews the Pending reviews section draws, or `null` before anything
+ * arrived. A page whose server sent no block and answers no read has none, and
+ * draws no section.
+ */
+export const pendingAnswer = signal<GithubPrPendingAnswer | null>(null);
+
+/** The ticket key of the saved reviews, apart from the list's. */
+const PENDING_KEY = "pending-reviews";
+
+/** Draw the saved reviews the server wrote into the page, if it wrote any. */
+export function drawFirstPending(): boolean {
+  const first = readFirstPending();
+  if (first === undefined) return false;
+  pendingAnswer.value = first;
+  return true;
+}
+
+/**
+ * Read the saved reviews again, and draw them when this read is still the newest.
+ *
+ * A failure leaves what is drawn where it is and says nothing: the section is a
+ * second view of files on the server, and the list's own failure strip is for the
+ * list. A server that has no such route answers 404 and the page keeps no section.
+ */
+export async function loadPending(): Promise<boolean> {
+  const ticket = begin(PENDING_KEY);
+  try {
+    const answer = await fetchPending();
+    if (!isCurrent(PENDING_KEY, ticket)) return false;
+    if (!Array.isArray(answer?.reviews)) return false;
+    pendingAnswer.value = answer;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The browser's confirmation, or a refusal on a page that has none. */
+function confirmDelete(message: string): boolean {
+  if (typeof window === "undefined" || typeof window.confirm !== "function") return false;
+  return window.confirm(message) === true;
+}
+
+/** What the confirmation says is lost, in words. */
+export function deleteQuestion(review: GithubPrPendingReview): string {
+  const name = `${review.repo} #${review.number}`;
+  if (review.kind === "unreadable") {
+    return `Delete the saved review of ${name} that cannot be read? This cannot be undone.`;
+  }
+  const parts: string[] = [];
+  if (review.comments > 0) parts.push(`${review.comments} ${review.comments === 1 ? "comment" : "comments"}`);
+  if (review.summary) parts.push("an overall comment");
+  const holds = parts.length === 0 ? "" : ` It holds ${parts.join(" and ")}.`;
+  return `Delete the saved review of ${name}?${holds} This cannot be undone.`;
+}
+
+/**
+ * Delete one saved review after the reader confirms.
+ *
+ * A cancel sends nothing. A success also drops this tab's own copies of the
+ * review (the collected comments and the unsent changes), because the diff page
+ * would otherwise send them again at its next load and make the draft anew. A
+ * refusal puts the server's sentence in the list's strip and keeps the row.
+ */
+export async function deletePending(review: GithubPrPendingReview): Promise<boolean> {
+  if (!confirmDelete(deleteQuestion(review))) return false;
+  try {
+    await postDraftDelete(
+      review.kind === "unreadable"
+        ? { file: review.file }
+        : { repo: review.repo, number: review.number, savedAt: review.savedAt },
+    );
+  } catch (error) {
+    listError.value = listFailureText(error);
+    return false;
+  }
+  forgetStored(pendingStoreKey(review.repo, review.number));
+  forgetStored(draftQueueStoreKey(review.repo, review.number));
+  listError.value = null;
+  await loadPending();
+  return true;
 }
