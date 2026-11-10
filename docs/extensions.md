@@ -3121,6 +3121,10 @@ Rules that matter more than the checks:
   that the rest of it is clean. The scan reads each command's whole output up to
   8 MiB (`SCAN_LIMIT_BYTES`), not the shortened text a tool result shows, and a
   change or a list of untracked files larger than that fails the run.
+- **An unreadable untracked file fails the scan.** The scan lists untracked files
+  with NUL-separated names, so a name that is not ASCII is read as it is. An
+  untracked file that the gate cannot read fails the scan and names the path. A
+  symbolic link whose target does not exist holds no content and is skipped.
 - **Each command has a hard timeout** (`validation.timeoutMs`, 600 s by default).
   A gate that can hang is a tool call that can hang.
 - **A failure reverts nothing.** The tree is not executed, git is the source of
