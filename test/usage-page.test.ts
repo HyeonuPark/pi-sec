@@ -674,6 +674,8 @@ describe("the OpenAI card and the decision models card", () => {
         },
       },
     });
+    expect(openai?.shape).toBe("prepaid");
+    expect(openai?.receivedAt).toBeNull();
     // The one reader this route ships was the only address asked for.
     expect(remote.calls).toEqual([ANTHROPIC_USAGE_URL]);
     // A refresh of the OpenAI card asks nothing either, and still states it.
@@ -694,7 +696,9 @@ describe("the OpenAI card and the decision models card", () => {
       harness.paths.auditLog,
       judgeLine(now - hour) +
         judgeLine(now - 2 * hour, { outcome: "failed" }) +
-        judgeLine(now - 3 * day),
+        judgeLine(now - 3 * day) +
+        // Just outside the month: in no window.
+        judgeLine(now - 31 * day),
       "utf8",
     );
     // A rotated file beside it: one judgement twenty days back, one older than the

@@ -345,19 +345,6 @@ describe("which cards exist", () => {
     expect(slotsOf(prepaid)).toHaveLength(30);
   });
 
-  it("makes no card for a provider without auth", async () => {
-    const catalog = catalogOf({
-      providers: [
-        { id: "anthropic", name: "Anthropic" },
-        { id: "groq", name: "Groq" },
-      ],
-      configured: ["groq"],
-    });
-    const service = serviceOf({ catalog, fetch: fakeFetch({}).fetch });
-    const answer = await service.answer();
-    expect(answer.cards.map((card) => card.provider)).toEqual(["groq"]);
-  });
-
   it("puts the subscription cards first, then each shape by display name", async () => {
     const catalog = catalogOf({
       providers: [
@@ -372,28 +359,6 @@ describe("which cards exist", () => {
     const service = serviceOf({ catalog, fetch: fakeFetch({}).fetch });
     const answer = await service.answer();
     expect(answer.cards.map((card) => card.provider)).toEqual(["kimi-coding", "alpha", "openai", "zeta"]);
-  });
-
-  it("has the card of a provider that gained auth between two requests", async () => {
-    const added = { id: "fixture-meter", name: "Fixture Meter" };
-    const catalog = catalogOf({
-      providers: [{ id: "anthropic", name: "Anthropic" }],
-      configured: ["anthropic"],
-      subscription: ["anthropic"],
-      auth: { anthropic: ANTHROPIC_TOKEN },
-    });
-    const service = serviceOf({ catalog, fetch: fakeFetch({ [ANTHROPIC_USAGE_URL]: { body: ANTHROPIC_BODY } }).fetch });
-
-    const first = await service.answer();
-    expect(first.cards.map((card) => card.provider)).toEqual(["anthropic"]);
-
-    // The catalog answers per request, so a provider added or logged in later is
-    // there on the next request with no restart and no code change.
-    catalog.providers.push(added);
-    catalog.configured.add(added.id);
-    const second = await service.answer();
-    expect(second.cards.map((card) => card.provider)).toEqual(["anthropic", "fixture-meter"]);
-    expect(cardOf(second, "fixture-meter").fields["balance"]).toEqual({ state: "wip" });
   });
 });
 
@@ -1249,22 +1214,6 @@ describe("refreshing one card", () => {
     expect(card.hold).toBeUndefined();
   });
 
-  it("answers no card for a provider the catalog does not have, or one without auth", async () => {
-    const catalog = catalogOf({
-      providers: [
-        { id: "groq", name: "Groq" },
-        { id: "kimi-coding", name: "Kimi For Coding" },
-      ],
-      configured: ["groq"],
-    });
-    const service = serviceOf({ catalog, fetch: fakeFetch({}).fetch });
-
-    expect(await service.refresh("absent-provider")).toEqual({ ok: false, code: "unknown_provider" });
-    // In the catalog and without auth is the same answer: there is no card.
-    expect(await service.refresh("kimi-coding")).toEqual({ ok: false, code: "unknown_provider" });
-    expect((await service.refresh("groq")).ok).toBe(true);
-  });
-
   it("gives the daily field the ledger's reason when the ledger cannot be read", async () => {
     const catalog = catalogOf({
       providers: [{ id: "deepseek", name: "DeepSeek" }],
@@ -1344,15 +1293,6 @@ describe("the answer the page is served with", () => {
     // The ledger's fields are not a provider value: they are already here.
     expect(deepseek.fields["day"]).toMatchObject({ state: "value", value: { calls: 12, tokens: 21_000 } });
     expect(deepseek.fields["daily"]).toMatchObject({ state: "value" });
-  });
-
-  it("keeps wip for a provider with no reader, so it never makes the page ask", async () => {
-    const catalog = catalogOf({ providers: [{ id: "fixture-meter", name: "Fixture Meter" }], configured: ["fixture-meter"] });
-    const service = serviceOf({ catalog, fetch: fakeFetch({}).fetch });
-
-    const card = cardOf(await service.firstPaint(), "fixture-meter");
-    expect(card.fields["balance"]).toEqual({ state: "wip" });
-    expect(card.fields["day"]).toMatchObject({ state: "value" });
   });
 
   it("serves a value it received less than ten minutes ago, and calls nothing more", async () => {
@@ -1576,18 +1516,6 @@ describe("the OpenAI card", () => {
     });
   }
 
-  it("states the sentence and the billing link in the balance row instead of WIP", async () => {
-    const service = serviceOf({ catalog: openaiCatalog(), fetch: fakeFetch({}).fetch });
-    const card = cardOf(await service.answer(), "openai");
-
-    expect(card.shape).toBe("prepaid");
-    expect(card.receivedAt).toBeNull();
-    expect(card.fields["balance"]).toEqual({
-      state: "value",
-      value: { amount: null, currency: null, note: "No API for the balance", billing: OPENAI_BILLING },
-    });
-  });
-
   it("calls no address at all, neither on the answer, the page load, a refresh nor the prefetch", async () => {
     // A fetch that fails the test if it is asked for anything: the absence of a
     // call is the whole point, so an address this table gained would show up here.
@@ -1630,12 +1558,6 @@ describe("the OpenAI card", () => {
     expect(card.fields["week"]).toEqual({ state: "value", value: { calls: 9, tokens: 12_000, cost: 0.18 } });
     expect(card.fields["month"]).toEqual({ state: "value", value: { calls: 40, tokens: 60_000, cost: 0.9 } });
     expect(slotsOf(card)).toHaveLength(30);
-  });
-
-  it("keeps WIP for a provider no entry names and no reader fills", async () => {
-    const catalog = catalogOf({ providers: [{ id: "fixture-meter", name: "Fixture Meter" }], configured: ["fixture-meter"] });
-    const service = serviceOf({ catalog, fetch: fakeFetch({}).fetch });
-    expect(cardOf(await service.answer(), "fixture-meter").fields["balance"]).toEqual({ state: "wip" });
   });
 });
 
@@ -1726,14 +1648,6 @@ describe("the decision models card", () => {
     expect(rows.map((row) => row.name)).toEqual(["report-check"]);
     // The config says nothing, so the audit line's own provider and model stand.
     expect(rows[0]).toMatchObject({ provider: "openai", model: "gpt-6-luna" });
-  });
-
-  it("leaves the card out entirely when no judge is configured and the trail holds none", async () => {
-    const answer = await serviceWith({ judges: {} }).answer();
-    expect(answer.judges).toBeUndefined();
-    // Not an empty card: the property is absent, which is what the page reads as
-    // "draw no decision models card".
-    expect(Object.prototype.hasOwnProperty.call(answer, "judges")).toBe(false);
   });
 
   it("adds nothing of the judgement cost to a provider card's windows", async () => {

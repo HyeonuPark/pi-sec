@@ -315,6 +315,9 @@ describe("http server", () => {
 
       const page = await fetch(`${origin}/basic-chat`);
       expect(await page.text()).toContain('<meta name="pi-sec-base" content="/sec" />');
+
+      const prefixedPage = await fetch(`${origin}/sec/basic-chat`);
+      expect(prefixedPage.status).toBe(200);
     });
 
     it("ignores a forwarded prefix from a peer that is not trusted", async () => {
@@ -339,6 +342,11 @@ describe("http server", () => {
         const page = await fetch(`${origin}/basic-chat`, { headers: { "X-Forwarded-Prefix": hostile } });
         expect(await page.text(), hostile).toContain('<meta name="pi-sec-base" content="" />');
       }
+      // A rejected prefix does not stand in for the configured mount.
+      const mounted = await boot({ config: { server: { ...trusting(), basePath: "/sec" } } });
+      const hostileHeaders = { "X-Forwarded-Prefix": "//evil.example.com" };
+      expect((await fetch(`${mounted.origin}/healthz`, { headers: hostileHeaders })).status).toBe(404);
+      expect((await fetch(`${mounted.origin}/sec/healthz`, { headers: hostileHeaders })).status).toBe(200);
     });
 
     it("still requires a locally configured basePath", async () => {
@@ -350,6 +358,10 @@ describe("http server", () => {
       expect(await page.text()).toContain('<meta name="pi-sec-base" content="/sec" />');
       const redirect = await fetch(`${origin}/`, { redirect: "manual" });
       expect(redirect.headers.get("location")).toBe("/sec/basic-chat");
+
+      const bareMount = await fetch(`${origin}/sec`, { redirect: "manual" });
+      expect(bareMount.status).toBe(302);
+      expect(bareMount.headers.get("location")).toBe("/sec/basic-chat");
     });
   });
 

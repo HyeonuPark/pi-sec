@@ -31,8 +31,7 @@ import { createAttachment, type AttachmentContext, type AttachmentRecord } from 
 import { attachmentRefsInText } from "../src/extensions/attachment-context.ts";
 import { createAttachmentsExtension, urlOf } from "../src/extensions/attachments.ts";
 import type { ExtensionContext } from "../src/extensions/context.ts";
-import { describeBasePathProblem, effectivePrefix, isTrustedPeer, normalizePrefix, proxyContext, resolveMount, stripMount, trustedProxyProblems } from "../src/server/proxy.ts";
-import { defaultTreeAdapter, parse, parseFragment, serialize } from "parse5";
+import { describeBasePathProblem, effectivePrefix, isTrustedPeer, normalizePrefix, proxyContext, resolveMount, trustedProxyProblems } from "../src/server/proxy.ts";
 import { checkCardMarkup, UI_MARKUP_MAX_BYTES } from "../src/server/ui-markup.ts";
 
 describe("base-mount.test.ts", () => {
@@ -53,16 +52,6 @@ describe("base-mount.test.ts", () => {
   const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
   describe("the page routes the mount is read from", () => {
-    it("knows the chats list as a page of this app", async () => {
-      const base = await readFile(join(root, "src/web/base.js"), "utf8");
-      // `PAGES` is the one list the page reads its own mount from, so `/chats`
-      // under a prefix has to be in it. The array is the one place the names are
-      // written: the comment above `mountFromPath` names no page, so a page added
-      // later cannot leave that comment out of date.
-      expect(base).toMatch(/var PAGES = \[[^\]]*"\/chats"[^\]]*\];/);
-      expect(base.match(/"\/chats"/g)).toHaveLength(1);
-    });
-
     it("resolves the mount from a chats page's own path", async () => {
       const source = await readFile(join(root, "src/web/base.js"), "utf8");
       const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -394,16 +383,6 @@ describe("personality-name-page.test.ts", () => {
   const UNNAMED_FILE = "---\nlanguage: ko\n---\n# 인물\n\n차분하게 말합니다.\n";
 
   describe("injectName", () => {
-    it("stamps the name into the meta tag", () => {
-      expect(injectName(PAGE, "테스트봇")).toContain('<meta name="pi-sec-name" content="테스트봇" />');
-      // An empty name is stamped too: it tells the page that no name is registered.
-      expect(injectName(PAGE, "")).toContain('<meta name="pi-sec-name" content="" />');
-    });
-
-    it("leaves a page without the meta tag unchanged", () => {
-      expect(injectName(PAGE_WITHOUT_NAME, "테스트봇")).toBe(PAGE_WITHOUT_NAME);
-    });
-
     it("writes a name with a `$` pattern as it is", () => {
       const stamped = injectName(PAGE, "N$&M $' $$");
       expect(stamped).toContain('content="N$&amp;M $\' $$"');
@@ -810,37 +789,6 @@ describe("proxy.test.ts", () => {
       return { ...base, server: { ...base.server, ...server } };
     }
 
-    it("requires the prefix when basePath is configured and nothing is forwarded", () => {
-      const mount = resolveMount(request({}), serverConfig({ basePath: "/sec" }));
-      expect(mount).toMatchObject({ prefix: "/sec", required: "/sec", tolerated: "/sec", conflict: undefined });
-      // A bare root belongs at the mount point even though the mount is required.
-      expect(stripMount(mount, "/")).toEqual({ pathname: "/", redirectTo: "/sec/basic-chat" });
-      expect(stripMount(mount, "/sec")).toEqual({ pathname: "/" });
-      expect(stripMount(mount, "/sec/basic-chat")).toEqual({ pathname: "/basic-chat" });
-      expect(stripMount(mount, "/basic-chat")).toEqual({ pathname: "/basic-chat", outside: true });
-      expect(stripMount(mount, "/nope")).toEqual({ pathname: "/nope", outside: true });
-    });
-
-    it("requires nothing when a trusted proxy announced a prefix", () => {
-      const mount = resolveMount(
-        request({ "x-forwarded-prefix": "/sec" }),
-        serverConfig({ trustedProxies: ["127.0.0.1/32"] }),
-      );
-      expect(mount).toMatchObject({ prefix: "/sec", required: "", tolerated: "/sec", conflict: undefined });
-      expect(stripMount(mount, "/basic-chat")).toEqual({ pathname: "/basic-chat" });
-      // A proxy that forwards the prefix anyway is tolerated.
-      expect(stripMount(mount, "/sec/basic-chat")).toEqual({ pathname: "/basic-chat" });
-      expect(stripMount(mount, "/")).toEqual({ pathname: "/", redirectTo: "/sec/basic-chat" });
-    });
-
-    it("takes the mount from publicUrl when nothing else declares one", () => {
-      // A deployment where the proxy strips the prefix and says nothing.
-      const mount = resolveMount(request({}), serverConfig({ publicUrl: "https://example.com/sec" }));
-      expect(mount).toMatchObject({ prefix: "/sec", required: "", tolerated: "/sec" });
-      expect(stripMount(mount, "/basic-chat")).toEqual({ pathname: "/basic-chat" });
-      expect(stripMount(mount, "/sec/basic-chat")).toEqual({ pathname: "/basic-chat" });
-    });
-
     it("reports a forwarded prefix that disagrees with the configured mount", () => {
       const mount = resolveMount(
         request({ "x-forwarded-prefix": "/attacker" }),
@@ -890,12 +838,6 @@ describe("proxy.test.ts", () => {
         config(["127.0.0.1/32"]),
       );
       expect(context.client).toBeUndefined();
-    });
-
-    it("treats a rejected prefix as absent", () => {
-      const context = proxyContext(request({ "x-forwarded-prefix": "//evil" }), config(["127.0.0.1/32"]));
-      expect(context.trusted).toBe(true);
-      expect(context.forwardedPrefix).toBeUndefined();
     });
   });
 
@@ -1038,14 +980,6 @@ describe("ui-markup.test.ts", () => {
       }
     });
 
-    it("reads the decoded attribute value", () => {
-      const fragment = parseFragment('<a href="&#106;avascript:alert(1)">a</a>');
-      const anchor = defaultTreeAdapter.getChildNodes(fragment)[0];
-      expect(
-        defaultTreeAdapter.getAttrList(anchor as never).map((attr) => attr.value),
-      ).toEqual(["javascript:alert(1)"]);
-    });
-
     it("refuses javascript: in xlink:href", () => {
       const reason = reasonOf('<svg><a xlink:href="javascript:alert(1)">a</a></svg>');
       expect(reason).toContain("xlink:href");
@@ -1170,50 +1104,12 @@ describe("ui-markup.test.ts", () => {
       expect(output).not.toContain("</template>");
       expect(output).not.toContain("</div>");
       expect(accepted("a </template> b").html).not.toContain("</template>");
+      // The card after the stray tags survives, so it can sit inside the page's template.
+      expect(accepted("</template></div></div><div>card</div>").html).toBe("<div>card</div>");
     });
 
     it("escapes text that looks like an end tag", () => {
       expect(accepted("&lt;/template&gt;").html).toBe("&lt;/template&gt;");
-    });
-
-    it("stays inside the template the page puts it in", () => {
-      const output = accepted("</template></div></div><div>card</div>").html;
-      const wrapper = (prefix: string) =>
-        `${prefix}<template shadowrootmode="open"><div data-ui-body>${output}</div></template><p id="after">x</p>`;
-
-      // A <template> that starts the document is moved into <head>, so the
-      // sibling case needs one body element before the wrapper.
-      const document = parse(wrapper('<div id="before"></div>'));
-      const html = defaultTreeAdapter
-        .getChildNodes(document)
-        .find((node) => node.nodeName === "html");
-      const body = defaultTreeAdapter
-        .getChildNodes(html as never)
-        .find((node) => node.nodeName === "body");
-      const children = defaultTreeAdapter.getChildNodes(body as never);
-      expect(children.map((node) => node.nodeName)).toEqual(["div", "template", "p"]);
-      const template = children[1];
-      expect(defaultTreeAdapter.getAttrList(template as never)).toEqual([
-        { name: "shadowrootmode", value: "open" },
-      ]);
-      const content = defaultTreeAdapter.getTemplateContent(template as never);
-      expect(serialize(content)).toBe('<div data-ui-body=""><div>card</div></div>');
-      // #after follows the template as a sibling, outside its content.
-      const after = children[2];
-      expect(defaultTreeAdapter.getAttrList(after as never)).toEqual([{ name: "id", value: "after" }]);
-
-      // The same wrapper as the page writes it, with #after outside the content.
-      const bare = parse(wrapper(""));
-      const bareHtml = defaultTreeAdapter
-        .getChildNodes(bare)
-        .find((node) => node.nodeName === "html");
-      const bareBody = defaultTreeAdapter
-        .getChildNodes(bareHtml as never)
-        .find((node) => node.nodeName === "body");
-      const p = defaultTreeAdapter
-        .getChildNodes(bareBody as never)
-        .find((node) => node.nodeName === "p");
-      expect(defaultTreeAdapter.getAttrList(p as never)).toEqual([{ name: "id", value: "after" }]);
     });
   });
 

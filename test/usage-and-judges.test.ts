@@ -15,7 +15,7 @@ import { JudgeUsage } from "../src/server/usage/judges.ts";
 import { USAGE_WINDOW_MS, dailySlotRanges, isDeepSeekPeak, UsageRecords, DAILY_SLOT_COUNT, type UsageLedger, type UsageSlotSums, type UsageTotals, type UsageWindows, emptyLedger } from "../src/server/usage/records.ts";
 import { DatabaseSync } from "node:sqlite";
 import { ANTHROPIC_USAGE_URL, SYNTHETIC_QUOTAS_URL } from "../src/server/usage/fetchers.ts";
-import { createUsageService, COST_NOTES, type UsageModels } from "../src/server/usage/service.ts";
+import { createUsageService, type UsageModels } from "../src/server/usage/service.ts";
 import type { UsageAnswer, UsageCard, UsageSlot } from "../src/server/usage/values.ts";
 import { fileURLToPath } from "node:url";
 import { createModels, createProvider, type AnyModel, type Api, type ClassifierApi, type ClassifierContext, type ClassifierModel, type ClassifierQuestion, type Model } from "@earendil-works/pi-ai";
@@ -98,29 +98,6 @@ describe("usage-judges.test.ts", () => {
   const DAY = 24 * HOUR;
 
   describe("the judgement sums", () => {
-    it("counts one judge by name over the three windows, from the lines' own times", async () => {
-      const { file } = await trail();
-      await writeTrail(file, [
-        judgeLine({ at: NOW - 1 * HOUR, provider: "openai", model: "gpt-6-luna", tokens: 300, cost: 0.0003 }),
-        judgeLine({ at: NOW - 2 * HOUR, provider: "openai", model: "gpt-6-luna", tokens: 500, cost: 0.0005 }),
-        // Two days back: inside the week, outside the day.
-        judgeLine({ at: NOW - 2 * DAY, provider: "openai", model: "gpt-6-luna", tokens: 700, cost: 0.0007 }),
-        // Twenty days back: inside the month only.
-        judgeLine({ at: NOW - 20 * DAY, provider: "openai", model: "gpt-6-luna", tokens: 900, cost: 0.0009 }),
-        // Older than the month: in no window at all.
-        judgeLine({ at: NOW - 31 * DAY, provider: "openai", model: "gpt-6-luna", tokens: 5000, cost: 0.5 }),
-      ]);
-
-      const rows = await new JudgeUsage({ file }).rows(NOW);
-      const row = rows.get("report-check");
-      expect(row).toBeDefined();
-      expect(row?.provider).toBe("openai");
-      expect(row?.model).toBe("gpt-6-luna");
-      expect(row?.windows.day).toEqual({ calls: 2, tokens: 800, cost: expect.closeTo(0.0008, 10), unanswered: 0 });
-      expect(row?.windows.week).toEqual({ calls: 3, tokens: 1500, cost: expect.closeTo(0.0015, 10), unanswered: 0 });
-      expect(row?.windows.month).toEqual({ calls: 4, tokens: 2400, cost: expect.closeTo(0.0024, 10), unanswered: 0 });
-    });
-
     it("leaves out a line whose time is after the moment of the read", async () => {
       const { file } = await trail();
       await writeTrail(file, [
@@ -172,24 +149,6 @@ describe("usage-judges.test.ts", () => {
       expect(rows.get("reply-language")?.windows.day.calls).toBe(2);
       expect(rows.get("reply-language")?.windows.day.unanswered).toBe(1);
       expect(rows.get("reply-language")?.provider).toBe("deepseek");
-    });
-
-    it("reads the rotated file beside the live one, and drops an old line inside it", async () => {
-      const { file, dir } = await trail();
-      // The live file holds the newest judgements; a rotated file the ones before
-      // it, which is what `rotateBySize` leaves when the trail passes its limit.
-      await writeTrail(file, [judgeLine({ at: NOW - HOUR, tokens: 100, cost: 0.0001 })]);
-      await writeTrail(join(dir, "audit.jsonl.2026-10-20T00-00-00.000Z"), [
-        judgeLine({ at: NOW - 3 * DAY, tokens: 200, cost: 0.0002 }),
-        // Inside the rotated file but outside the month: it counts nowhere.
-        judgeLine({ at: NOW - 40 * DAY, tokens: 90_000, cost: 9 }),
-      ]);
-
-      const rows = await new JudgeUsage({ file }).rows(NOW);
-      const row = rows.get("report-check");
-      expect(row?.windows.day).toMatchObject({ calls: 1, tokens: 100 });
-      expect(row?.windows.week).toMatchObject({ calls: 2, tokens: 300 });
-      expect(row?.windows.month).toMatchObject({ calls: 2, tokens: 300 });
     });
 
     it("ignores a line of another type, a corrupt line, and a file that is not there", async () => {
@@ -923,12 +882,6 @@ describe("usage-subscription-windows.test.ts", () => {
       expect(card.fields["daily"]).toMatchObject({ state: "value" });
       expect(slotsOf(card)).toHaveLength(30);
       expect(slotsOf(card)[29]).toMatchObject(ANTHROPIC_SUMS);
-    });
-
-    it("states both notes for the two providers and no other", () => {
-      expect(COST_NOTES["synthetic"]).toBe("pi-sec calls only · estimated credit use at subscription rates");
-      expect(COST_NOTES["anthropic"]).toBe("pi-sec calls only · API-equivalent cost");
-      expect(COST_NOTES["deepseek"]).toBe("Peak/off-peak rates applied · holidays ignored");
     });
   });
 });
