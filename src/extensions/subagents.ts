@@ -3206,12 +3206,15 @@ export function createSubagentsExtension(context: ExtensionContext): Extension<T
 
   const gate = hook(ToolTask, {
     beforeTool: async (call: ToolCall, api: HookApi, ctx) => {
+      // A finished agent gets every tool refused, the ones the kind table does not
+      // name included: `bash`, `read`, `write` and `edit` are not in it, and the run
+      // answers to nobody.
+      if (await hub.isFinished(api.conversationId, ctx)) {
+        return { block: `\`${call.name}\` is not available: ${FINISHED_TEXT}` };
+      }
       const allowed = TOOL_KINDS[call.name];
       if (allowed === undefined) return undefined;
       const kind = await hub.kindOf(api.conversationId, ctx);
-      if (kind === "subagent" && (await hub.isFinished(api.conversationId, ctx))) {
-        return { block: `\`${call.name}\` is not available: ${FINISHED_TEXT}` };
-      }
       if (allowed.includes(kind)) return undefined;
       return { block: `\`${call.name}\` is not available to a ${kind} agent. It is for: ${allowed.join(", ")}.` };
     },

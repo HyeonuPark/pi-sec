@@ -2263,8 +2263,8 @@ A conversation with no filter is read as a scheduled run, as before. A message t
 delivered: `send_message` and `request_message` answer with `delivered: false`
 and say that the agent already finished. If an input still slips in and opens a
 run, the run tells each sender that nobody read the message, and the tool gate
-refuses the agent tools (`finish_work`, `await_orders`, `send_message`,
-`spawn_subagent` and the rest) with a text that says the agent already finished.
+refuses every tool (the agent tools, and `bash`, `read`, `write`, `edit` and
+`js` too) with a text that says the agent already finished.
 That run costs one model request, because a hook cannot refuse a run.
 
 **Messages.** `send_message(to, body, kind?)` writes a `sec.message` row into the

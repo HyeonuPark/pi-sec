@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
@@ -384,6 +386,52 @@ describe("a message that reaches a subagent around the time it finishes", () => 
     expect(notes[0]).toContain(`"c" had already finished its work and ended when your note ${written.id} arrived`);
     expect(notes[0]).toContain("STRAY-NOTE that slipped in");
     expect((await rootNotes(harness)).some((body) => body.includes("a second final report"))).toBe(false);
+  }, 20_000);
+
+  it("refuses every tool to a run that slipped in after the finish, the shell and the file tools included", async () => {
+    harness = await createTestHarness();
+    const live = join(harness.paths.workspaceTree, "written-while-live.txt");
+    const stray = join(harness.paths.workspaceTree, "written-after-finish.txt");
+    harness.faux.setResponses(
+      script((context) => {
+        if (hasUser(context, "STRAY-NOTE")) {
+          return hasResult(context, "is not available")
+            ? say("nothing to do")
+            : call("write", { path: stray, content: "stray\n" });
+        }
+        if (hasUser(context, "BRIEF")) {
+          return hasResult(context, "wrote") || hasResult(context, "Successfully")
+            ? call("finish_work", { note: "FINAL-REPORT done" })
+            : call("write", { path: live, content: "live\n" });
+        }
+        return command(context) === undefined
+          ? say("ok")
+          : call("spawn_subagent", { name: "c", vmodel: "faux", roles: [], initialPrompt: "BRIEF c" });
+      }),
+    );
+    const spawned = await root(harness, "CMD: spawn");
+    const childId = Number(/started "c" \(conversation (\d+)/.exec(spawned)?.[1]) as ConversationId;
+    await released(harness, childId);
+    await idle(harness, childId);
+    // The control: a live subagent can write.
+    await expect(access(live)).resolves.toBeUndefined();
+
+    const hub = harness.runtime.subagents!;
+    const written = await hub.writeMessage(CTX, {
+      from: { conversationId: "1", name: "operator", agentKind: "root" },
+      to: { conversationId: String(childId), name: "c", agentKind: "subagent" },
+      kind: "note",
+      body: "STRAY-NOTE that slipped in",
+    });
+    const conversation = await harness.runtime.harness.conversation(childId, CTX);
+    const submission = await conversation!.submit(
+      { type: "input", content: "STRAY-NOTE that slipped in", requestId: agentMessageRequestId(written.id) },
+      CTX,
+    );
+    await submission.wait(CTX);
+
+    expect(results(await rowsOf(harness, childId))).toContain("`write` is not available: this agent already finished");
+    await expect(access(stray)).rejects.toThrow();
   }, 20_000);
 
   it("withdraws a queued message and tells its sender", async () => {
