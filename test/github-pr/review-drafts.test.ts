@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createReviewDraftStore,
+  DraftConflictError,
   DraftInputError,
   MAX_COMMENTS,
   MAX_TEXT,
@@ -53,10 +54,11 @@ describe("review draft store", () => {
     const dir = join(root, "drafts");
     return { dir, store: open(dir) };
   }
-  function open(dir: string): ReviewDraftStore {
+  function open(dir: string, onChange?: () => void): ReviewDraftStore {
     return createReviewDraftStore({
       dir,
       now: () => clock,
+      ...(onChange === undefined ? {} : { onChange }),
       logger: {
         info: (_m, fields) => void infos.push(fields ?? {}),
         warn: (message) => void warnings.push(message),
@@ -198,5 +200,96 @@ describe("review draft store", () => {
     expect(draft.summary).toBe("");
     await store.removeSubmitted(pr, ["b"]);
     expect(await readdir(dir)).toEqual([]);
+  });
+  it("lists drafts and set-aside files", async () => {
+    const { dir, store } = await fresh();
+    await store.apply(target("Acme/Widgets", 7), { op: "add", comment: comment("a") });
+    await store.apply(target("Acme/Widgets", 7), { op: "add", comment: comment("b") });
+    clock += 5000;
+    await store.apply(target("acme/widgets", 7), { op: "set", summary: "overall", event: "APPROVE" });
+    await store.apply(target("old/tool", 4), { op: "add", comment: comment("c") });
+    await writeFile(join(dir, "acme+widgets+9.json"), "{ broken");
+    await writeFile(join(dir, "notes.txt"), "ignored");
+    await writeFile(join(dir, "acme+widgets+3.json.unreadable-1767000000000"), "{ older");
+
+    const entries = await store.list();
+    const drafts = entries.filter((e) => e.kind === "draft");
+    expect(drafts).toEqual([
+      { kind: "draft", repo: "Acme/Widgets", number: 7, comments: 2, summary: true, event: "APPROVE", savedAt: new Date(clock).toISOString() },
+      { kind: "draft", repo: "old/tool", number: 4, comments: 1, summary: false, event: "COMMENT", savedAt: new Date(clock).toISOString() },
+    ].sort((a, b) => (a.number < b.number ? 1 : -1)));
+    const aside = entries.filter((e) => e.kind === "unreadable");
+    expect(aside.map((e) => e.kind === "unreadable" && [e.repo, e.number, e.file.replace(/-\d+$/, "-<ms>")])).toEqual(
+      expect.arrayContaining([
+        ["acme/widgets", 9, "acme+widgets+9.json.unreadable-<ms>"],
+        ["acme/widgets", 3, "acme+widgets+3.json.unreadable-<ms>"],
+      ]),
+    );
+    expect(aside).toHaveLength(2);
+  });
+
+  it("deletes a draft only when it is unchanged", async () => {
+    const infoBefore = infos.length;
+    const { dir, store } = await fresh();
+    const pr = target("acme/widgets", 7);
+    const draft = await store.apply(pr, { op: "add", comment: comment("a") });
+    clock += 1000;
+    await store.apply(pr, { op: "set", summary: "changed after the list showed it" });
+    await expect(store.discard(pr, draft.updatedAt)).rejects.toThrow(DraftConflictError);
+    expect(await readdir(dir)).toEqual(["acme+widgets+7.json"]);
+
+    const current = await store.get(pr);
+    expect(await store.discard(pr, current.updatedAt)).toBe(true);
+    expect(await readdir(dir)).toEqual([]);
+    expect(await store.discard(pr, current.updatedAt)).toBe(false);
+    expect(infos.slice(infoBefore)).toEqual([
+      { repo: "acme/widgets", number: 7, reason: "deleted on the list page", comments: 1 },
+    ]);
+  });
+
+  it("deletes a set-aside file and refuses any other name", async () => {
+    const { dir, store } = await fresh();
+    await store.ready();
+    const good = "acme+widgets+8.json.unreadable-1767000000000";
+    await writeFile(join(dir, good), "{ broken");
+    await writeFile(join(dir, "acme+widgets+8.json"), "{ keep, not set aside");
+    await writeFile(join(dir, "notes.txt"), "keep");
+    await writeFile(join(dir, "..", "outside.json.unreadable"), "keep");
+    for (const bad of ["acme+widgets+8.json", "notes.txt", "../outside.json.unreadable", "sub/acme+widgets+8.json.unreadable", "..", "", "acme+widgets+8.json.unreadable-"]) {
+      await expect(store.discardSetAside(bad)).rejects.toThrow(DraftInputError);
+    }
+    expect((await readdir(dir)).sort()).toEqual(["acme+widgets+8.json", good, "notes.txt"]);
+    expect(await store.discardSetAside(good)).toBe(true);
+    expect(await store.discardSetAside(good)).toBe(false);
+    expect((await readdir(dir)).sort()).toEqual(["acme+widgets+8.json", "notes.txt"]);
+    expect((await readdir(join(dir, ".."))).includes("outside.json.unreadable")).toBe(true);
+  });
+
+  it("reports a file that appears or goes, and not an edit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "review-drafts-"));
+    roots.push(root);
+    const dir = join(root, "drafts");
+    let count = 0;
+    const store = open(dir, () => (count += 1));
+    const pr = target("acme/widgets", 7);
+    await store.apply(pr, { op: "add", comment: comment("a") });
+    expect(count).toBe(1);
+    await store.apply(pr, { op: "add", comment: comment("b") });
+    await store.apply(pr, { op: "set", summary: "text" });
+    await store.apply(pr, { op: "add", comment: comment("b") });
+    expect(count).toBe(1);
+    await store.apply(pr, { op: "remove", id: "a" });
+    await store.apply(pr, { op: "remove", id: "b" });
+    expect(count).toBe(1);
+    await store.removeSubmitted(pr, ["b"]);
+    expect(count).toBe(2);
+    expect(await readdir(dir)).toEqual([]);
+    // A discard of a draft that has no file changes nothing.
+    await store.apply(pr, { op: "discard" });
+    expect(count).toBe(2);
+    await store.apply(pr, { op: "add", comment: comment("c") });
+    expect(count).toBe(3);
+    await store.apply(pr, { op: "discard" });
+    expect(count).toBe(4);
   });
 });

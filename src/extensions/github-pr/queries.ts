@@ -80,6 +80,19 @@ query($q: String!) {
 }
 `;
 
+/**
+ * One pull request as a list row shows it, open or not. The poll reads it for a
+ * saved review whose pull request is not on the list, so the page can show its
+ * title and state. The name is part of the text, so a test answers it by name.
+ */
+export const PENDING_PR_QUERY = `
+query PendingReviewPullRequest($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { ${PR_LIST_FIELDS} }
+  }
+}
+`;
+
 /** The full pull request detail: body, comments, reviews, threads and CI. */
 export const PR_DETAIL_QUERY = `
 query($owner: String!, $name: String!, $number: Int!) {

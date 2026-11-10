@@ -1,0 +1,28 @@
+{
+  "json": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "number": 99,
+          "title": "Closed without merge",
+          "url": "https://github.example.com/acme/widgets/pull/99",
+          "isDraft": false,
+          "state": "CLOSED",
+          "updatedAt": "2026-10-20T01:00:00Z",
+          "author": {
+            "login": "example-user"
+          },
+          "headRefName": "feature/old",
+          "baseRefName": "main",
+          "reviewDecision": null,
+          "labels": {
+            "nodes": []
+          },
+          "commits": {
+            "nodes": []
+          }
+        }
+      }
+    }
+  }
+}

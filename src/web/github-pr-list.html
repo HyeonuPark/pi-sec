@@ -36,6 +36,12 @@
          with `null` when it held none. This block is what makes the rows draw with
          the page instead of one request later. No other page carries it. -->
     <!--github-pr-list-first-->
+    <!-- The saved reviews, replaced by the server with
+         `<script type="application/json" id="github-pr-pending-first">…</script>`:
+         the same answer as `GET /api/github/pr/pending`, or `null` when the server
+         could not read them. The Pending reviews section draws with the page from
+         it. No other page carries it. -->
+    <!--github-pr-pending-first-->
 
     <!-- base.js first: it carries the one rule that builds every URL on this page,
          and the page module reads it before its first request. -->

@@ -1,4 +1,4 @@
-import { chmod, mkdir, readdir, readFile, rename, unlink } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "../../secrets/model-credentials.ts";
 import { isSafeNamePart } from "./network.ts";
@@ -26,6 +26,9 @@ import { isSafeNamePart } from "./network.ts";
  *     away when the reader submits the review, removes its last comment, or
  *     deletes it in the UI. A file that does not parse is set aside under a name
  *     of its own (`<name>.json.unreadable-<ms>`) and is never deleted here.
+ *   - The list page can delete a draft or a set-aside file by the reader's
+ *     request: `discard` and `discardSetAside`. `discard` refuses when the draft
+ *     changed after the reader saw it.
  *   - Nothing here reaches GitHub, so the write switch does not guard it.
  */
 
@@ -33,6 +36,9 @@ export const MAX_COMMENTS = 500;
 export const MAX_TEXT = 65536;
 export const DRAFT_VERSION = 1;
 const UNREADABLE = ".unreadable";
+const FILE_NAME = /^([a-z0-9-]+)\+([a-z0-9._-]+)\+(\d{1,18})\.json$/;
+/** A set-aside file: the old `.unreadable` name and the new `.unreadable-<epoch ms>` name. */
+const SET_ASIDE_NAME = /^([a-z0-9-]+)\+([a-z0-9._-]+)\+(\d{1,18})\.json\.unreadable(?:-\d{1,16})?$/;
 
 export type DraftSide = "LEFT" | "RIGHT";
 export type DraftEvent = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
@@ -90,6 +96,39 @@ export interface DraftTarget {
   readonly number: number;
 }
 
+/** The refusal of a delete because the draft changed after the reader saw it. The route answers 409. */
+export class DraftConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DraftConflictError";
+  }
+}
+
+/** One saved review as the list of saved reviews shows it. `repo` is the spelling stored in the draft. */
+export interface StoredDraftEntry {
+  readonly kind: "draft";
+  readonly repo: string;
+  readonly number: number;
+  readonly comments: number;
+  /** Whether the overall comment is not empty. */
+  readonly summary: boolean;
+  readonly event: DraftEvent;
+  /** The `updatedAt` of the draft. */
+  readonly savedAt: string;
+}
+
+/** A file that did not parse and was set aside. `repo` is the lower-case name from the file name. */
+export interface StoredUnreadableEntry {
+  readonly kind: "unreadable";
+  readonly repo: string;
+  readonly number: number;
+  readonly file: string;
+  /** The modification time of the file. */
+  readonly savedAt: string;
+}
+
+export type StoredEntry = StoredDraftEntry | StoredUnreadableEntry;
+
 export interface DraftLogger {
   info(message: string, fields?: Record<string, unknown>): void;
   warn(message: string, fields?: Record<string, unknown>): void;
@@ -99,6 +138,11 @@ export interface ReviewDraftStoreOptions {
   readonly dir: string;
   readonly now?: () => number;
   readonly logger?: DraftLogger;
+  /**
+   * Called after a draft file was created or removed. An edit of an existing
+   * draft does not call it.
+   */
+  readonly onChange?: () => void;
 }
 
 export interface ReviewDraftStore {
@@ -107,6 +151,15 @@ export interface ReviewDraftStore {
   apply(target: DraftTarget, op: DraftOp): Promise<Draft>;
   /** Remove the submitted comments and the overall comment, after GitHub accepted the review. */
   removeSubmitted(target: DraftTarget, ids: readonly string[]): Promise<void>;
+  /** Every saved review and every set-aside file, each read in its own pull request's queue. */
+  list(): Promise<StoredEntry[]>;
+  /**
+   * Delete one draft by the reader's request. Resolves `false` when it is gone,
+   * and rejects with {@link DraftConflictError} when its `updatedAt` is not `savedAt`.
+   */
+  discard(target: DraftTarget, savedAt: string): Promise<boolean>;
+  /** Delete one set-aside file by the reader's request. Resolves `false` when it is gone. */
+  discardSetAside(file: string): Promise<boolean>;
   /** Resolves when the start-up cleanup is done. */
   ready(): Promise<void>;
 }
@@ -245,6 +298,13 @@ export function createReviewDraftStore(options: ReviewDraftStoreOptions): Review
   const dir = resolve(options.dir);
   const now = options.now ?? Date.now;
   const logger = options.logger;
+  const changed = (): void => {
+    try {
+      options.onChange?.();
+    } catch (error) {
+      logger?.warn("github-pr draft change callback failed", { error });
+    }
+  };
   const iso = (): string => new Date(now()).toISOString();
 
   const queues = new Map<string, Promise<unknown>>();
@@ -324,6 +384,7 @@ export function createReviewDraftStore(options: ReviewDraftStoreOptions): Review
       const base = stored ?? emptyDraft(target, at);
       if (change.op === "discard") {
         await remove(path);
+        if (stored !== undefined) changed();
         return emptyDraft(target, at);
       }
       let next: Draft = base;
@@ -344,9 +405,11 @@ export function createReviewDraftStore(options: ReviewDraftStoreOptions): Review
       next = { ...next, updatedAt: at };
       if (isEmpty(next)) {
         await remove(path);
+        if (stored !== undefined) changed();
         return next;
       }
       await save(path, next);
+      if (stored === undefined) changed();
       return next;
     });
   };
@@ -367,8 +430,86 @@ export function createReviewDraftStore(options: ReviewDraftStoreOptions): Review
         if (draft === undefined) return;
         const gone = new Set(ids);
         const next: Draft = { ...draft, summary: "", comments: draft.comments.filter((c) => !gone.has(c.id)), updatedAt: iso() };
-        if (isEmpty(next)) await remove(path);
-        else await save(path, next);
+        if (isEmpty(next)) {
+          await remove(path);
+          changed();
+        } else await save(path, next);
+      });
+    },
+    async list() {
+      await ensure();
+      const entries: StoredEntry[] = [];
+      for (const name of await readdir(dir)) {
+        const match = FILE_NAME.exec(name);
+        if (match === null) continue;
+        const number = Number.parseInt(match[3] ?? "", 10);
+        const path = join(dir, name);
+        // A file that does not parse is set aside by `load`, and shows below.
+        const draft = await enqueue(`${match[1]}+${match[2]}+${number}`, () => load(path)).catch(() => undefined);
+        if (draft === undefined) continue;
+        entries.push({
+          kind: "draft",
+          repo: draft.repo,
+          number: draft.number,
+          comments: draft.comments.length,
+          summary: draft.summary !== "",
+          event: draft.event,
+          savedAt: draft.updatedAt,
+        });
+      }
+      for (const name of await readdir(dir)) {
+        const match = SET_ASIDE_NAME.exec(name);
+        if (match === null) continue;
+        const info = await stat(join(dir, name)).catch(() => undefined);
+        if (info === undefined) continue;
+        entries.push({
+          kind: "unreadable",
+          repo: `${match[1]}/${match[2]}`,
+          number: Number.parseInt(match[3] ?? "", 10),
+          file: name,
+          savedAt: new Date(info.mtimeMs).toISOString(),
+        });
+      }
+      return entries;
+    },
+    async discard(target, savedAt) {
+      const { key, path } = keyOf(target);
+      await ensure();
+      return await enqueue(key, async () => {
+        const draft = await load(path);
+        if (draft === undefined) return false;
+        if (draft.updatedAt !== savedAt) {
+          throw new DraftConflictError("The saved review changed after this list showed it. Reload the list and try again.");
+        }
+        await remove(path);
+        logger?.info("github-pr draft deleted", {
+          repo: draft.repo,
+          number: draft.number,
+          reason: "deleted on the list page",
+          comments: draft.comments.length,
+        });
+        changed();
+        return true;
+      });
+    },
+    async discardSetAside(file) {
+      const match = SET_ASIDE_NAME.exec(file);
+      if (match === null || resolve(dir, file, "..") !== dir) throw new DraftInputError("file is not the name of a set-aside saved review");
+      await ensure();
+      const number = Number.parseInt(match[3] ?? "", 10);
+      return await enqueue(`${match[1]}+${match[2]}+${number}`, async () => {
+        const path = join(dir, file);
+        const info = await stat(path).catch(() => undefined);
+        if (info === undefined) return false;
+        await remove(path);
+        logger?.info("github-pr draft deleted", {
+          repo: `${match[1]}/${match[2]}`,
+          number,
+          reason: "deleted on the list page",
+          file,
+        });
+        changed();
+        return true;
       });
     },
   };

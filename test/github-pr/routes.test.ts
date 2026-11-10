@@ -189,7 +189,12 @@ describe("github-pr routes", () => {
   function openEvents(
     origin: string,
     path: string,
-  ): { frames: { event: string; data: string }[]; until: (event: string, timeoutMs?: number) => Promise<void>; close: () => void } {
+  ): {
+    frames: { event: string; data: string }[];
+    until: (event: string, timeoutMs?: number) => Promise<void>;
+    drain: (ms: number) => Promise<void>;
+    close: () => void;
+  } {
     const controller = new AbortController();
     const frames: { event: string; data: string }[] = [];
     let buffer = "";
@@ -219,9 +224,26 @@ describe("github-pr routes", () => {
     };
 
     closures.push(() => controller.abort());
+    let pendingRead: Promise<ReadableStreamReadResult<Uint8Array>> | undefined;
     return {
       frames,
       close: () => controller.abort(),
+      /** Read what arrives during `ms` milliseconds, and keep an unfinished read for the next call. */
+      async drain(ms) {
+        reader ??= await opened;
+        const end = Date.now() + ms;
+        for (;;) {
+          const left = end - Date.now();
+          if (left <= 0) return;
+          pendingRead ??= reader.read();
+          const chunk = await Promise.race([pendingRead, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), left))]);
+          if (chunk === undefined) return;
+          pendingRead = undefined;
+          if (chunk.done) return;
+          buffer += decoder.decode(chunk.value, { stream: true });
+          drain();
+        }
+      },
       async until(event, timeoutMs = 5000) {
         reader ??= await opened;
         const deadline = Date.now() + timeoutMs;
@@ -743,6 +765,144 @@ describe("github-pr routes", () => {
     }
     expect((await get(origin, "/api/github/pr/list?refresh=1")).status).toBe(200);
     expect((await readdir(draftsDir)).sort()).toEqual([...names].sort());
+  }, 40_000);
+
+  /** A draft file for a case that seeds one by hand, in any repository. */
+  function seededIn(repo: string, number: number, updatedAt: string): string {
+    return seededDraft(number, false)
+      .replace("acme/widgets", repo)
+      .replace('"updatedAt":"2026-01-01T00:00:00.000Z"', `"updatedAt":"${updatedAt}"`);
+  }
+
+  /** Boot with four saved reviews: on the list, off the list and closed, not configured, and unreadable. */
+  async function bootWithSavedReviews(): Promise<{ origin: string; draftsDir: string; gh: FakeGhFixture }> {
+    const gh = await fakeGhFixture();
+    const draftsDir = join(await mkdtemp(join(tmpdir(), "drafts-routes-")), "drafts");
+    await mkdir(draftsDir, { recursive: true });
+    await writeFile(join(draftsDir, "acme+widgets+15.json"), seededIn("acme/widgets", 15, "2026-01-04T00:00:00.000Z"));
+    await writeFile(join(draftsDir, "acme+widgets+99.json"), seededIn("acme/widgets", 99, "2026-01-03T00:00:00.000Z"));
+    await writeFile(join(draftsDir, "gone+tool+4.json"), seededIn("gone/tool", 4, "2026-01-02T00:00:00.000Z"));
+    const aside = join(draftsDir, "acme+widgets+7.json.unreadable-1767000000000");
+    await writeFile(aside, "{ broken");
+    await utimes(aside, new Date("2026-01-01T00:00:00.000Z"), new Date("2026-01-01T00:00:00.000Z"));
+    const { origin } = await boot({ githubPr: { writes: false, repos: ["acme/widgets"] }, gh, routeOptions: { draftsDir } });
+    // The boot poll reads the facts of the saved reviews that are not on the list.
+    expect((await get(origin, "/api/github/pr/list")).status).toBe(200);
+    return { origin, draftsDir, gh };
+  }
+
+  it("answers the saved reviews without asking GitHub", async () => {
+    const { origin, gh } = await bootWithSavedReviews();
+    const before = (await calls(gh)).length;
+    const answer = await get(origin, "/api/github/pr/pending");
+    expect(answer.status).toBe(200);
+    const reviews = (answer.json as { reviews: Record<string, unknown>[] }).reviews;
+    expect(reviews.map((r) => [r["kind"], r["repo"], r["number"]])).toEqual([
+      ["draft", "acme/widgets", 15],
+      ["draft", "acme/widgets", 99],
+      ["draft", "gone/tool", 4],
+      ["unreadable", "acme/widgets", 7],
+    ]);
+    expect(reviews[0]).toMatchObject({ configured: true, comments: 1, summary: false, event: "COMMENT", pr: { state: "OPEN" } });
+    expect(reviews[1]).toMatchObject({ configured: true, pr: { title: "Closed without merge", state: "CLOSED" } });
+    expect(reviews[2]).toMatchObject({ configured: false, pr: null });
+    expect(reviews[3]).toMatchObject({ file: "acme+widgets+7.json.unreadable-1767000000000" });
+    expect((await calls(gh)).length).toBe(before);
+  }, 40_000);
+
+  it("takes a pull request with a saved review out of the five sections", async () => {
+    const { origin } = await bootWithSavedReviews();
+    const numbers = (json: unknown): number[] =>
+      (json as { sections: { prs: { number: number }[] }[] }).sections.flatMap((section) => section.prs.map((pr) => pr.number));
+    const list = await get(origin, "/api/github/pr/list");
+    expect(numbers(list.json)).not.toContain(15);
+    expect(numbers(list.json)).toContain(10);
+    const refreshed = await get(origin, "/api/github/pr/list?refresh=1");
+    expect(numbers(refreshed.json)).not.toContain(15);
+    const page = await get(origin, "/github/pr/");
+    expect(numbers(block(page.text, "github-pr-list-first"))).not.toContain(15);
+
+    // The pull request is still there for the Pending reviews section.
+    const pending = (await get(origin, "/api/github/pr/pending")).json as { reviews: { number: number; pr: { title: string } | null }[] };
+    expect(pending.reviews.find((r) => r.number === 15)?.pr?.title).not.toBe(undefined);
+  }, 40_000);
+
+  it("serves the list page with the saved reviews block", async () => {
+    const { origin } = await bootWithSavedReviews();
+    const page = await get(origin, "/github/pr/");
+    expect(page.status).toBe(200);
+    const pending = block(page.text, "github-pr-pending-first") as { reviews: { number: number }[] };
+    expect(pending.reviews.map((r) => r.number)).toEqual([15, 99, 4, 7]);
+    // The other two pages carry no such block.
+    expect((await get(origin, "/github/pr/acme/widgets/10")).text).not.toContain('id="github-pr-pending-first"');
+  }, 40_000);
+
+  it("deletes a saved review only on a well-formed request", async () => {
+    const { origin, draftsDir, gh } = await bootWithSavedReviews();
+    const before = (await calls(gh)).length;
+    const path = "/api/github/pr/drafts/discard";
+    const names = async (): Promise<string[]> => (await readdir(draftsDir)).sort();
+    const all = await names();
+    expect(all).toHaveLength(4);
+
+    const notJson = await fetch(`${origin}${path}`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" });
+    expect(notJson.status).toBe(415);
+    for (const bad of [
+      [],
+      {},
+      { repo: "acme/widgets", number: 15 },
+      { repo: "acme", number: 15, savedAt: "x" },
+      { repo: "acme/widgets", number: "15", savedAt: "x" },
+      { repo: "acme/widgets", number: 0, savedAt: "x" },
+      { repo: "../widgets", number: 15, savedAt: "x" },
+      { file: "acme+widgets+15.json" },
+      { file: "../x.json.unreadable" },
+      { file: 7 },
+      { file: "acme+widgets+7.json.unreadable-1767000000000", repo: "acme/widgets" },
+    ]) {
+      expect((await postJson(origin, path, bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    // The draft changed after the reader saw the row.
+    const conflict = await postJson(origin, path, { repo: "acme/widgets", number: 15, savedAt: "2026-01-01T00:00:00.000Z" });
+    expect(conflict.status).toBe(409);
+    expect(await names()).toEqual(all);
+
+    const configured = await postJson(origin, path, { repo: "Acme/Widgets", number: 15, savedAt: "2026-01-04T00:00:00.000Z" });
+    expect([configured.status, configured.json]).toEqual([200, { deleted: true }]);
+    const notConfigured = await postJson(origin, path, { repo: "gone/tool", number: 4, savedAt: "2026-01-02T00:00:00.000Z" });
+    expect([notConfigured.status, notConfigured.json]).toEqual([200, { deleted: true }]);
+    const again = await postJson(origin, path, { repo: "gone/tool", number: 4, savedAt: "2026-01-02T00:00:00.000Z" });
+    expect([again.status, again.json]).toEqual([200, { deleted: false }]);
+    const aside = await postJson(origin, path, { file: "acme+widgets+7.json.unreadable-1767000000000" });
+    expect([aside.status, aside.json]).toEqual([200, { deleted: true }]);
+    expect(await names()).toEqual(["acme+widgets+99.json"]);
+    expect((await calls(gh)).length).toBe(before);
+
+    // A deleted review is back in its section at the next list read.
+    const list = (await get(origin, "/api/github/pr/list")).json as { sections: { prs: { number: number }[] }[] };
+    expect(list.sections.flatMap((s) => s.prs.map((p) => p.number))).toContain(15);
+  }, 40_000);
+
+  it("publishes prs when a draft file is created or removed, and not for an edit", async () => {
+    const gh = await fakeGhFixture();
+    const draftsDir = join(await mkdtemp(join(tmpdir(), "drafts-routes-")), "drafts");
+    const { origin } = await boot({ githubPr: { writes: false, repos: ["acme/widgets"] }, gh, routeOptions: { draftsDir } });
+    expect((await get(origin, "/api/github/pr/list")).status).toBe(200);
+    const events = openEvents(origin, "/api/github/pr/events");
+    const count = (): number => events.frames.filter((frame) => frame.event === "prs").length;
+    const base = "/api/github/pr/acme/widgets/10/draft";
+
+    await postJson(origin, base, { op: "add", comment: DRAFT_COMMENT });
+    await events.drain(400);
+    expect(count()).toBe(1);
+    await postJson(origin, base, { op: "set", summary: "an edit" });
+    await postJson(origin, base, { op: "add", comment: { ...DRAFT_COMMENT, id: "c-000002" } });
+    await events.drain(400);
+    expect(count()).toBe(1);
+    await postJson(origin, base, { op: "discard" });
+    await events.drain(400);
+    expect(count()).toBe(2);
+    events.close();
   }, 40_000);
 
   /* ---------------------------------------------------------------- cache */

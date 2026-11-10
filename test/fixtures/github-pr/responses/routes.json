@@ -30,6 +30,10 @@
     { "contains": ["is:pr is:open involves:"], "file": "search-involves.json" },
     { "contains": ["is:pr is:open reviewed-by:"], "file": "search-reviewed.json" },
 
+    { "contains": ["PendingReviewPullRequest", "number=99"], "file": "pending-pr-closed.json" },
+    { "contains": ["PendingReviewPullRequest", "number=98"], "file": "pending-pr-merged.json" },
+    { "contains": ["PendingReviewPullRequest"], "file": "pending-pr-none.json" },
+
     { "contains": ["id number title baseRefName headRefName headRefOid"], "file": "pr-refs.json" },
     { "contains": ["statusCheckRollup"], "file": "pr-detail.json" },
     { "contains": ["pullRequest(number:"], "file": "mentions-detail.json" },

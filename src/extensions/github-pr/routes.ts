@@ -16,10 +16,11 @@ import {
   type GhReader,
   type GhWriter,
 } from "./gh.ts";
-import { fetchPrList, type PrListPayload } from "./list.ts";
+import { fetchPrList, withoutPullRequests, type PrListPayload } from "./list.ts";
 import { createPrListCache, type ListCacheTimers, type PrListCache } from "./list-cache.ts";
 import { configuredRepository, createSettingsReader, DISK_LIMIT_DEFAULT_MEGABYTES, splitRepository, type GithubPrSettings } from "./settings.ts";
-import { createReviewDraftStore, DraftInputError, readOp } from "./review-drafts.ts";
+import { buildPendingReviews, draftKeys, offListTargets, readPendingFacts, type PendingPr, type PendingReview } from "./pending.ts";
+import { createReviewDraftStore, DraftConflictError, DraftInputError, readOp } from "./review-drafts.ts";
 import { createRepoStore, DiskLimitError } from "./store.ts";
 import {
   commentOnPullRequest,
@@ -86,6 +87,8 @@ const META_MARKER = "<!--github-pr-meta-->";
 const META_ID = "github-pr-meta";
 const LIST_FIRST_MARKER = "<!--github-pr-list-first-->";
 const LIST_FIRST_ID = "github-pr-list-first";
+const PENDING_FIRST_MARKER = "<!--github-pr-pending-first-->";
+const PENDING_FIRST_ID = "github-pr-pending-first";
 
 /** The directory the bare repositories live in, under the pi-sec home. */
 export const REPO_DIRECTORY = "gh-repo";
@@ -282,9 +285,19 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
     dir: options.draftsDir ?? join(deps.runtime.paths.stateDir, "github-pr", "review-drafts"),
     ...(options.now === undefined ? {} : { now: options.now }),
     logger,
+    // A draft file that appeared or went changes the Pending reviews section and
+    // the sections it takes pull requests out of, so every open page reads again.
+    onChange: () => channel.publish(PRS_EVENT, {}),
   });
 
   const channel = deps.sse.channel(EVENTS_CHANNEL);
+
+  /**
+   * What the last poll read about each saved review whose pull request was not on
+   * the list, keyed by {@link prKey}. It lives in memory only and a restart reads
+   * it again at the first poll.
+   */
+  let pendingFacts: ReadonlyMap<string, PendingPr> = new Map();
 
   /**
    * Reconcile the bare repositories, one call at a time.
@@ -334,7 +347,43 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
     if (active === undefined) throw new GhError("the githubPr settings are missing from the config");
     await reconcileQuietly(active.repos);
     const payload = await fetchPrList(reader, active.repos);
+    await refreshPendingFacts(payload);
     return payload;
+  };
+
+  /**
+   * Read the facts of the saved reviews whose pull request is not on the new list.
+   * A failure here never fails the list: the section only shows older facts.
+   */
+  async function refreshPendingFacts(payload: PrListPayload): Promise<void> {
+    try {
+      const targets = offListTargets(await drafts.list(), payload);
+      const next = await readPendingFacts(reader, targets, pendingFacts, logger);
+      const changed = JSON.stringify([...next]) !== JSON.stringify([...pendingFacts]);
+      pendingFacts = next;
+      if (changed) channel.publish(PRS_EVENT, {});
+    } catch (error) {
+      logger.warn("github-pr saved review facts failed", { error });
+    }
+  }
+
+  /** The saved reviews with what the server knows about their pull requests. It never asks GitHub. */
+  const pendingReviews = async (): Promise<PendingReview[]> =>
+    buildPendingReviews(await drafts.list(), cache.current(), pendingFacts, configuredRepos());
+
+  /**
+   * The list as a page shows it: a pull request with a saved review is in the
+   * Pending reviews section only. A saved review that cannot be read takes no
+   * pull request out of the list.
+   */
+  const visibleList = async (payload: PrListPayload | undefined): Promise<PrListPayload | undefined> => {
+    if (payload === undefined) return undefined;
+    try {
+      return withoutPullRequests(payload, draftKeys(await drafts.list()));
+    } catch (error) {
+      logger.warn("github-pr saved reviews could not be listed", { error });
+      return payload;
+    }
   };
 
   const cache: PrListCache = createPrListCache({
@@ -417,7 +466,15 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
     });
     let html = fillMarker(page.html, META_MARKER, dataBlock(META_ID, meta()));
     if (extra.listFirst === true) {
-      html = fillMarker(html, LIST_FIRST_MARKER, dataBlock(LIST_FIRST_ID, cache.current() ?? null));
+      html = fillMarker(html, LIST_FIRST_MARKER, dataBlock(LIST_FIRST_ID, (await visibleList(cache.current())) ?? null));
+      const pending = await pendingReviews().then(
+        (reviews) => ({ reviews }),
+        (error: unknown) => {
+          logger.warn("github-pr saved reviews could not be listed", { error });
+          return null;
+        },
+      );
+      html = fillMarker(html, PENDING_FIRST_MARKER, dataBlock(PENDING_FIRST_ID, pending));
     }
     sendBody(route.res, {
       status: 200,
@@ -469,10 +526,20 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
     try {
       // A forced refresh reads GitHub now and replaces the copy; when it fails
       // the copy stays as it was and the failure is the answer.
-      json(route.res, 200, await cache.load(force ? { force: true } : {}));
+      const payload = await cache.load(force ? { force: true } : {});
+      json(route.res, 200, (await visibleList(payload)) ?? payload);
     } catch (error) {
       logger.warn("github-pr list failed", { requestId: route.requestId, error });
       refuse(route.res, 502, messageOf(error));
+    }
+  });
+
+  router.get("/api/github/pr/pending", async (route) => {
+    try {
+      json(route.res, 200, { reviews: await pendingReviews() });
+    } catch (error) {
+      logger.warn("github-pr pending reviews failed", { requestId: route.requestId, error });
+      refuse(route.res, 500, messageOf(error));
     }
   });
 
@@ -594,6 +661,53 @@ export function registerGithubPrRoutes(context: ExtensionRouteContext): Extensio
       const change = readOp(route.body, new Date((options.now ?? Date.now)()).toISOString());
       return await drafts.apply(target, change);
     });
+  });
+
+  /**
+   * Delete one saved review by the reader's request from the list page. The body
+   * is `{ repo, number, savedAt }` for a draft, and the repository need not be in
+   * the settings, or `{ file }` for a set-aside file. A draft that changed after
+   * the reader saw it is `409`. Nothing here reaches GitHub, so the write switch
+   * does not guard it.
+   */
+  router.post("/api/github/pr/drafts/discard", async (route) => {
+    if (!isJsonRequest(route)) {
+      refuse(route.res, 415, "send this request with Content-Type: application/json");
+      return;
+    }
+    try {
+      const body = bodyObject(route.body);
+      if (body === undefined) throw new DraftInputError("the body must be a JSON object");
+      const file = body["file"];
+      if (file !== undefined) {
+        if (typeof file !== "string" || body["repo"] !== undefined || body["number"] !== undefined || body["savedAt"] !== undefined) {
+          throw new DraftInputError("send either file, or repo, number and savedAt");
+        }
+        json(route.res, 200, { deleted: await drafts.discardSetAside(file) });
+        return;
+      }
+      const repo = body["repo"];
+      const number = body["number"];
+      const savedAt = body["savedAt"];
+      if (typeof repo !== "string") throw new DraftInputError("repo must be a string like owner/repo");
+      const parts = repo.split("/");
+      if (parts.length !== 2 || parts[0] === "" || parts[1] === "") throw new DraftInputError("repo must be a string like owner/repo");
+      if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1) throw new DraftInputError("number must be a positive integer");
+      if (typeof savedAt !== "string" || savedAt === "") throw new DraftInputError("savedAt must be a string");
+      const deleted = await drafts.discard({ repo, owner: parts[0] ?? "", name: parts[1] ?? "", number }, savedAt);
+      json(route.res, 200, { deleted });
+    } catch (error) {
+      if (error instanceof DraftInputError) {
+        refuse(route.res, 400, error.message);
+        return;
+      }
+      if (error instanceof DraftConflictError) {
+        refuse(route.res, 409, error.message);
+        return;
+      }
+      logger.warn("github-pr draft delete failed", { requestId: route.requestId, error });
+      refuse(route.res, 500, messageOf(error));
+    }
   });
 
   /* ---------------------------------------------------------------- write */

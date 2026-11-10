@@ -80,11 +80,11 @@ export interface PrListPayload {
 }
 
 /** Raw shapes of the GraphQL answers this module reads. */
-interface RawAuthor {
+export interface RawAuthor {
   readonly login?: string | null;
 }
 
-interface RawPr {
+export interface RawPr {
   readonly number?: number | null;
   readonly title?: string;
   readonly url?: string;
@@ -181,6 +181,30 @@ export function slimPr(pr: RawPr, repo: string): PrRow {
     labels: pr.labels?.nodes ?? [],
     ciState: commit?.statusCheckRollup?.state ?? null,
     repo,
+  };
+}
+
+/**
+ * The key of one pull request: the repository in lower case and the number. The
+ * saved reviews and the list are joined on it, and it ignores the spelling.
+ */
+export function prKey(repo: string, number: number): string {
+  return `${repo.trim().toLowerCase()}#${number}`;
+}
+
+/**
+ * The list without the pull requests that have a saved review. Those show in the
+ * Pending reviews section only, so a pull request stays in one section, and the
+ * count of each section drops with them. The payload is copied, not changed.
+ */
+export function withoutPullRequests(payload: PrListPayload, keys: ReadonlySet<string>): PrListPayload {
+  if (keys.size === 0) return payload;
+  return {
+    ...payload,
+    sections: payload.sections.map((section) => ({
+      ...section,
+      prs: section.prs.filter((pr) => !keys.has(prKey(pr.repo, pr.number))),
+    })),
   };
 }
 

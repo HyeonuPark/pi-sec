@@ -1752,7 +1752,9 @@ path below answers `404`.
 | `GET` | `/github/pr/<owner>/<repo>/<number>/diff` | The diff of one pull request. |
 | `GET` | `/github/pr/<owner>/<repo>/<number>/commits/<sha>` | The diff of one commit of a pull request. |
 | `GET` | `/api/github/pr/list` | The list, from the copy the process holds. |
-| `GET` | `/api/github/pr/events` | SSE stream: the cached list changed. |
+| `GET` | `/api/github/pr/pending` | The saved reviews (§10.8), with the facts the process holds. It never asks GitHub. |
+| `POST` | `/api/github/pr/drafts/discard` | Delete one saved review, or one set-aside file (§10.8). |
+| `GET` | `/api/github/pr/events` | SSE stream: the cached list or the saved reviews changed. |
 | `GET` | `/api/github/pr/<owner>/<repo>/<number>` | One pull request. |
 | `GET` | `/api/github/pr/<owner>/<repo>/<number>/diff` | The diff of one pull request. |
 | `GET` | `/api/github/pr/<owner>/<repo>/<number>/commits/<sha>` | The diff of one commit of a pull request. |
@@ -1794,7 +1796,7 @@ failure of `gh` (`502`). A switched-off install starts no
 
 ### 10.2 Pages
 
-Each page is a shell from `src/web/` plus two JSON data blocks the server fills,
+Each page is a shell from `src/web/` plus up to three JSON data blocks the server fills,
 the same technique as the usage page's `#usage-first` (§8):
 
 - `github-pr-meta` on all three pages:
@@ -1802,8 +1804,11 @@ the same technique as the usage page's `#usage-first` (§8):
   The viewer is the one in the cached list, and `null` means no list was read
   yet.
 - `github-pr-list-first` on the list page only: the list the process held, or
-  `null` when it held none. The rows draw with the page instead of one request
-  later.
+  `null` when it held none, without the pull requests that have a saved review
+  (§10.8). The rows draw with the page instead of one request later.
+- `github-pr-pending-first` on the list page only: the same answer as
+  `GET /api/github/pr/pending`, or `null` when the server could not read the saved
+  reviews.
 
 A block is `<script type="application/json">` with every `<` written as
 `\u003c`, so no value can close the element early and the page's
@@ -1835,6 +1840,12 @@ never overlap. A poll that fails keeps the copy and tries again.
 `502` and leaves the copy as it was, and the next `GET` still answers the old
 list. One repository that cannot be read fails the whole read: the list is all or
 nothing.
+
+A pull request that has a saved review (§10.7) is left out of every section of this
+answer and of the `github-pr-list-first` block, so that it shows in the Pending
+reviews section only and the count of each section drops with it. A set-aside file
+or a file that cannot be read takes no pull request out. The poll keeps the full
+list in memory, so deleting the saved review puts the pull request back at once.
 
 ### 10.4 One pull request, and its diff
 
@@ -1892,7 +1903,10 @@ data: {}
 
 The server publishes it when a read replaced a list that was already there with a
 different one, which includes a forced refresh that changed the list. Filling an
-empty copy is not a change. A page that receives the frame reads the list route
+empty copy is not a change. It also publishes it when a draft file is created or
+removed (the first comment, the last removal, a discard, a submit, a delete from the
+list page), and when a poll changed the facts of a saved review's pull request that
+is not on the list. An edit of an existing draft publishes nothing. A page that receives the frame reads the list route
 again. The channel is separate from every conversation's stream, and the endpoint
 answers no `snapshot`: the page's first answer is the `github-pr-list-first` block
 or a read of the list route.
@@ -2005,8 +2019,9 @@ Changes to two pull requests do not wait for each other.
 The server never deletes a draft on a timer or after a read of the dashboard list. A
 draft file goes away only when the reader submits the review (the review route
 removes the submitted comments and the summary, and the file when nothing is left),
-removes the last comment while the overall comment is empty, or sends `discard`
-while the overall comment is empty. A draft stays when its pull request leaves the
+removes the last comment while the overall comment is empty, sends `discard`
+while the overall comment is empty, or deletes it in the Pending reviews section
+(§10.8). A draft stays when its pull request leaves the
 list, is merged or closed, or when its repository leaves `githubPr.repos`.
 
 A file that does not parse is renamed to `<name>.json.unreadable-<epoch
@@ -2015,6 +2030,56 @@ first, and the pull request can get a new draft. The server never deletes a
 set-aside file. The `listed` field stays in the file and in the answer, and a new
 file gets `listed: false`. Nothing reads it. It stays because an older build refuses
 a file without it as unreadable.
+
+### 10.8 The Pending reviews routes <a id="github-pr-pending"></a>
+
+```jsonc
+// GET /api/github/pr/pending
+{ "reviews": [
+  { "kind": "draft", "repo": "acme/widgets", "number": 12, "configured": true,
+    "comments": 3, "summary": true, "event": "COMMENT", "savedAt": "<updatedAt of the draft>",
+    "pr": { "title": "...", "url": "https://github.com/acme/widgets/pull/12", "state": "OPEN",
+            "isDraft": false, "author": "someone", "updatedAt": "..." } },
+  { "kind": "unreadable", "repo": "acme/widgets", "number": 7,
+    "file": "acme+widgets+7.json.unreadable-1767000000000", "savedAt": "<modification time of the file>" }
+] }
+```
+
+The answer lists every file of the drafts directory, newest `savedAt` first, whether
+its pull request is open, closed or merged, and whether its repository is still in
+`githubPr.repos`. `repo` is the configured spelling when the repository is
+configured (`configured` is true) and the spelling stored in the draft otherwise. A
+set-aside file shows the lower-case name from its file name. The route reads the
+directory and never asks GitHub, so it answers when GitHub cannot be read and before
+the first list read.
+
+`pr` comes from the cached list when the pull request is on it (its `state` is
+`OPEN`), else from the facts of the last poll, else it is `null`. After each
+successful read of the list, the poll reads one pull request from GitHub for each
+saved review whose pull request is not on the new list, with the query
+`PendingReviewPullRequest`, one after another. A failed read keeps the earlier facts
+of that pull request and writes one warning, and it never fails the list read. The
+facts live in memory only. This read costs one GraphQL request for each such saved
+review at each poll and each forced refresh, and nothing for a pull request on the
+list or for a set-aside file.
+
+```jsonc
+// POST /api/github/pr/drafts/discard
+{ "repo": "acme/widgets", "number": 12, "savedAt": "<savedAt the row showed>" }   // a draft
+{ "file": "acme+widgets+7.json.unreadable-1767000000000" }                        // a set-aside file
+// 200 { "deleted": true }, or { "deleted": false } when the file is already gone
+```
+
+This is the delete of the Pending reviews section. It never reaches GitHub, so
+`githubPr.writes` does not gate it, and the repository need not be in
+`githubPr.repos`. The refusals are `415` for a body that is not JSON, `400` for a
+malformed body (a repository that is not `owner/repo`, a number that is not a
+positive integer, a `file` outside the set-aside name pattern, or a body that mixes
+the two forms), and `409` when the draft's `updatedAt` is not `savedAt`, which means
+the review changed after the reader saw the row. The delete runs in the pull
+request's own queue. A success writes one log line "github-pr draft deleted" with the
+repository, the number, the reason `deleted on the list page` and the comment count,
+and never the text.
 
 ---
 
