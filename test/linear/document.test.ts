@@ -35,6 +35,7 @@ describe("the operation check: what a read may send", () => {
     "a comment line and then a mutation": ["# just a query\nmutation { issueArchive(id: \"x\") { success } }", "a mutation"],
     "a schema definition": ["type Foo { a: Int }", "the word type"],
     "an empty document": ["", "no operation"],
+    "a document of only spaces": ["   ", "no operation"],
     "a document of only a comment": ["# nothing", "no operation"],
     "two queries": ["query A { viewer { id } } query B { viewer { id } }", "more than one operation"],
     "an unclosed string": ['query Q { issues(filter: { title: { eq: "abc } }) { nodes { id } } }', "text that does not parse"],
@@ -84,24 +85,12 @@ describe("linear_graphql", () => {
     rig = undefined;
   });
 
-  const refusedInputs = [
-    'mutation { issueCreate(input: { title: "x", teamId: "x" }) { success } }',
-    "subscription { issueCreated { id } }",
-    "query Q { viewer { id } } mutation { issueArchive(id: \"x\") { success } }",
-    "# a comment\nmutation { issueArchive(id: \"x\") { success } }",
-    "type Foo { a: Int }",
-    "   ",
-    "query A { viewer { id } } query B { viewer { id } }",
-    'query Q { issues(filter: { title: { eq: "abc } }) { nodes { id } } }',
-  ];
-
-  it("refuses each of those documents with the fixed sentence and sends no request", async () => {
+  it("refuses a document with the fixed sentence and sends no request", async () => {
     rig = await createRig();
-    for (const query of refusedInputs) {
-      const result = await rig.call("linear_graphql", { query });
-      expect(result.isError, query).toBe(true);
-      expect(result.text).toMatch(/^Refused: linear_graphql sends only one read query\. This document holds .+\. Nothing was sent to Linear\.$/);
-    }
+    const query = 'mutation { issueCreate(input: { title: "x", teamId: "x" }) { success } }';
+    const result = await rig.call("linear_graphql", { query });
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/^Refused: linear_graphql sends only one read query\. This document holds .+\. Nothing was sent to Linear\.$/);
     expect(rig.linear.seen).toHaveLength(0);
   });
 

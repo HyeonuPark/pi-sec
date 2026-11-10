@@ -597,71 +597,62 @@ describe("network.test.ts", () => {
       expect(resolution.grouped).toEqual(["acme/app", "me/app"]);
     });
 
-    it("puts two forks of one source in the same network", async () => {
-      const resolution = await resolveNetworks(
+    type NetworkRow = [
+      name: string,
+      repos: string[],
+      table: Record<string, RepoInfo>,
+      networks: Array<{ root: string; members: Array<{ slug: string; sizeKilobytes?: number }>; estimateKilobytes?: number }>,
+      exact?: { network: number; members: Array<{ slug: string; sizeKilobytes: number }> },
+    ];
+    // A row's `networks` is matched by shape: the list length and each list of members are exact, each object is a subset.
+    // A row with `exact` also compares one network's members whole, as the old cases did.
+    const networkRows: NetworkRow[] = [
+      [
+        "puts two forks of one source in the same network",
         ["me/one", "you/two", "acme/app"],
-        readerOf({
-          "acme/app": plain(500),
-          "me/one": forkOf("acme/app", 10),
-          "you/two": forkOf("acme/app", 10),
-        }),
-      );
-
-      expect(resolution.networks).toHaveLength(1);
-      expect(resolution.networks[0]?.members.map((member) => member.slug)).toEqual([
-        "acme/app",
-        "me/one",
-        "you/two",
-      ]);
-    });
-
-    it("makes a network of its own for a fork that reports no source", async () => {
-      const resolution = await resolveNetworks(
+        { "acme/app": plain(500), "me/one": forkOf("acme/app", 10), "you/two": forkOf("acme/app", 10) },
+        [{ root: "acme/app", members: [{ slug: "acme/app" }, { slug: "me/one" }, { slug: "you/two" }] }],
+      ],
+      [
+        "makes a network of its own for a fork that reports no source",
         ["acme/app", "me/private-fork"],
-        readerOf({ "acme/app": plain(1000), "me/private-fork": forkWithoutSource(300) }),
-      );
-
-      expect(resolution.networks.map((network) => network.root)).toEqual(["acme/app", "me/private-fork"]);
-      expect(resolution.networks[1]?.members).toEqual([{ slug: "me/private-fork", sizeKilobytes: 300 }]);
-    });
-
-    it("makes a network of its own for a repository that is not a fork", async () => {
-      const resolution = await resolveNetworks(
+        { "acme/app": plain(1000), "me/private-fork": forkWithoutSource(300) },
+        [
+          { root: "acme/app", members: [{ slug: "acme/app" }] },
+          { root: "me/private-fork", members: [{ slug: "me/private-fork", sizeKilobytes: 300 }] },
+        ],
+        { network: 1, members: [{ slug: "me/private-fork", sizeKilobytes: 300 }] },
+      ],
+      [
+        "makes a network of its own for a repository that is not a fork",
         ["acme/one", "acme/two"],
-        readerOf({ "acme/one": plain(10), "acme/two": plain(20) }),
-      );
-
-      expect(resolution.networks.map((network) => network.root)).toEqual(["acme/one", "acme/two"]);
-      expect(resolution.networks.map((network) => network.estimateKilobytes)).toEqual([10, 20]);
-    });
-
-    it("names the source as the root when the source is not configured", async () => {
-      const resolution = await resolveNetworks(["me/fork"], readerOf({ "me/fork": forkOf("upstream/proj", 40) }));
-
-      expect(resolution.networks).toHaveLength(1);
-      expect(resolution.networks[0]?.root).toBe("upstream/proj");
-      expect(resolution.networks[0]?.members).toEqual([{ slug: "me/fork", sizeKilobytes: 40 }]);
-      // The root itself is not in the list, so the largest member is the estimate.
-      expect(resolution.networks[0]?.estimateKilobytes).toBe(40);
-    });
-
-    it("follows a chain of forks to the oldest configured repository", async () => {
-      const resolution = await resolveNetworks(
+        { "acme/one": plain(10), "acme/two": plain(20) },
+        [
+          { root: "acme/one", members: [{ slug: "acme/one" }], estimateKilobytes: 10 },
+          { root: "acme/two", members: [{ slug: "acme/two" }], estimateKilobytes: 20 },
+        ],
+      ],
+      [
+        // The root itself is not in the list, so the largest member is the estimate.
+        "names the source as the root when the source is not configured",
+        ["me/fork"],
+        { "me/fork": forkOf("upstream/proj", 40) },
+        [{ root: "upstream/proj", members: [{ slug: "me/fork", sizeKilobytes: 40 }], estimateKilobytes: 40 }],
+        { network: 0, members: [{ slug: "me/fork", sizeKilobytes: 40 }] },
+      ],
+      [
+        "follows a chain of forks to the oldest configured repository",
         ["acme/app", "mid/app", "me/app"],
-        readerOf({
-          "acme/app": plain(700),
-          "mid/app": forkOf("acme/app", 15),
-          "me/app": forkOf("mid/app", 15),
-        }),
-      );
+        { "acme/app": plain(700), "mid/app": forkOf("acme/app", 15), "me/app": forkOf("mid/app", 15) },
+        [{ root: "acme/app", members: [{ slug: "acme/app" }, { slug: "me/app" }, { slug: "mid/app" }] }],
+      ],
+    ];
 
-      expect(resolution.networks).toHaveLength(1);
-      expect(resolution.networks[0]?.root).toBe("acme/app");
-      expect(resolution.networks[0]?.members.map((member) => member.slug)).toEqual([
-        "acme/app",
-        "me/app",
-        "mid/app",
-      ]);
+    it.each(networkRows)("%s", async (_name, repos, table, networks, exact) => {
+      const resolution = await resolveNetworks(repos, readerOf(table));
+
+      expect(resolution.networks).toMatchObject(networks);
+      if (exact) expect(resolution.networks[exact.network]?.members).toEqual(exact.members);
     });
 
     it("stops a cycle of sources instead of looping forever", async () => {
