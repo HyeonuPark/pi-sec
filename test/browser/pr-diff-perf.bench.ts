@@ -560,13 +560,19 @@ it("measures the diff page", async () => {
     out["facts"] = facts; out["order"] = order; out["results"] = results; out["profiles"] = profiles; out["inclusive"] = inclusive; out["reps"] = REPS;
     await writeFile(join(OUT, "results.json"), JSON.stringify(out, null, 1), "utf8");
   };
+  // A round that fails is logged and the next one runs, and the run fails at the end.
+  const failed: string[] = [];
   for (const phase of phases) {
     await boot(phase.web);
     for (let r = 0; r < phase.rounds; r += 1) {
       // One Chromium per round: with --single-process, closing a context takes the browser down with it.
       browser = await chromium.launch({ args: LAUNCH_ARGS });
       process.stderr.write(`[bench] round ${r} profile=${phase.profile}\n`);
-      await runRound(r, phase.profile).catch((e) => console.log("ROUND FAILED", String(e).split("\n")[0]));
+      await runRound(r, phase.profile).catch((e) => {
+        const line = String(e).split("\n")[0];
+        console.log("ROUND FAILED", line);
+        failed.push(`round ${r} profile=${phase.profile}: ${line}`);
+      });
       await browser.close().catch(() => {}); browser = undefined;
       await save();
     }
@@ -579,4 +585,5 @@ it("measures the diff page", async () => {
   out["inclusive"] = inclusive;
   out["reps"] = REPS;
   await writeFile(join(OUT, "results.json"), JSON.stringify(out, null, 1), "utf8");
+  if (failed.length > 0) throw new Error(`${failed.length} round(s) failed: ${failed.join("; ")}`);
 }, 14_400_000);
