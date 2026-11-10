@@ -28,9 +28,8 @@
  * because jsdom has no layout: only the browser can say whether two buttons share
  * a top edge or how tall they came out.
  */
-import { existsSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { AdminNotes } from "../../src/runtime/notes.ts";
 import { SseHub } from "../../src/server/sse.ts";
@@ -39,14 +38,7 @@ import { startServer, type StartedServer } from "../../src/server/server.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
-
-// Same library prefix and launch args as the other browser tests: Chromium needs
-// X11/atk/gbm libraries that a minimal Linux image may not ship, and it may have no GPU.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 let harness: TestHarness | undefined;
 let started: StartedServer | undefined;
@@ -196,7 +188,7 @@ beforeAll(async () => {
   started = await startServer(deps, { webDir: builtWebDir() });
   origin = started.origin;
 
-  browser = await chromium.launch({ args: LAUNCH_ARGS });
+  browser = await launchChromium();
   page = await browser.newPage();
   page.on("pageerror", (error) => pageErrors.push(`${error.name}: ${error.message}`));
   // Every API request is answered here, so nothing this file does reaches the

@@ -7,19 +7,11 @@
  * jsdom does not enforce a Content-Security-Policy and does not run module
  * scripts, so neither claim can be tested there.
  */
-import { existsSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext } from "playwright";
+import type { Browser, BrowserContext } from "playwright";
 import { builtWebDir } from "./web-dir.ts";
 import { bootServer, installHostStatus, pagesExtension, writeExtension, type BootedPages } from "../ext-pages-helpers.ts";
-
-// Same browser set-up as `ui-cards.browser.ts`: the libraries Chromium needs are
-// unpacked into a local prefix, and rendering stays on the CPU.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 /** A page whose html carries code of every inline kind, and one allowed script file. */
 const INLINE = pagesExtension(
@@ -52,11 +44,7 @@ beforeAll(async () => {
   });
   const loaded = await booted.harness.runtime.loader.loadAll();
   if (loaded.errors.length > 0) throw new Error(`the fixture extensions did not load: ${loaded.errors.join("; ")}`);
-  try {
-    browser = await chromium.launch({ args: LAUNCH_ARGS });
-  } catch (error) {
-    throw new Error(`chromium did not launch: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  browser = await launchChromium();
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 });
 

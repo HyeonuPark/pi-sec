@@ -19,13 +19,12 @@
  * life of this file, the replacement answers the three endpoints those readers
  * call, and it throws on every other address.
  */
-import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { Models } from "@earendil-works/pi-ai";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { AdminNotes } from "../../src/runtime/notes.ts";
 import { SseHub } from "../../src/server/sse.ts";
@@ -35,20 +34,7 @@ import { builtWebDir } from "./web-dir.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { ANTHROPIC_USAGE_URL, DEEPSEEK_BALANCE_URL, SYNTHETIC_QUOTAS_URL } from "../../src/server/usage/fetchers.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
-
-// Chromium needs X11/atk/gbm libraries that a minimal Linux image may not ship, and there may be no
-// root to install them. They are unpacked from Fedora RPMs into a local
-// prefix instead; point the dynamic linker at it before launching. Same as
-// scripts/ui-probe.mjs and `ui-cards.browser.ts`.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-
-// A host may have no GPU, and the GPU process may not start at all, so
-// rendering stays on the CPU inside the browser process. Same args as
-// `ui-cards.browser.ts`.
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 /** The two widths every condition is checked at: a desktop and a phone. */
 const VIEWPORTS = [
@@ -365,11 +351,7 @@ beforeAll(async () => {
   started = await startServer(deps, { webDir: builtWebDir(), ui: { renderTimeoutMs: 2000 }, usage: { models: () => runtime.models as never, fetch: fakeFetch } });
   origin = started.origin;
 
-  try {
-    browser = await chromium.launch({ args: LAUNCH_ARGS });
-  } catch (error) {
-    throw new Error(`chromium did not launch: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  browser = await launchChromium();
   context = await browser.newContext({ viewport: { width: VIEWPORTS[0].width, height: VIEWPORTS[0].height } });
 });
 

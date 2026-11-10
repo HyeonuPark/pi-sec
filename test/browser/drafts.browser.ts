@@ -7,10 +7,9 @@
  * through Playwright against a server on port 0, types into each field, reloads,
  * and reads the field back. Nothing is sent: the tests never press a send button.
  */
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { AdminNotes } from "../../src/runtime/notes.ts";
@@ -20,20 +19,7 @@ import { startServer, type StartedServer } from "../../src/server/server.ts";
 import { builtWebDir } from "./web-dir.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
-
-// Chromium needs X11/atk/gbm libraries that a minimal Linux image may not ship, and there may be no
-// root to install them. They are unpacked from Fedora RPMs into a local
-// prefix instead; point the dynamic linker at it before launching. Same as
-// scripts/ui-probe.mjs.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-
-// A host may have no GPU, and the GPU process may not start at all
-// (`gpu_data_manager_impl_private.cc: GPU process isn't usable`). `--single-process`
-// keeps rendering on the CPU inside the browser process, which is all this needs.
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 let harness: TestHarness | undefined;
 let started: StartedServer | undefined;
@@ -74,13 +60,7 @@ beforeAll(async () => {
   started = await startServer(deps, { webDir: builtWebDir() });
   origin = started.origin;
 
-  try {
-    browser = await chromium.launch({ args: LAUNCH_ARGS });
-  } catch (error) {
-    // A launch failure is the host's, not
-    // the code's, and the exact error is the only useful thing to report.
-    throw new Error(`chromium did not launch: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  browser = await launchChromium();
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 });
 

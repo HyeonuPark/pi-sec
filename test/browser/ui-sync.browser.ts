@@ -11,9 +11,8 @@
  * The server is a test server on port 0 with a harness of its own. Nothing here
  * talks to a running daemon.
  */
-import { existsSync } from "node:fs";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { createInboxItemTx } from "../../src/extensions/notify.ts";
@@ -24,14 +23,7 @@ import { startServer, type StartedServer } from "../../src/server/server.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
-
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-// Without `--single-process`: that mode runs the browser in one process and
-// cannot hold the three contexts (two machines and a phone) this file needs.
-const LAUNCH_ARGS = ["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 const PHONE = { width: 390, height: 844 } as const;
 const WIDE = { width: 1280, height: 900 } as const;
@@ -75,7 +67,7 @@ beforeAll(async () => {
   started = await startServer(deps, { webDir: builtWebDir() });
   origin = started.origin;
 
-  browser = await chromium.launch({ args: LAUNCH_ARGS });
+  browser = await launchChromium({ singleProcess: false });
   machineA = await browser.newContext({ viewport: WIDE });
   machineB = await browser.newContext({ viewport: WIDE });
   phone = await browser.newContext({ viewport: PHONE });

@@ -20,9 +20,8 @@
  * it reads (`inline` in place of `none`), and the wide half still passes: the
  * failure names the narrow screen, not something else.
  */
-import { existsSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { AdminNotes } from "../../src/runtime/notes.ts";
@@ -32,14 +31,7 @@ import { startServer, type StartedServer } from "../../src/server/server.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
-
-// Same library prefix and launch args as the other browser tests: Chromium needs
-// X11/atk/gbm libraries that a minimal Linux image may not ship, and it may have no GPU.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 /** The widths the app switches layout at, one on each side and one exactly on it. */
 const PHONE = { width: 390, height: 844 } as const;
@@ -97,7 +89,7 @@ beforeAll(async () => {
     await wait(100);
   }
 
-  browser = await chromium.launch({ args: LAUNCH_ARGS });
+  browser = await launchChromium();
   context = await browser.newContext({ viewport: DESKTOP });
   page = await context.newPage();
   page.on("pageerror", (error) => pageErrors.push(`${error.name}: ${error.message}`));

@@ -10,9 +10,8 @@
  * queued field's computed style, both in the dark theme, and the whole flow from
  * a held run to one automatic send.
  */
-import { existsSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { fauxAssistantMessage, fauxText, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { AdminNotes } from "../../src/runtime/notes.ts";
@@ -22,13 +21,7 @@ import { startServer, type StartedServer } from "../../src/server/server.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
-
-// Same library prefix and launch args as the other browser tests.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 let harness: TestHarness | undefined;
 let started: StartedServer | undefined;
@@ -54,7 +47,7 @@ beforeAll(async () => {
   };
   started = await startServer(deps, { webDir: builtWebDir() });
   origin = started.origin;
-  browser = await chromium.launch({ args: LAUNCH_ARGS });
+  browser = await launchChromium();
   context = await browser.newContext({ viewport: { width: 1000, height: 800 } });
 });
 

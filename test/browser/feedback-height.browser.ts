@@ -29,9 +29,8 @@
  * hidden, so the panel's box below is written as the old box plus the 21px the
  * field gains over that measurement.
  */
-import { existsSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { createInboxItemTx } from "../../src/extensions/notify.ts";
@@ -42,14 +41,7 @@ import { startServer, type StartedServer } from "../../src/server/server.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
-
-// Same library prefix and launch args as the other browser tests: Chromium needs
-// X11/atk/gbm libraries that a minimal Linux image may not ship, and it may have no GPU.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 /** The two viewports measured, named for the failure messages. */
 const PHONE = { width: 390, height: 844 } as const;
@@ -121,13 +113,7 @@ beforeAll(async () => {
   started = await startServer(deps, { webDir: builtWebDir() });
   origin = started.origin;
 
-  try {
-    browser = await chromium.launch({ args: LAUNCH_ARGS });
-  } catch (error) {
-    // A launch failure is the host's, not
-    // the code's, and the exact error is the only useful thing to report.
-    throw new Error(`chromium did not launch: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  browser = await launchChromium();
   page = await browser.newPage();
   page.on("pageerror", (error) => pageErrors.push(`${error.name}: ${error.message}`));
 });

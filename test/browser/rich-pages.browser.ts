@@ -14,13 +14,12 @@
  *     page frame more than three pane heights away goes back to `about:blank`
  *     and keeps its height; the report viewer loads its frame at once.
  */
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { createAttachment, type AttachmentContext } from "../../src/attachments/store.ts";
 import { AdminNotes } from "../../src/runtime/notes.ts";
@@ -30,12 +29,7 @@ import { startServer, type StartedServer } from "../../src/server/server.ts";
 import { builtWebDir } from "./web-dir.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
-
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 let harness: TestHarness | undefined;
 let started: StartedServer | undefined;
@@ -106,7 +100,7 @@ beforeAll(async () => {
   started.server.on("request", (request) => {
     seen.push(request.url ?? "");
   });
-  browser = await chromium.launch({ args: LAUNCH_ARGS });
+  browser = await launchChromium();
   context = await browser.newContext({ viewport: { width: 1280, height: 600 } });
 });
 

@@ -19,9 +19,8 @@
  * The assertion is the same shape everywhere: the reading place the operator
  * left, read before the update, is the reading place after it.
  */
-import { existsSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { defaultConfig } from "../../src/config/schema.ts";
@@ -33,14 +32,7 @@ import type { AppDeps } from "../../src/server/deps.ts";
 import { createInboxItemTx } from "../../src/extensions/notify.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
-
-// Same library prefix and launch args as the other browser tests: Chromium needs
-// X11/atk/gbm libraries that a minimal Linux image may not ship, and it may have no GPU.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 /** Distance from the tail that still counts as "following along"; the page's own slack. */
 const BOTTOM_SLACK_PX = 24;
@@ -147,7 +139,7 @@ beforeAll(async () => {
   await send("the first message of the reset tests");
   await waitForContextUsed();
 
-  browser = await chromium.launch({ args: LAUNCH_ARGS });
+  browser = await launchChromium();
   context = await browser.newContext({ viewport: { width: 1000, height: 400 } });
 });
 

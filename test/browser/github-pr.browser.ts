@@ -31,12 +31,11 @@
  * result report shows; when it is not set, no file is written.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { AdminNotes } from "../../src/runtime/notes.ts";
 import { SseHub } from "../../src/server/sse.ts";
@@ -46,14 +45,7 @@ import type { AppDeps } from "../../src/server/deps.ts";
 import { fakeGhFixture, type FakeGhFixture } from "../github-pr/fake-gh-helpers.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
-
-// Same library prefix and launch args as the other browser tests: Chromium needs
-// X11/atk/gbm libraries that a minimal Linux image may not ship, and it may have no GPU.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 /** A timer queue that never fires: the boot cycle of the poll is the only one run. */
 const NEVER_FIRE = {
@@ -263,7 +255,7 @@ beforeAll(async () => {
     await wait(100);
   }
 
-  browser = await chromium.launch({ args: LAUNCH_ARGS });
+  browser = await launchChromium();
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 }, 120000);
 

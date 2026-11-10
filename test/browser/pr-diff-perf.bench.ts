@@ -18,12 +18,11 @@
  * Run (see bench/run.sh): npx vitest --run --config test/browser/pr-diff-perf.vitest.config.ts
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, it } from "vitest";
-import { chromium, type Browser, type CDPSession, type Page } from "playwright";
+import type { Browser, CDPSession, Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { AdminNotes } from "../../src/runtime/notes.ts";
 import { SseHub } from "../../src/server/sse.ts";
@@ -33,12 +32,8 @@ import type { AppDeps } from "../../src/server/deps.ts";
 import { fakeGhFixture, type FakeGhFixture } from "../github-pr/fake-gh-helpers.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
+import { launchChromium } from "./chromium.ts";
 
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
 const NEVER_FIRE = { set: (): unknown => Symbol("never"), clear: (): void => {} };
 const REPO = "acme/widgets";
 const NUMBER = 10;
@@ -566,7 +561,7 @@ it("measures the diff page", async () => {
     await boot(phase.web);
     for (let r = 0; r < phase.rounds; r += 1) {
       // One Chromium per round: with --single-process, closing a context takes the browser down with it.
-      browser = await chromium.launch({ args: LAUNCH_ARGS });
+      browser = await launchChromium();
       process.stderr.write(`[bench] round ${r} profile=${phase.profile}\n`);
       await runRound(r, phase.profile).catch((e) => {
         const line = String(e).split("\n")[0];

@@ -14,9 +14,8 @@
  * reader pressed. So this file drives Chromium through Playwright against a real
  * server on port 0, and reads the address the new tab really landed on.
  */
-import { existsSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { defaultConfig } from "../../src/config/schema.ts";
 import { createInboxItemTx } from "../../src/extensions/notify.ts";
@@ -27,14 +26,7 @@ import { startServer, type StartedServer } from "../../src/server/server.ts";
 import type { AppDeps } from "../../src/server/deps.ts";
 import { createTestHarness, type TestHarness } from "../helpers.ts";
 import { builtWebDir } from "./web-dir.ts";
-
-// Same library prefix and launch args as the other browser tests: Chromium needs
-// X11/atk/gbm libraries that a minimal Linux image may not ship, and it may have no GPU.
-const BROWSER_LIBS = `${process.env["HOME"]}/.cache/pi-sec-browser/root/usr/lib64`;
-if (existsSync(BROWSER_LIBS)) {
-  process.env["LD_LIBRARY_PATH"] = [BROWSER_LIBS, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":");
-}
-const LAUNCH_ARGS = ["--single-process", "--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"];
+import { launchChromium } from "./chromium.ts";
 
 /** How long the chat tab gets to put the press behind it before the test fails. */
 const CLOSED_TIMEOUT_MS = 10000;
@@ -86,7 +78,7 @@ beforeAll(async () => {
   started = await startServer(deps, { webDir: builtWebDir() });
   origin = started.origin;
 
-  browser = await chromium.launch({ args: LAUNCH_ARGS });
+  browser = await launchChromium();
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 });
 
