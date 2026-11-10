@@ -74,6 +74,15 @@ async function waitUntil(fact: () => boolean, message: string, ms = 3_000): Prom
   }
 }
 
+/** A promise that a case resolves by hand, and the function that resolves it. */
+function gate(): { promise: Promise<void>; release: () => void } {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
 /** A shell command that runs until `signal` exists. */
 function waitForFile(signal: string): string {
   return `while [ ! -e ${JSON.stringify(signal)} ]; do sleep 0.02; done`;
@@ -98,6 +107,9 @@ async function finishesWithin<T>(work: Promise<T>, message: string, ms = 3_000):
  */
 class SlowEnv extends NodeExecutionEnv {
   readonly events: string[] = [];
+
+  /** When set, a shell runs no process: it ends with exit code 0 once this promise resolves. */
+  shellGate: Promise<void> | undefined;
 
   /**
    * `holdUntilStarts`: after a write starts, it waits (up to 3 s) until that
@@ -134,6 +146,11 @@ class SlowEnv extends NodeExecutionEnv {
     context: Context,
   ): ReturnType<NodeExecutionEnv["exec"]> {
     this.events.push("shell:start");
+    if (this.shellGate !== undefined) {
+      await this.shellGate;
+      this.events.push("shell:end");
+      return ok({ exitCode: 0 }) as Awaited<ReturnType<NodeExecutionEnv["exec"]>>;
+    }
     const result = await super.exec(command, options, context);
     this.events.push("shell:end");
     return result;
@@ -207,12 +224,18 @@ describe("a file write and a shell in one conversation", () => {
   it("runs two shells together", async () => {
     const dir = await directory();
     const env = new SlowEnv(dir);
+    const hold = gate();
+    env.shellGate = hold.promise;
     const tools = codingTools();
 
-    await Promise.all([
-      tools.get("bash")?.execute({ command: "sleep 0.2" }, apiFor(env), ctx()),
-      tools.get("bash")?.execute({ command: "sleep 0.2" }, apiFor(env), ctx()),
+    const both = Promise.all([
+      tools.get("bash")?.execute({ command: "hold" }, apiFor(env), ctx()),
+      tools.get("bash")?.execute({ command: "hold" }, apiFor(env), ctx()),
     ]);
+    // Both shells start before either ends: neither waits for the other.
+    await waitUntil(() => env.events.length === 2, "the second shell never started");
+    hold.release();
+    await both;
 
     expect(env.events).toEqual(["shell:start", "shell:start", "shell:end", "shell:end"]);
   });
@@ -367,16 +390,22 @@ describe("a file write and a shell in one conversation", () => {
     const file = join(dir, "waits.md");
     await writeFile(file, "a\n", "utf8");
     const env = new SlowEnv(dir);
+    const hold = gate();
+    env.shellGate = hold.promise;
     const tools = codingTools();
 
-    const shell = tools.get("bash")?.execute({ command: "sleep 0.3" }, apiFor(env, { conversationId: 8 }), ctx());
-    await delay(50);
+    const shell = tools.get("bash")?.execute({ command: "hold" }, apiFor(env, { conversationId: 8 }), ctx());
+    await waitUntil(() => env.events.includes("shell:start"), "the shell never started");
+    const edit = tools.get("edit")?.execute({ path: file, edits: [{ oldText: "a", newText: "A" }] }, apiFor(env, { conversationId: 8 }), ctx());
+    await delay(20);
+    // The edit has not begun to write while the shell is open.
+    expect(env.events).toEqual(["shell:start"]);
+    hold.release();
+    await Promise.all([shell, edit]);
 
-    const started = Date.now();
-    await tools.get("edit")?.execute({ path: file, edits: [{ oldText: "a", newText: "A" }] }, apiFor(env, { conversationId: 8 }), ctx());
-    expect(Date.now() - started).toBeGreaterThanOrEqual(200);
-
-    await shell;
+    // The write starts only after the shell ended.
+    expect(env.events.indexOf("shell:end")).toBeGreaterThanOrEqual(0);
+    expect(env.events.indexOf("shell:end")).toBeLessThan(env.events.findIndex((event) => event.startsWith("write:start:")));
   });
 });
 

@@ -132,49 +132,21 @@ describe("spawning a subagent", () => {
     harness = undefined;
   });
 
-  it("refuses the reserved name", async () => {
-    harness = await createTestHarness();
-    const entries = await once(harness, [
-      spawnCall({ name: "parent-agent", vmodel: "faux", roles: [], initialPrompt: "work" }),
-      ...answers(),
-    ]);
-    expect(toolResult(entries)).toContain("parent-agent");
-    expect(toolResult(entries)).toContain("reserved");
-  });
+  const OVER_LIMIT = "x".repeat(defaultConfig().agent.subagent.maxMessageBytes + 1);
+  const REFUSALS: [string, Record<string, unknown>, string[]][] = [
+    ["the reserved name", { name: "parent-agent" }, ["parent-agent", "reserved"]],
+    ["a name that is not usable as a document key", { name: "../escape" }, ["not usable"]],
+    ["a role with no prompt file and names the ones that exist", { roles: ["missing"] }, ["no role file", "Known roles"]],
+    ["a brief over the size limit instead of truncating it", { initialPrompt: OVER_LIMIT }, ["the limit is", "Shorten it"]],
+  ];
 
-  it("refuses a name that is not usable as a document key", async () => {
+  it.each(REFUSALS)("refuses %s", async (_what, args, expected) => {
     harness = await createTestHarness();
     const entries = await once(harness, [
-      spawnCall({ name: "../escape", vmodel: "faux", roles: [], initialPrompt: "work" }),
+      spawnCall({ name: "researcher", vmodel: "faux", roles: [], initialPrompt: "work", ...args }),
       ...answers(),
     ]);
-    expect(toolResult(entries)).toContain("not usable");
-  });
-
-  it("refuses a role with no prompt file and names the ones that exist", async () => {
-    harness = await createTestHarness();
-    const entries = await once(harness, [
-      spawnCall({ name: "researcher", vmodel: "faux", roles: ["missing"], initialPrompt: "work" }),
-      ...answers(),
-    ]);
-    expect(toolResult(entries)).toContain("no role file");
-    expect(toolResult(entries)).toContain("Known roles");
-  });
-
-  it("refuses a brief over the size limit instead of truncating it", async () => {
-    harness = await createTestHarness();
-    const base = defaultConfig();
-    const entries = await once(harness, [
-      spawnCall({
-        name: "researcher",
-        vmodel: "faux",
-        roles: [],
-        initialPrompt: "x".repeat(base.agent.subagent.maxMessageBytes + 1),
-      }),
-      ...answers(),
-    ]);
-    expect(toolResult(entries)).toContain("the limit is");
-    expect(toolResult(entries)).toContain("Shorten it");
+    for (const text of expected) expect(toolResult(entries)).toContain(text);
   });
 
   it("fails the spawn when the limit is full and creates nothing", async () => {

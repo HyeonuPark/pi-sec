@@ -209,7 +209,7 @@ describe("moving a long call to the background", () => {
     open = await boot({
       tools: { backgroundAfterMs: 150, backgroundCheckMs: 0 },
       responses: [
-        fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 1.5; echo MOVED-OK" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("bash", { command: "while [ ! -e moved-signal.txt ]; do sleep 0.05; done; echo MOVED-OK" })], { stopReason: "toolUse" }),
         fauxAssistantMessage([fauxToolCall("background_list", {})], { stopReason: "toolUse" }),
         fauxAssistantMessage([fauxText("the turn went on")]),
       ],
@@ -236,6 +236,9 @@ describe("moving a long call to the background", () => {
     }, "the background list");
     expect(listed).toContain('title="auto-bash-1"');
 
+    // The shell waits for this file, so the call is still running while the list is
+    // read, however late the timers run. Its result comes only after it exists.
+    await writeFile(join(open.paths.workspaceTree, "moved-signal.txt"), "go\n");
     const delivered = await until(async () => {
       const found = (await entries(open!)).find((row) => row.text.includes("MOVED-OK"));
       return found;
@@ -468,7 +471,7 @@ describe("the status check of a running background call", () => {
       tools: { backgroundAfterMs: 0, backgroundCheckMs: 300 },
       responses: [
         fauxAssistantMessage(
-          [fauxToolCall("async_call", { title: "longer", tool: "bash", args: { command: "sleep 1.2; echo CALLED-OK" } })],
+          [fauxToolCall("async_call", { title: "longer", tool: "bash", args: { command: "while [ ! -e called-signal.txt ]; do sleep 0.05; done; echo CALLED-OK" } })],
           { stopReason: "toolUse" },
         ),
         fauxAssistantMessage([fauxText("noted")]),
@@ -481,6 +484,8 @@ describe("the status check of a running background call", () => {
     }, "the status check");
     expect(check.text).toContain("longer (bash)");
     expect(check.text).toContain("You started it with async_call.");
+    // The shell waits for this file, so the call outlives the check by construction.
+    await writeFile(join(open.paths.workspaceTree, "called-signal.txt"), "go\n");
     await until(async () => {
       const found = (await entries(open!)).find((row) => row.text.includes("CALLED-OK"));
       return found;

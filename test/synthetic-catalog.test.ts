@@ -245,34 +245,13 @@ describe("one entry of the list as a model", () => {
 });
 
 describe("the cost of one model", () => {
-  it("takes the subscription rate the table holds for the model", () => {
-    const models = syntheticModelsFromCatalog(entriesOf());
-    expect(models.find((entry) => entry.id === KIMI_ID)?.cost).toEqual({
-      input: 1.5,
-      cacheRead: 0.23,
-      output: 7.5,
-      cacheWrite: 0,
-    });
-  });
-
-  it("follows alias_of once when the alias carries no hugging_face_id", () => {
-    const models = syntheticModelsFromCatalog(entriesOf());
-    expect(models.find((entry) => entry.id === ALIAS_ID)?.cost).toEqual({
-      input: 1.5,
-      cacheRead: 0.23,
-      output: 7.5,
-      cacheWrite: 0,
-    });
-  });
-
-  it("keeps the list's own price for an infinite: alias", () => {
-    const models = syntheticModelsFromCatalog(entriesOf());
-    expect(models.find((entry) => entry.id === INFINITE_ID)?.cost).toEqual({
-      input: 0,
-      cacheRead: 0,
-      output: 0,
-      cacheWrite: 0,
-    });
+  const KIMI_RATE = { input: 1.5, cacheRead: 0.23, output: 7.5, cacheWrite: 0 };
+  it.each([
+    ["takes the subscription rate the table holds for the model", KIMI_ID, KIMI_RATE],
+    ["follows alias_of once when the alias carries no hugging_face_id", ALIAS_ID, KIMI_RATE],
+    ["keeps the list's own price for an infinite: alias", INFINITE_ID, { input: 0, cacheRead: 0, output: 0, cacheWrite: 0 }],
+  ])("%s", (_rule, id, cost) => {
+    expect(syntheticModelsFromCatalog(entriesOf()).find((entry) => entry.id === id)?.cost).toEqual(cost);
   });
 
   it("turns the list's per-token price into a per-million one, and says so once for that model", () => {
