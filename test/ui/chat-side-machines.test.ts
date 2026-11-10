@@ -215,6 +215,32 @@ describe("the Machines panel", () => {
     expect(marked.map((button) => button.textContent)).toEqual(["on"]);
   });
 
+  it("marks the level of the last press when two answers come back in reverse order", async () => {
+    setList([machine()]);
+    const releases = new Map<string, () => void>();
+    answer("/api/remote-machines/box-a/level", (call) => {
+      const level = (JSON.parse(call.body ?? "{}") as { level: string }).level;
+      return new Promise((resolve) => {
+        releases.set(level, () => resolve({ body: machine({ level }) }));
+      });
+    });
+    await startSidePanels();
+    await settle();
+
+    panel().querySelector<HTMLElement>('[data-machine-level="on"]')!.click();
+    panel().querySelector<HTMLElement>('[data-machine-level="off"]')!.click();
+    expect(posts()).toHaveLength(2);
+    releases.get("off")?.();
+    await settle();
+    releases.get("on")?.();
+    await settle();
+
+    const marked = [...panel().querySelectorAll<HTMLElement>(".machine-level-button.marked")];
+    expect(marked.map((button) => button.textContent)).toEqual(["off"]);
+    expect(panel().querySelector(".machine-level-button.waiting, [data-waiting]")).toBeNull();
+    expect(markedLevel({ id: "box-a", level: "off" } as never)).toBe("off");
+  });
+
   it("writes the reason under the slider when the server refuses the press", async () => {
     setList([machine()]);
     answer("/api/remote-machines/box-a/level", () => ({

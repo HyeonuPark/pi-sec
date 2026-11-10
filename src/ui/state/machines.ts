@@ -132,10 +132,15 @@ export function machinesTabVisible(): Promise<void> {
   return scheduler.visible();
 }
 
+/** The newest level press of each machine: an older press never writes after it. */
+const pressSerials = new Map<string, number>();
+
 /** One level press, its request, and what the answer did to the panel. */
 export async function setMachineLevel(id: string, level: MachineLevel): Promise<void> {
   const before = machines.value.find((machine) => machine.id === id);
   if (before !== undefined && before.level === level && pendingLevels.value[id] === undefined) return;
+  const mine = (pressSerials.get(id) ?? 0) + 1;
+  pressSerials.set(id, mine);
   pendingLevels.value = { ...pendingLevels.value, [id]: level };
   machineErrors.value = omit(machineErrors.value, id);
   try {
@@ -143,6 +148,7 @@ export async function setMachineLevel(id: string, level: MachineLevel): Promise<
       method: "POST",
       body: JSON.stringify({ level }),
     });
+    if (pressSerials.get(id) !== mine) return;
     // The answer is the changed machine alone, so the list is patched rather than
     // replaced: a machine the answer does not mention keeps what it had.
     if (answer !== undefined && typeof answer.id === "string") {
@@ -150,10 +156,11 @@ export async function setMachineLevel(id: string, level: MachineLevel): Promise<
       machines.value = machines.value.map((machine) => (machine.id === changed.id ? changed : machine));
     }
   } catch (error) {
+    if (pressSerials.get(id) !== mine) return;
     const message = error instanceof Error ? error.message : String(error);
     machineErrors.value = { ...machineErrors.value, [id]: message };
   } finally {
-    pendingLevels.value = omit(pendingLevels.value, id);
+    if (pressSerials.get(id) === mine) pendingLevels.value = omit(pendingLevels.value, id);
   }
 }
 
