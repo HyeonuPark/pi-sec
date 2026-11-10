@@ -441,39 +441,29 @@ describe("usage-records.test.ts", () => {
     });
 
     /** The recorded cost one call at `at` comes to, through a ledger of its own. */
-    async function costAt(at: number): Promise<number> {
+    async function costAt(at: number, provider = "deepseek"): Promise<number> {
       const { path, db } = await ledger();
-      addCall(db, { provider: "deepseek", at, cost: 1 });
+      addCall(db, { provider, at, cost: 1 });
       db.close();
       const records = new UsageRecords({ path });
       const totals = await records.totals(at + 60_000);
       records.close();
-      expect(windowOf(totals, "deepseek", "day").calls).toBe(1);
-      return windowOf(totals, "deepseek", "day").cost;
+      expect(windowOf(totals, provider, "day").calls).toBe(1);
+      return windowOf(totals, provider, "day").cost;
     }
 
-    it("halves the recorded amount outside the peak hours", async () => {
-      expect(await costAt(monday(0, 59))).toBe(0.5);
-      expect(await costAt(monday(4, 0))).toBe(0.5);
-      expect(await costAt(monday(10, 0))).toBe(0.5);
-      expect(await costAt(Date.UTC(2026, 9, 31, 2, 0))).toBe(0.5);
-    });
-
-    it("keeps the recorded amount inside the peak hours", async () => {
-      expect(await costAt(monday(1, 0))).toBe(1);
-      expect(await costAt(monday(3, 59))).toBe(1);
-      expect(await costAt(monday(6, 0))).toBe(1);
-      expect(await costAt(monday(9, 59))).toBe(1);
-    });
-
-    it("leaves every other provider's recorded amount alone", async () => {
-      const { path, db } = await ledger();
-      addCall(db, { provider: "alpha", at: monday(0, 59), cost: 1 });
-      db.close();
-      const records = new UsageRecords({ path });
-      const totals = await records.totals(monday(0, 59) + 60_000);
-      records.close();
-      expect(windowOf(totals, "alpha", "day").cost).toBe(1);
+    it.each([
+      ["halves the recorded amount outside the peak hours: just before", "deepseek", monday(0, 59), 0.5],
+      ["halves the recorded amount outside the peak hours: end of the morning window", "deepseek", monday(4, 0), 0.5],
+      ["halves the recorded amount outside the peak hours: end of the afternoon window", "deepseek", monday(10, 0), 0.5],
+      ["halves the recorded amount outside the peak hours: a Saturday", "deepseek", Date.UTC(2026, 9, 31, 2, 0), 0.5],
+      ["keeps the recorded amount inside the peak hours: start", "deepseek", monday(1, 0), 1],
+      ["keeps the recorded amount inside the peak hours: end of the morning window", "deepseek", monday(3, 59), 1],
+      ["keeps the recorded amount inside the peak hours: afternoon start", "deepseek", monday(6, 0), 1],
+      ["keeps the recorded amount inside the peak hours: afternoon end", "deepseek", monday(9, 59), 1],
+      ["leaves every other provider's recorded amount alone", "alpha", monday(0, 59), 1],
+    ])("%s", async (_name, provider, at, cost) => {
+      expect(await costAt(at, provider)).toBe(cost);
     });
   });
 
@@ -1493,75 +1483,63 @@ describe("judges.test.ts", () => {
   });
 
   describe("judge models: what is not called", () => {
-    it("skips a model whose api pi-sec does not call, and warns about it", async () => {
-      const sb = await sandbox();
-      const c = catalog([{ id: "test", classifiers: ["test-judge"], chats: ["test-judge"], api: "test-classifier" }]);
-      const http = fakeHttp([jsonReply(answersBody({ korean: 0.9 }))]);
-      const judges = judgesWith(sb, c.models, { korean: { provider: "test", modelId: "test-judge" } }, http.fetch);
-
-      expect(await judges.judge("korean", request)).toMatchObject({ outcome: "skipped", reason: "api" });
-      expect(http.calls).toEqual([]);
-      expect(c.classified).toEqual([]);
-
-      await judges.warnMissing();
-
-      const warnings = sb.log.filter((line) => line.level === "warn");
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toMatchObject({
-        message: "judge names a model whose api pi-sec does not call",
-        fields: { judge: "korean", provider: "test", model: "test-judge", api: "test-classifier" },
-      });
-      await sb.close();
-    });
-
-    it("skips a name whose provider has only a chat model of that id, and streams nothing", async () => {
-      const sb = await sandbox();
-      const c = catalog([{ id: "test", chats: ["test-judge"] }]);
-      const http = fakeHttp([jsonReply(answersBody({ korean: 0.9 }))]);
-      const judges = judgesWith(sb, c.models, { korean: { provider: "test", modelId: "test-judge" } }, http.fetch);
-
-      expect(await judges.judge("korean", request)).toMatchObject({ outcome: "skipped", reason: "model" });
-      expect(http.calls).toEqual([]);
-      expect(c.streamed).toEqual([]);
-      await sb.close();
-    });
-
-    it("skips a model the credential hides, the way openai hides its classifier under a chat login", async () => {
-      const sb = await sandbox();
-      const c = catalog([{ id: "test", classifiers: ["test-judge"], chats: ["test-judge"], hidden: ["test-judge"] }]);
-      const http = fakeHttp([jsonReply(answersBody({ korean: 0.9 }))]);
-      const judges = judgesWith(sb, c.models, { korean: { provider: "test", modelId: "test-judge" } }, http.fetch);
-
-      const result = await judges.judge("korean", request);
-
-      expect(result).toMatchObject({ outcome: "skipped", reason: "model" });
-      expect(http.calls).toEqual([]);
-      expect(c.streamed).toEqual([]);
-      await sb.close();
-    });
-
-    it("skips an unknown name, a missing model and a missing credential, each with its own reason", async () => {
-      const sb = await sandbox();
-      const c = catalog([
-        { id: "test", classifiers: ["test-judge"] },
-        { id: "locked", classifiers: ["test-judge"], credentials: false },
-      ]);
-      const http = fakeHttp([jsonReply(answersBody({ korean: 0.9 }))]);
-      const judges = judgesWith(
-        sb,
-        c.models,
-        {
+    const KOREAN = { korean: { provider: "test", modelId: "test-judge" } };
+    it.each<{
+      name: string;
+      specs: ProviderSpec[];
+      judges: Config["judges"];
+      asks: [string, string][];
+      warns?: Record<string, unknown>;
+    }>([
+      {
+        name: "skips a model whose api pi-sec does not call, and warns about it",
+        specs: [{ id: "test", classifiers: ["test-judge"], chats: ["test-judge"], api: "test-classifier" }],
+        judges: KOREAN,
+        asks: [["korean", "api"]],
+        warns: {
+          message: "judge names a model whose api pi-sec does not call",
+          fields: { judge: "korean", provider: "test", model: "test-judge", api: "test-classifier" },
+        },
+      },
+      {
+        name: "skips a name whose provider has only a chat model of that id, and streams nothing",
+        specs: [{ id: "test", chats: ["test-judge"] }],
+        judges: KOREAN,
+        asks: [["korean", "model"]],
+      },
+      {
+        name: "skips a model the credential hides, the way openai hides its classifier under a chat login",
+        specs: [{ id: "test", classifiers: ["test-judge"], chats: ["test-judge"], hidden: ["test-judge"] }],
+        judges: KOREAN,
+        asks: [["korean", "model"]],
+      },
+      {
+        name: "skips an unknown name, a missing model and a missing credential, each with its own reason",
+        specs: [{ id: "test", classifiers: ["test-judge"] }, { id: "locked", classifiers: ["test-judge"], credentials: false }],
+        judges: {
           absentModel: { provider: "test", modelId: "absent-judge" },
           noCredential: { provider: "locked", modelId: "test-judge" },
         },
-        http.fetch,
-      );
+        asks: [["unknownName", "name"], ["absentModel", "model"], ["noCredential", "auth"]],
+      },
+    ])("$name", async ({ specs, judges: table, asks, warns }) => {
+      const sb = await sandbox();
+      const c = catalog(specs);
+      const http = fakeHttp([jsonReply(answersBody({ korean: 0.9 }))]);
+      const judges = judgesWith(sb, c.models, table, http.fetch);
 
-      expect(await judges.judge("unknownName", request)).toMatchObject({ outcome: "skipped", reason: "name" });
-      expect(await judges.judge("absentModel", request)).toMatchObject({ outcome: "skipped", reason: "model" });
-      expect(await judges.judge("noCredential", request)).toMatchObject({ outcome: "skipped", reason: "auth" });
+      for (const [name, reason] of asks) {
+        expect(await judges.judge(name, request)).toMatchObject({ outcome: "skipped", reason });
+      }
       expect(http.calls).toEqual([]);
       expect(c.classified).toEqual([]);
+      expect(c.streamed).toEqual([]);
+      if (warns !== undefined) {
+        await judges.warnMissing();
+        const warnings = sb.log.filter((line) => line.level === "warn");
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toMatchObject(warns);
+      }
       await sb.close();
     });
 

@@ -1398,29 +1398,21 @@ describe("restart from the web UI", () => {
     expect(launched).toHaveLength(0);
   });
 
-  it("refuses when there is no unit to drive", async () => {
-    for (const options of [{ userUnit: false }, { userUnit: false, systemUnit: true }, { userUnit: false, systemdRun: false }]) {
-      const { origin, launched } = await boot(options);
-      const response = await post(origin);
-      expect(response.status, JSON.stringify(options)).toBe(409);
-      expect(launched).toHaveLength(0);
-    }
-  });
-
-  it("says why a system unit cannot be restarted from here", async () => {
-    const { origin } = await boot({ userUnit: false, systemUnit: true });
+  it.each<[string, BootOptions, number, string?, string?]>([
+    ["refuses when there is no unit to drive: no user unit", { userUnit: false }, 409],
+    ["says why a system unit cannot be restarted from here", { userUnit: false, systemUnit: true }, 409, "system_unit", "sudo"],
+    ["refuses when there is no unit to drive: no user unit and no systemd-run", { userUnit: false, systemdRun: false }, 409],
+    ["refuses when systemd-run is missing", { systemdRun: false }, 500, "systemd_run_missing"],
+  ])("%s", async (_name, options, status, code, message) => {
+    // Each row boots its own server; nothing may be launched for a refusal.
+    const { origin, launched } = await boot(options);
     const response = await post(origin);
+    expect(response.status, JSON.stringify(options)).toBe(status);
+    expect(launched).toHaveLength(0);
+    if (code === undefined) return;
     const body = (await response.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("system_unit");
-    expect(body.error.message).toContain("sudo");
-  });
-
-  it("refuses when systemd-run is missing", async () => {
-    const { origin } = await boot({ systemdRun: false });
-    const response = await post(origin);
-    expect(response.status).toBe(500);
-    const body = (await response.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("systemd_run_missing");
+    expect(body.error.code).toBe(code);
+    if (message !== undefined) expect(body.error.message).toContain(message);
   });
 });
 
@@ -1524,56 +1516,39 @@ describe("ui restart from the web UI", () => {
     expect(calls.count).toBe(0);
   });
 
-  it("answers 409 when the source directory is missing", async () => {
-    const { wired } = stub({ ok: false, code: "source_missing", restored: true });
-    const { origin } = await boot(wired);
-
-    const response = await post(origin);
-    expect(response.status).toBe(409);
-    const body = (await response.json()) as { error: { code: string; requestId: string; details: { code: string; restored: boolean } } };
-    expect(body.error.code).toBe("source_missing");
-    expect(body.error.requestId).toBeTruthy();
-    expect(body.error.details).toEqual({ code: "source_missing", restored: true });
-
-    const row = (await audit(origin)).find((event) => event.type === "ui_restart_refused");
-    expect(row).toMatchObject({ source: "ui", code: "source_missing" });
-    // A refusal is not a swap: no success row may be written for it.
-    expect((await audit(origin)).some((event) => event.type === "ui_restart")).toBe(false);
-  });
-
-  it("answers 409 when the workspace pages do not build", async () => {
+  it.each<[string, UiRestartOutcome, number, boolean, string?]>([
+    ["answers 409 when the source directory is missing", { ok: false, code: "source_missing", restored: true }, 409, true],
     // A build that fails is a fact about the workspace code, like a missing
     // directory: the operator fixes the page and presses again, and the served
     // tree is untouched in the meantime, which `restored` states.
-    const { wired } = stub({ ok: false, code: "build_failed", restored: true });
-    const { origin } = await boot(wired);
-
-    const response = await post(origin);
-    expect(response.status).toBe(409);
-    const body = (await response.json()) as { error: { code: string; message: string; details: { code: string; restored: boolean } } };
-    expect(body.error.code).toBe("build_failed");
-    expect(body.error.message).toBe("the web pages could not be built from the workspace");
-    expect(body.error.details).toEqual({ code: "build_failed", restored: true });
-
-    const row = (await audit(origin)).find((event) => event.type === "ui_restart_refused");
-    expect(row).toMatchObject({ source: "ui", code: "build_failed" });
-    expect((await audit(origin)).some((event) => event.type === "ui_restart")).toBe(false);
-  });
-
-  it("answers 500 when the swap fails", async () => {
-    const { wired } = stub({ ok: false, code: "sync_failed", restored: false });
-    const { origin } = await boot(wired);
-
-    const response = await post(origin);
-    expect(response.status).toBe(500);
-    const body = (await response.json()) as { error: { code: string; details: { code: string; restored: boolean } } };
-    expect(body.error.code).toBe("sync_failed");
+    [
+      "answers 409 when the workspace pages do not build",
+      { ok: false, code: "build_failed", restored: true },
+      409,
+      true,
+      "the web pages could not be built from the workspace",
+    ],
     // `restored: false` is the sentence that matters: the assets directory was
     // not put back, so the page has to say so instead of "try again".
-    expect(body.error.details).toEqual({ code: "sync_failed", restored: false });
+    ["answers 500 when the swap fails", { ok: false, code: "sync_failed", restored: false }, 500, false],
+  ])("%s", async (_name, outcome, status, restored, message) => {
+    const { wired } = stub(outcome);
+    const { origin } = await boot(wired);
 
-    const row = (await audit(origin)).find((event) => event.type === "ui_restart_refused");
-    expect(row).toMatchObject({ source: "ui", code: "sync_failed" });
+    const response = await post(origin);
+    expect(response.status).toBe(status);
+    const body = (await response.json()) as {
+      error: { code: string; message: string; requestId: string; details: { code: string; restored: boolean } };
+    };
+    expect(body.error.code).toBe(outcome.code);
+    expect(body.error.requestId).toBeTruthy();
+    if (message !== undefined) expect(body.error.message).toBe(message);
+    expect(body.error.details).toEqual({ code: outcome.code, restored });
+
+    const events = await audit(origin);
+    expect(events.find((event) => event.type === "ui_restart_refused")).toMatchObject({ source: "ui", code: outcome.code });
+    // A refusal is not a swap: no success row may be written for it.
+    expect(events.some((event) => event.type === "ui_restart")).toBe(false);
   });
 
   it("answers 500 sync_failed when the swap throws", async () => {

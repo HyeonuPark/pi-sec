@@ -696,38 +696,30 @@ describe("proxy.test.ts", () => {
   }
 
   describe("normalizePrefix", () => {
-    it("accepts plain paths and normalises the trailing slash", () => {
-      expect(normalizePrefix("/sec")).toBe("/sec");
-      expect(normalizePrefix("/sec/")).toBe("/sec");
-      expect(normalizePrefix("/a/b/c")).toBe("/a/b/c");
-      expect(normalizePrefix("  /sec  ")).toBe("/sec");
-    });
-
-    it("reads empty and root as no prefix", () => {
-      expect(normalizePrefix("")).toBe("");
-      expect(normalizePrefix("/")).toBe("");
-      expect(normalizePrefix(undefined)).toBe("");
-      expect(normalizePrefix(null)).toBe("");
-    });
-
-    it("rejects anything that is not a boring path", () => {
-      // A forwarded prefix reaches a Location header and the served HTML, so a
-      // misconfigured proxy must not be able to inject either.
-      for (const hostile of [
-        "//evil.example.com",
-        "https://evil.example.com",
-        "/sec/../../etc",
-        "/sec/./x",
-        "/sec%2f..%2f",
-        "/a b",
-        '/sec<x>',
-        "/sec\\x",
-        "/sec\nLocation: https://evil.example.com",
-        "sec",
-        `/${"a".repeat(300)}`,
-      ]) {
-        expect(normalizePrefix(hostile), hostile).toBeUndefined();
-      }
+    // A forwarded prefix reaches a Location header and the served HTML, so a
+    // misconfigured proxy must not be able to inject either.
+    it.each<[string, string | null | undefined, string | undefined]>([
+      ["accepts plain paths and normalises the trailing slash", "/sec", "/sec"],
+      ["accepts plain paths and normalises the trailing slash", "/sec/", "/sec"],
+      ["accepts plain paths and normalises the trailing slash", "/a/b/c", "/a/b/c"],
+      ["accepts plain paths and normalises the trailing slash", "  /sec  ", "/sec"],
+      ["reads empty and root as no prefix", "", ""],
+      ["reads empty and root as no prefix", "/", ""],
+      ["reads empty and root as no prefix", undefined, ""],
+      ["reads empty and root as no prefix", null, ""],
+      ["rejects anything that is not a boring path", "//evil.example.com", undefined],
+      ["rejects anything that is not a boring path", "https://evil.example.com", undefined],
+      ["rejects anything that is not a boring path", "/sec/../../etc", undefined],
+      ["rejects anything that is not a boring path", "/sec/./x", undefined],
+      ["rejects anything that is not a boring path", "/sec%2f..%2f", undefined],
+      ["rejects anything that is not a boring path", "/a b", undefined],
+      ["rejects anything that is not a boring path", "/sec<x>", undefined],
+      ["rejects anything that is not a boring path", "/sec\\x", undefined],
+      ["rejects anything that is not a boring path", "/sec\nLocation: https://evil.example.com", undefined],
+      ["rejects anything that is not a boring path", "sec", undefined],
+      ["rejects anything that is not a boring path", `/${"a".repeat(300)}`, undefined],
+    ])("%s: normalizePrefix(%j) is %j", (_name, input, expected) => {
+      expect(normalizePrefix(input)).toBe(expected);
     });
   });
 
@@ -757,29 +749,20 @@ describe("proxy.test.ts", () => {
   });
 
   describe("effectivePrefix", () => {
-    it("prefers a forwarded prefix over configuration", () => {
-      expect(
-        effectivePrefix({ forwardedPrefix: "/proxy", basePath: "/configured", publicUrl: "https://x.example.com/url" }),
-      ).toBe("/proxy");
+    const from = (forwardedPrefix: string | undefined, basePath: string, publicUrl?: string) => ({
+      forwardedPrefix,
+      basePath,
+      publicUrl,
     });
-
-    it("falls back to basePath, then to the path of publicUrl", () => {
-      expect(effectivePrefix({ forwardedPrefix: undefined, basePath: "/configured", publicUrl: undefined })).toBe(
-        "/configured",
-      );
-      expect(
-        effectivePrefix({ forwardedPrefix: undefined, basePath: "", publicUrl: "https://agent.example.com/sec" }),
-      ).toBe("/sec");
-      expect(effectivePrefix({ forwardedPrefix: undefined, basePath: "", publicUrl: "https://agent.example.com" })).toBe(
-        "",
-      );
-    });
-
-    it("ignores a rejected forwarded prefix rather than trusting it", () => {
-      expect(
-        effectivePrefix({ forwardedPrefix: "//evil.example.com", basePath: "/sec", publicUrl: undefined }),
-      ).toBe("/sec");
-      expect(effectivePrefix({ forwardedPrefix: "//evil.example.com", basePath: "", publicUrl: undefined })).toBe("");
+    it.each([
+      ["prefers a forwarded prefix over configuration", from("/proxy", "/configured", "https://x.example.com/url"), "/proxy"],
+      ["falls back to basePath, then to the path of publicUrl: basePath", from(undefined, "/configured"), "/configured"],
+      ["falls back to basePath, then to the path of publicUrl: publicUrl path", from(undefined, "", "https://agent.example.com/sec"), "/sec"],
+      ["falls back to basePath, then to the path of publicUrl: publicUrl without a path", from(undefined, "", "https://agent.example.com"), ""],
+      ["ignores a rejected forwarded prefix rather than trusting it: basePath set", from("//evil.example.com", "/sec"), "/sec"],
+      ["ignores a rejected forwarded prefix rather than trusting it: nothing set", from("//evil.example.com", ""), ""],
+    ])("%s", (_name, input, expected) => {
+      expect(effectivePrefix(input)).toBe(expected);
     });
   });
 
@@ -870,27 +853,20 @@ describe("proxy.test.ts", () => {
   });
 
   describe("trustedProxyProblems", () => {
-    it("accepts addresses and CIDR blocks", () => {
-      expect(trustedProxyProblems(["127.0.0.1", "10.0.0.0/8", "::1", "::1/128"])).toEqual([]);
-    });
-
-    it("ignores blanks", () => {
-      expect(trustedProxyProblems(["", "  "])).toEqual([]);
-    });
-
-    it("names a port as the mistake it usually is", () => {
+    it.each<[string, string[], number, string?]>([
+      ["accepts addresses and CIDR blocks", ["127.0.0.1", "10.0.0.0/8", "::1", "::1/128"], 0],
+      ["ignores blanks", ["", "  "], 0],
       // The bug: `isIP("127.0.0.1:8787")` is false, so the entry was skipped
       // and the trust list came out empty.
-      const problems = trustedProxyProblems(["127.0.0.1:8787/32"]);
-      expect(problems).toHaveLength(1);
-      expect(problems[0]).toContain("port");
-    });
-
-    it("rejects a value that is neither an address nor a valid block", () => {
-      expect(trustedProxyProblems(["localhost"])).toHaveLength(1);
-      expect(trustedProxyProblems(["localhost"])[0]).toContain("neither");
-      expect(trustedProxyProblems(["127.0.0.1/64"])).toHaveLength(1);
-      expect(trustedProxyProblems(["10.0.0.0/8", "nonsense"])).toHaveLength(1);
+      ["names a port as the mistake it usually is", ["127.0.0.1:8787/32"], 1, "port"],
+      ["rejects a value that is neither an address nor a valid block: a name", ["localhost"], 1, "neither"],
+      ["rejects a value that is neither an address nor a valid block: a long block", ["127.0.0.1/64"], 1],
+      ["rejects a value that is neither an address nor a valid block: one bad entry among good", ["10.0.0.0/8", "nonsense"], 1],
+    ])("%s", (_name, list, count, text) => {
+      const problems = trustedProxyProblems(list);
+      if (count === 0) expect(problems).toEqual([]);
+      expect(problems).toHaveLength(count);
+      if (text !== undefined) expect(problems[0]).toContain(text);
     });
   });
 });

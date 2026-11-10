@@ -540,57 +540,6 @@ describe("the synthetic.new card", () => {
     });
   });
 
-  it("reads the same quota from numbers, with the block under data", async () => {
-    const body = {
-      data: { weeklyTokenLimit: { percentRemaining: 0, maxCredits: 24, remainingCredits: 3.5, nextRegenAt: null } },
-    };
-    const service = serviceOf({
-      catalog: syntheticCatalog(),
-      fetch: fakeFetch({ [SYNTHETIC_QUOTAS_URL]: { body } }).fetch,
-    });
-
-    const card = cardOf(await service.answer(), "synthetic");
-    expect(card.fields["weekly"]).toEqual({
-      state: "value",
-      value: { utilization: 100, resetsAt: null, regenPercent: null },
-    });
-    expect(card.fields["credits"]).toMatchObject({
-      state: "value",
-      value: {
-        used: { amount: 20.5, currency: "USD" },
-        limit: { amount: 24, currency: "USD" },
-        balance: { amount: 3.5, currency: "USD" },
-      },
-    });
-  });
-
-  it("leaves a slot empty when the answer does not state it, and fills the rest", async () => {
-    const body = { weeklyTokenLimit: { percentRemaining: 90, remainingCredits: "$1.25" } };
-    const service = serviceOf({
-      catalog: syntheticCatalog(),
-      fetch: fakeFetch({ [SYNTHETIC_QUOTAS_URL]: { body } }).fetch,
-    });
-
-    const card = cardOf(await service.answer(), "synthetic");
-    // No nextRegenAt: the reset time stays empty and the share is still drawn.
-    expect(card.fields["weekly"]).toEqual({
-      state: "value",
-      value: { utilization: 10, resetsAt: null, regenPercent: null },
-    });
-    // No maxCredits: the limit and the difference it would make stay empty too.
-    expect(card.fields["credits"]).toEqual({
-      state: "value",
-      value: {
-        enabled: null,
-        used: null,
-        limit: null,
-        disabledReason: null,
-        balance: { amount: 1.25, currency: "USD" },
-        billing: SYNTHETIC_BILLING,
-      },
-    });
-  });
-
   /**
    * The block this account actually answers.
    *
@@ -608,155 +557,88 @@ describe("the synthetic.new card", () => {
     search: { hourly: { limit: 250, requests: 0, renewsAt: "2026-10-27T20:56:56.000Z" } },
   };
 
-  it("reads the plan block, with the share it gives back and no amounts", async () => {
-    const remote = fakeFetch({ [SYNTHETIC_QUOTAS_URL]: { body: PLAN_BODY } });
-    const service = serviceOf({ catalog: syntheticCatalog(), fetch: remote.fetch });
+  const weeklyOf = (utilization: number, resetsAt: unknown, regenPercent: number | null) => ({
+    state: "value",
+    value: { utilization, resetsAt, regenPercent },
+  });
+  const creditsOf = (amounts: Record<string, unknown>) => ({
+    state: "value",
+    value: { enabled: null, used: null, limit: null, disabledReason: null, balance: null, billing: SYNTHETIC_BILLING, ...amounts },
+  });
+  const usd = (amount: number) => ({ amount, currency: "USD" });
+  const FAILED = { state: "error", reason: "unexpected answer" };
+  const PLAN_RESET = { at: Date.parse("2026-10-27T19:56:56.000Z"), label: "2026-10-28 04:56" };
+  const planBody = (nextRegenPercent: unknown) => ({
+    planWeeklyLimit: { percentRemaining: 50, nextRegenAt: null, nextRegenPercent },
+  });
 
+  // `credits` is compared whole (toEqual) unless `partial` is set, which compares only the keys it names (toMatchObject).
+  it.each<{ name: string; body: unknown; weekly: unknown; credits: unknown; partial?: boolean; receivedAt?: null }>([
+    {
+      name: "reads the same quota from numbers, with the block under data",
+      body: { data: { weeklyTokenLimit: { percentRemaining: 0, maxCredits: 24, remainingCredits: 3.5, nextRegenAt: null } } },
+      weekly: weeklyOf(100, null, null),
+      credits: { state: "value", value: { used: usd(20.5), limit: usd(24), balance: usd(3.5) } },
+      partial: true,
+    },
+    {
+      // No nextRegenAt: the reset time stays empty and the share is still drawn.
+      // No maxCredits: the limit and the difference it would make stay empty too.
+      name: "leaves a slot empty when the answer does not state it, and fills the rest",
+      body: { weeklyTokenLimit: { percentRemaining: 90, remainingCredits: "$1.25" } },
+      weekly: weeklyOf(10, null, null),
+      credits: creditsOf({ balance: usd(1.25) }),
+    },
+    {
+      // The block states no amounts, so every amount is empty and the card keeps the
+      // billing link it links instead of printing an amount of zero.
+      name: "reads the plan block, with the share it gives back and no amounts",
+      body: PLAN_BODY,
+      weekly: weeklyOf(0, PLAN_RESET, 2),
+      credits: creditsOf({}),
+    },
+    {
+      name: "reads the plan block under data, and counts what remains as used",
+      body: {
+        data: { planWeeklyLimit: { percentRemaining: 65, nextRegenAt: "2026-10-27T19:56:56.000Z", nextRegenPercent: 4 } },
+      },
+      weekly: weeklyOf(35, PLAN_RESET, 4),
+      credits: { state: "value", value: { used: null, limit: null, balance: null, billing: SYNTHETIC_BILLING } },
+      partial: true,
+    },
+    // A null share is stated in the key, which is what tells the page to write
+    // `next regeneration` rather than `resets`.
+    ...[undefined, 0, -1, 2.5, "two"].map((share) => ({
+      name: `leaves the regeneration share empty when the plan states no usable one: ${String(share)}`,
+      body: planBody(share),
+      weekly: weeklyOf(50, null, null),
+      credits: creditsOf({}),
+    })),
+    {
+      // The plan block states no amounts, so the fallback's dollar amounts are not
+      // mixed into the card.
+      name: "prefers the plan block to the fallback when an answer holds both",
+      body: { planWeeklyLimit: { percentRemaining: 90, nextRegenPercent: 3 }, weeklyTokenLimit: SYNTHETIC_BODY.weeklyTokenLimit },
+      weekly: weeklyOf(10, null, 3),
+      credits: { state: "value", value: { used: null, limit: null, balance: null } },
+      partial: true,
+    },
+    {
+      name: "fails as an unexpected answer when the quota block is nowhere",
+      body: { data: { token: "quota-missing" } },
+      weekly: FAILED,
+      credits: FAILED,
+      receivedAt: null,
+    },
+  ])("$name", async ({ body, weekly, credits, partial, receivedAt }) => {
+    const service = serviceOf({ catalog: syntheticCatalog(), fetch: fakeFetch({ [SYNTHETIC_QUOTAS_URL]: { body } }).fetch });
     const card = cardOf(await service.answer(), "synthetic");
     expect(card.shape).toBe("subscription");
     expect(card.fields["fiveHour"]).toBeUndefined();
-    expect(card.fields["weekly"]).toEqual({
-      state: "value",
-      value: {
-        utilization: 0,
-        resetsAt: { at: Date.parse("2026-10-27T19:56:56.000Z"), label: "2026-10-28 04:56" },
-        regenPercent: 2,
-      },
-    });
-    // The block states no amounts, so every amount is empty and the card keeps the
-    // billing link it links instead of printing an amount of zero.
-    expect(card.fields["credits"]).toEqual({
-      state: "value",
-      value: {
-        enabled: null,
-        used: null,
-        limit: null,
-        disabledReason: null,
-        balance: null,
-        billing: SYNTHETIC_BILLING,
-      },
-    });
-  });
-
-  it("reads the plan block under data, and counts what remains as used", async () => {
-    const body = {
-      data: {
-        planWeeklyLimit: {
-          percentRemaining: 65,
-          nextRegenAt: "2026-10-27T19:56:56.000Z",
-          nextRegenPercent: 4,
-        },
-      },
-    };
-    const service = serviceOf({
-      catalog: syntheticCatalog(),
-      fetch: fakeFetch({ [SYNTHETIC_QUOTAS_URL]: { body } }).fetch,
-    });
-
-    const card = cardOf(await service.answer(), "synthetic");
-    expect(card.fields["weekly"]).toEqual({
-      state: "value",
-      value: {
-        utilization: 35,
-        resetsAt: { at: Date.parse("2026-10-27T19:56:56.000Z"), label: "2026-10-28 04:56" },
-        regenPercent: 4,
-      },
-    });
-    expect(card.fields["credits"]).toMatchObject({
-      state: "value",
-      value: { used: null, limit: null, balance: null, billing: SYNTHETIC_BILLING },
-    });
-  });
-
-  it("leaves the regeneration share empty when the plan states no usable one", async () => {
-    for (const nextRegenPercent of [undefined, 0, -1, 2.5, "two"]) {
-      const body = { planWeeklyLimit: { percentRemaining: 50, nextRegenAt: null, nextRegenPercent } };
-      const service = serviceOf({
-        catalog: syntheticCatalog(),
-        fetch: fakeFetch({ [SYNTHETIC_QUOTAS_URL]: { body } }).fetch,
-      });
-
-      const card = cardOf(await service.answer(), "synthetic");
-      // A null share is stated in the key, which is what tells the page to write
-      // `next regeneration` rather than `resets`.
-      expect(card.fields["weekly"], String(nextRegenPercent)).toEqual({
-        state: "value",
-        value: { utilization: 50, resetsAt: null, regenPercent: null },
-      });
-    }
-  });
-
-  it("prefers the plan block to the fallback when an answer holds both", async () => {
-    const body = {
-      planWeeklyLimit: { percentRemaining: 90, nextRegenPercent: 3 },
-      weeklyTokenLimit: SYNTHETIC_BODY.weeklyTokenLimit,
-    };
-    const service = serviceOf({
-      catalog: syntheticCatalog(),
-      fetch: fakeFetch({ [SYNTHETIC_QUOTAS_URL]: { body } }).fetch,
-    });
-
-    const card = cardOf(await service.answer(), "synthetic");
-    expect(card.fields["weekly"]).toEqual({
-      state: "value",
-      value: { utilization: 10, resetsAt: null, regenPercent: 3 },
-    });
-    // The plan block states no amounts, so the fallback's dollar amounts are not
-    // mixed into the card.
-    expect(card.fields["credits"]).toMatchObject({ state: "value", value: { used: null, limit: null, balance: null } });
-  });
-
-  it("fails as an unexpected answer when the quota block is nowhere", async () => {
-    const service = serviceOf({
-      catalog: syntheticCatalog(),
-      fetch: fakeFetch({ [SYNTHETIC_QUOTAS_URL]: { body: { data: { token: "quota-missing" } } } }).fetch,
-    });
-
-    const card = cardOf(await service.answer(), "synthetic");
-    expect(card.shape).toBe("subscription");
-    expect(card.receivedAt).toBeNull();
-    expect(card.fields["fiveHour"]).toBeUndefined();
-    expect(card.fields["weekly"]).toEqual({ state: "error", reason: "unexpected answer" });
-    expect(card.fields["credits"]).toEqual({ state: "error", reason: "unexpected answer" });
-  });
-
-  it("stops calling for thirty minutes after HTTP 429, and keeps the last value with its time", async () => {
-    let now = NOW;
-    let refuse = false;
-    const remote = fakeFetch({ [SYNTHETIC_QUOTAS_URL]: () => (refuse ? { status: 429 } : { body: SYNTHETIC_BODY }) });
-    const service = serviceOf({ catalog: syntheticCatalog(), fetch: remote.fetch, now: () => now });
-
-    const first = await service.answer();
-    expect(cardOf(first, "synthetic").fields["credits"]).toMatchObject({
-      state: "value",
-      value: { used: { amount: 13.5, currency: "USD" } },
-    });
-
-    // The held value ages out, the next call is refused, and the card keeps what it
-    // last received, with the time it received it.
-    refuse = true;
-    now = NOW + VALUE_REUSE_MS;
-    const refused = await service.answer();
-    expect(remote.calls).toHaveLength(2);
-    expect(cardOf(refused, "synthetic").receivedAt).toEqual({ at: NOW, label: "2026-10-25 07:30" });
-    expect(cardOf(refused, "synthetic").fields["weekly"]).toMatchObject({
-      state: "value",
-      value: { utilization: 57.5 },
-    });
-    expect(cardOf(refused, "synthetic").hold).toEqual({
-      kind: "rate_limited",
-      until: { at: NOW + VALUE_REUSE_MS + RATE_LIMIT_BACKOFF_MS, label: "2026-10-25 08:10" },
-    });
-
-    // Nothing calls again while the back-off holds, even past the reuse window.
-    refuse = false;
-    now = NOW + VALUE_REUSE_MS + RATE_LIMIT_BACKOFF_MS - 1;
-    await service.answer();
-    expect(remote.calls).toHaveLength(2);
-
-    now = NOW + VALUE_REUSE_MS + RATE_LIMIT_BACKOFF_MS;
-    await service.answer();
-    expect(remote.calls).toHaveLength(3);
+    if (receivedAt !== undefined) expect(card.receivedAt).toBeNull();
+    expect(card.fields["weekly"]).toEqual(weekly);
+    if (partial) expect(card.fields["credits"]).toMatchObject(credits as object);
+    else expect(card.fields["credits"]).toEqual(credits);
   });
 });
 
@@ -811,41 +693,94 @@ describe("the calls to a provider's own API", () => {
     expect(remote.calls).toHaveLength(2);
   });
 
-  it("stops calling a provider for thirty minutes after HTTP 429, and keeps the last value with its time", async () => {
-    let now = NOW;
-    let refuse = false;
-    const catalog = catalogOf({
-      providers: [{ id: "deepseek", name: "DeepSeek" }],
-      configured: ["deepseek"],
-      auth: { deepseek: DEEPSEEK_KEY },
-    });
-    const remote = fakeFetch({
-      [DEEPSEEK_BALANCE_URL]: () => (refuse ? { status: 429 } : { body: DEEPSEEK_BODY }),
-    });
-    const service = serviceOf({ catalog, fetch: remote.fetch, now: () => now });
+  // The 429 back-off is one branch of UsageService#read with no provider condition,
+  // so one clock sequence runs over two providers that differ in endpoint and body.
+  const BACKOFF_PROVIDERS = [
+    {
+      id: "synthetic",
+      catalog: () =>
+        catalogOf({
+          providers: [{ id: "synthetic", name: "synthetic.new" }],
+          configured: ["synthetic"],
+          auth: { synthetic: SYNTHETIC_KEY },
+        }),
+      url: SYNTHETIC_QUOTAS_URL,
+      body: SYNTHETIC_BODY,
+      first: {
+        field: "credits",
+        value: {
+          state: "value",
+          value: {
+            enabled: null,
+            used: { amount: 13.5, currency: "USD" },
+            limit: { amount: 24, currency: "USD" },
+            disabledReason: null,
+            balance: { amount: 10.5, currency: "USD" },
+            billing: SYNTHETIC_BILLING,
+          },
+        },
+      },
+      kept: {
+        field: "weekly",
+        value: {
+          state: "value",
+          value: {
+            utilization: 57.5,
+            resetsAt: { at: Date.parse("2026-10-31T00:00:00.000Z"), label: "2026-10-31 09:00" },
+            regenPercent: null,
+          },
+        },
+      },
+    },
+    {
+      id: "deepseek",
+      catalog: () =>
+        catalogOf({
+          providers: [{ id: "deepseek", name: "DeepSeek" }],
+          configured: ["deepseek"],
+          auth: { deepseek: DEEPSEEK_KEY },
+        }),
+      url: DEEPSEEK_BALANCE_URL,
+      body: DEEPSEEK_BODY,
+      first: { field: "balance", value: { state: "value", value: { amount: 11.25, currency: "USD" } } },
+      kept: { field: "balance", value: { state: "value", value: { amount: 11.25, currency: "USD" } } },
+    },
+  ] as const;
 
-    const first = await service.answer();
-    expect(cardOf(first, "deepseek").fields["balance"]).toEqual({ state: "value", value: { amount: 11.25, currency: "USD" } });
+  it.each(BACKOFF_PROVIDERS)(
+    "stops calling $id for thirty minutes after HTTP 429, and keeps the last value with its time",
+    async (row) => {
+      let now = NOW;
+      let refuse = false;
+      const remote = fakeFetch({ [row.url]: () => (refuse ? { status: 429 } : { body: row.body }) });
+      const service = serviceOf({ catalog: row.catalog(), fetch: remote.fetch, now: () => now });
 
-    // The held value ages out, the next call is refused, and the card keeps what
-    // it last received — with the time it received it.
-    refuse = true;
-    now = NOW + VALUE_REUSE_MS;
-    const refused = await service.answer();
-    expect(remote.calls).toHaveLength(2);
-    expect(cardOf(refused, "deepseek").fields["balance"]).toEqual({ state: "value", value: { amount: 11.25, currency: "USD" } });
-    expect(cardOf(refused, "deepseek").receivedAt).toEqual({ at: NOW, label: "2026-10-25 07:30" });
+      expect(cardOf(await service.answer(), row.id).fields[row.first.field]).toEqual(row.first.value);
 
-    // Nothing calls again while the back-off holds, even past the reuse window.
-    refuse = false;
-    now = NOW + VALUE_REUSE_MS + RATE_LIMIT_BACKOFF_MS - 1;
-    await service.answer();
-    expect(remote.calls).toHaveLength(2);
+      // The held value ages out, the next call is refused, and the card keeps what it
+      // last received, with the time it received it.
+      refuse = true;
+      now = NOW + VALUE_REUSE_MS;
+      const refused = cardOf(await service.answer(), row.id);
+      expect(remote.calls).toHaveLength(2);
+      expect(refused.receivedAt).toEqual({ at: NOW, label: "2026-10-25 07:30" });
+      expect(refused.fields[row.kept.field]).toEqual(row.kept.value);
+      expect(refused.hold).toEqual({
+        kind: "rate_limited",
+        until: { at: NOW + VALUE_REUSE_MS + RATE_LIMIT_BACKOFF_MS, label: "2026-10-25 08:10" },
+      });
 
-    now = NOW + VALUE_REUSE_MS + RATE_LIMIT_BACKOFF_MS;
-    await service.answer();
-    expect(remote.calls).toHaveLength(3);
-  });
+      // Nothing calls again while the back-off holds, even past the reuse window.
+      refuse = false;
+      now = NOW + VALUE_REUSE_MS + RATE_LIMIT_BACKOFF_MS - 1;
+      await service.answer();
+      expect(remote.calls).toHaveLength(2);
+
+      now = NOW + VALUE_REUSE_MS + RATE_LIMIT_BACKOFF_MS;
+      await service.answer();
+      expect(remote.calls).toHaveLength(3);
+    },
+  );
 
   it("puts the reason in the field when a provider refuses and no value was ever received", async () => {
     const catalog = catalogOf({
