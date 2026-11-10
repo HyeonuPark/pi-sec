@@ -178,7 +178,8 @@ GET /healthz
 ```
 
 The answer is the same for every caller: the route reports that the process is
-answering. It checks no store and no model. It never returns another status, and
+answering. `scheduler` is `running`, or `disabled` when the configuration turns the
+scheduler off, as in the admin status. It checks no store and no model. It never returns another status, and
 it reveals no secret.
 
 ---

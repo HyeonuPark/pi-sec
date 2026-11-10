@@ -906,6 +906,28 @@ describe("the calls to a provider's own API", () => {
     expect(cardOf(answer, "anthropic").receivedAt).toBeNull();
   });
 
+  it("does not follow a provider's redirect into a value", async () => {
+    const catalog = catalogOf({
+      providers: [{ id: "deepseek", name: "DeepSeek" }],
+      configured: ["deepseek"],
+      auth: { deepseek: DEEPSEEK_KEY },
+    });
+    // A fetch that follows a redirect would end on the 200 below. A fetch told to
+    // leave the redirect alone is given the 302 itself.
+    const remote = (async (_input: unknown, init?: { redirect?: string }) => {
+      const manual = init?.redirect === "manual";
+      const status = manual ? 302 : 200;
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        text: async () => JSON.stringify(manual ? {} : DEEPSEEK_BODY),
+      };
+    }) as unknown as typeof globalThis.fetch;
+    const answer = await serviceOf({ catalog, fetch: remote }).answer();
+
+    expect(cardOf(answer, "deepseek").fields["balance"]).toEqual({ state: "error", reason: "HTTP 302" });
+  });
+
   it("says the ledger is unreadable instead of failing the whole answer", async () => {
     const catalog = catalogOf({
       providers: [{ id: "deepseek", name: "DeepSeek" }],

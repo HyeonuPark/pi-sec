@@ -11,7 +11,7 @@ export function registerHealth(router: Router, deps: AppDeps): void {
         version: deps.version,
         apiVersion: API_VERSION,
         uptimeMs: Date.now() - deps.startedAt,
-        scheduler: "running",
+        scheduler: deps.runtime.getConfig().scheduler.enabled ? "running" : "disabled",
       },
       { "X-API-Version": String(API_VERSION) },
     );

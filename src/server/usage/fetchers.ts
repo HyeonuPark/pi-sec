@@ -186,8 +186,8 @@ export function bearerOf(credential: ProviderCredential | undefined): string | u
  *
  * The caller passes the headers it needs; the credential's own headers are added
  * first, so a provider that resolves an unusual scheme keeps it. A redirect is
- * not followed into an answer: only a success with a body this build can read is
- * a value.
+ * not followed (`redirect: "manual"`), so the credential's headers never go to a
+ * second address: only a success with a body this build can read is a value.
  */
 async function fetchJson(
   context: FetcherContext,
@@ -195,7 +195,7 @@ async function fetchJson(
   headers: Readonly<Record<string, string>>,
 ): Promise<Record<string, unknown>> {
   const merged: Record<string, string> = { ...(context.credential?.headers ?? {}), ...headers };
-  const response = await context.fetch(url, { method: "GET", headers: merged });
+  const response = await context.fetch(url, { method: "GET", headers: merged, redirect: "manual" });
   if (!response.ok) throw new UsageHttpError(response.status);
   let body: unknown;
   try {

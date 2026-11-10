@@ -105,10 +105,18 @@ describe("http server", () => {
     const { origin } = await boot();
     const response = await fetch(`${origin}/healthz`);
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { status: string; apiVersion: number };
+    const body = (await response.json()) as { status: string; apiVersion: number; scheduler: string };
     expect(body.status).toBe("ok");
     expect(body.apiVersion).toBe(1);
     expect(response.headers.get("x-api-version")).toBe("1");
+    expect(body.scheduler).toBe("running");
+  });
+
+  it("says the scheduler is off when the configuration turns it off", async () => {
+    const { origin } = await boot({ config: { scheduler: { ...defaultConfig().scheduler, enabled: false } } });
+    const response = await fetch(`${origin}/healthz`);
+    const body = (await response.json()) as { scheduler: string };
+    expect(body.scheduler).toBe("disabled");
   });
 
   it("serves the chat UI", async () => {
