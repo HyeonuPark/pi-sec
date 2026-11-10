@@ -20,9 +20,9 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
@@ -79,13 +79,22 @@ function git(cwd: string, args: string[]): string {
   });
 }
 
+/** Temporary roots this file made, removed when the file ends. */
+const roots: string[] = [];
+
+async function tempRoot(prefix: string): Promise<string> {
+  const path = await mkdtemp(join(tmpdir(), prefix));
+  roots.push(path);
+  return path;
+}
+
 /**
  * A local repository standing in for GitHub: `main` with one file and a
  * `feature` branch, so the dashboard has a list to draw and the fake `gh` has
  * answers for every call the pages make.
  */
 async function makeRemote(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "pages-pr-link-origin-"));
+  const path = await tempRoot("pages-pr-link-origin-");
   git(path, ["init", "--quiet", "-b", "main", "."]);
   await mkdir(join(path, "src"), { recursive: true });
   await writeFile(join(path, "src", "index.ts"), "export function main(): void {\n  run();\n}\n", "utf8");
@@ -113,7 +122,7 @@ async function boot(options: { readonly enabled: boolean; readonly basePath: str
       ...(options.enabled ? { githubPr: { writes: false, repos: [REPO] } } : {}),
     },
   });
-  const repoRoot = await mkdtemp(join(tmpdir(), "pages-pr-link-repo-"));
+  const repoRoot = await tempRoot("pages-pr-link-repo-");
   const sse = new SseHub({ heartbeatMs: 15000, queueBytes: 1_000_000, bufferMs: 60000 });
   const deps: AppDeps = {
     runtime: harness.runtime,
@@ -151,6 +160,7 @@ async function boot(options: { readonly enabled: boolean; readonly basePath: str
 beforeAll(async () => {
   remote = await makeRemote();
   gh = await fakeGhFixture();
+  roots.push(dirname(gh.logFile));
   browser = await chromium.launch({ args: LAUNCH_ARGS });
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 }, 120000);
@@ -159,6 +169,7 @@ afterAll(async () => {
   await browser?.close();
   browser = undefined;
   context = undefined;
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 }, 60000);
 
 function currentContext(): BrowserContext {

@@ -32,9 +32,9 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { defaultConfig } from "../../src/config/schema.ts";
@@ -100,8 +100,17 @@ function git(cwd: string, args: string[]): string {
  */
 let featureSha = "";
 
+/** Temporary roots this file made, removed when the file ends. */
+const roots: string[] = [];
+
+async function tempRoot(prefix: string): Promise<string> {
+  const path = await mkdtemp(join(tmpdir(), prefix));
+  roots.push(path);
+  return path;
+}
+
 async function makeRemote(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "gh-pr-browser-origin-"));
+  const path = await tempRoot("gh-pr-browser-origin-");
   git(path, ["init", "--quiet", "-b", "main", "."]);
   await mkdir(join(path, "src"), { recursive: true });
   const cache = Array.from({ length: 60 }, (_unused, index) => `export const value${index + 1} = ${index + 1};`);
@@ -132,10 +141,10 @@ async function makeRemote(): Promise<string> {
 
 beforeAll(async () => {
   const remote = await makeRemote();
-  const repoRoot = await mkdtemp(join(tmpdir(), "gh-repo-browser-"));
+  const repoRoot = await tempRoot("gh-repo-browser-");
   // The drafts directory is this test's own, and one saved review is in it before
   // the server starts, as if an earlier session had left it.
-  draftsDir = await mkdtemp(join(tmpdir(), "gh-drafts-browser-"));
+  draftsDir = await tempRoot("gh-drafts-browser-");
   await writeFile(
     join(draftsDir, `${REPO.replace("/", "+")}+${NUMBER}.json`),
     JSON.stringify({
@@ -175,6 +184,7 @@ beforeAll(async () => {
     "utf8",
   );
   gh = await fakeGhFixture();
+  roots.push(dirname(gh.logFile));
 
   harness = await createTestHarness({
     config: {
@@ -234,6 +244,7 @@ afterAll(async () => {
   started = undefined;
   await harness?.close();
   harness = undefined;
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 }, 60000);
 
 function currentContext(): BrowserContext {
