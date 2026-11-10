@@ -78,6 +78,33 @@ describe("writing a remote file", () => {
     }
   });
 
+  it("gives two writes of one file two temporary names", async () => {
+    const fixture = await createRunFixture();
+    try {
+      await fixture.pinHostKey();
+      await fixture.setLevel("box-a", "on");
+      const files = fixture.runtime.remoteMachines.files();
+      const path = `${fixture.remote}/target.txt`;
+      const writes = await Promise.all([
+        files.write({ machine: "box-a", path, content: "one\n" }),
+        files.write({ machine: "box-a", path, content: "two\n" }),
+      ]);
+      expect(writes.map((write) => write.kind)).toEqual(["ok", "ok"]);
+
+      const calls = await fixture.sftpCalls();
+      const commands = calls.flatMap((call) => (call.commands as string[] | undefined) ?? []);
+      const temps = commands
+        .filter((line) => line.startsWith("put "))
+        .map((line) => /([^\s"']*\.target\.txt\.pi-sec-[^\s"']*)/.exec(line)?.[1]);
+      expect(temps).toHaveLength(2);
+      expect(temps[0]).toBeDefined();
+      expect(temps[0]).not.toBe(temps[1]);
+      for (const temp of temps) expect(temp!.startsWith(`${fixture.remote}/.target.txt.pi-sec-`)).toBe(true);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("creates no directory, and says so when the target's is missing", async () => {
     const fixture = await createRunFixture();
     try {

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import type { Paths } from "../runtime/paths.ts";
@@ -230,7 +231,7 @@ export async function writePersonalityFile(
   body: string,
   name?: string,
 ): Promise<void> {
-  const temporary = `${path}.tmp`;
+  const temporary = `${path}.${String(process.pid)}-${randomBytes(6).toString("hex")}.tmp`;
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(temporary, renderPersonalityFile(language, body, name), { encoding: "utf8", mode: 0o600 });

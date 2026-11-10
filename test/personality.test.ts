@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,6 +25,7 @@ import {
   personalityBodyOf,
   personalityPath,
   renderPersonalityFile,
+  writePersonalityFile,
 } from "../src/extensions/personality-file.ts";
 import {
   INTERVIEW,
@@ -915,5 +916,19 @@ describe("the personality settings", () => {
     for (const name of prompt) {
       expect(BUNDLED_EXTENSIONS[names.indexOf(name)]?.phase).toBe("app");
     }
+  });
+});
+
+describe("the personality file on disk", () => {
+  it("writes one file twice at once and leaves one whole document and no temporary file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "personality-race-"));
+    const path = join(directory, "personality.md");
+    await Promise.all([
+      writePersonalityFile(path, "en", "first document\n"),
+      writePersonalityFile(path, "en", "second document\n"),
+    ]);
+    const text = await readFile(path, "utf8");
+    expect(["first document", "second document"].filter((body) => text.includes(body))).toHaveLength(1);
+    expect((await readdir(directory)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 });

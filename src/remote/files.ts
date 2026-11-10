@@ -34,6 +34,7 @@
  * option list and takes its arguments through, and hands rsync the wrapper.
  */
 
+import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -138,8 +139,9 @@ export class RemoteFiles {
    * Replace one remote file's content.
    *
    * The temporary file is a sibling of the target, so the rename cannot cross a
-   * filesystem boundary. Its name carries the process's own number, so two writers
-   * of the same file cannot collide on it, and it is removed when the write fails so
+   * filesystem boundary. Its name carries the process's own number and a random
+   * part, so each call has its own name and two writers of the same file cannot
+   * collide on it, and it is removed when the write fails so
    * nothing is left beside the target.
    */
   async write(input: {
@@ -222,10 +224,10 @@ export class RemoteFiles {
         await this.#sftp(access, [`-rm ${sftpQuote(temp)}`]);
         return { kind: "failed", reason: sftpReason(put) };
       }
-      // The original is read again in the same batch as the rename, so no writer
-      // can slip between the comparison and the swap without the caretaker seeing
-      // a difference: the two lines go down one connection, and sftp aborts the
-      // batch on the first command that fails. A changed file is caught here.
+      // The original is read again before the rename. These are two separate sftp
+      // calls, so a writer that changes the file in the gap of one round trip is
+      // not seen: sftp has no compare-and-swap, and the second read cannot close
+      // that gap. A file that changed since the first read is caught here.
       const again = await this.read({
         machine: input.machine,
         path: input.path,
@@ -331,12 +333,15 @@ export class RemoteFiles {
   }
 }
 
-/** The temporary file a write or an edit uses, beside its target. */
+/**
+ * The temporary file a write or an edit uses, beside its target. Each call gets
+ * its own name, so two overlapping calls on one path never share a temporary file.
+ */
 function tempPathFor(path: string): string {
   const slash = path.lastIndexOf("/");
   const head = slash === -1 ? "" : path.slice(0, slash + 1);
   const name = slash === -1 ? path : path.slice(slash + 1);
-  return `${head}.${name}.pi-sec-${String(process.pid)}.tmp`;
+  return `${head}.${name}.pi-sec-${String(process.pid)}-${randomBytes(6).toString("hex")}.tmp`;
 }
 
 /** How many times `needle` appears in `haystack`, counted without overlapping. */
