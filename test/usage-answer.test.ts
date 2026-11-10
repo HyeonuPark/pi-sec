@@ -1371,6 +1371,40 @@ describe("the answer the page is served with", () => {
     expect(remote.calls).toHaveLength(2);
   });
 
+  it("shows the held value and the back-off on the first paint inside a 429 hold, and calls nothing", async () => {
+    let now = NOW;
+    let refuse = false;
+    const catalog = catalogOf({
+      providers: [{ id: "deepseek", name: "DeepSeek" }],
+      configured: ["deepseek"],
+      auth: { deepseek: DEEPSEEK_KEY },
+    });
+    const until = { at: NOW + VALUE_REUSE_MS + RATE_LIMIT_BACKOFF_MS, label: expect.any(String) };
+
+    // One read succeeded before the refusal, so a value is held.
+    const withValue = fakeFetch({ [DEEPSEEK_BALANCE_URL]: () => (refuse ? { status: 429 } : { body: DEEPSEEK_BODY }) });
+    const first = serviceOf({ catalog, fetch: withValue.fetch, now: () => now });
+    await first.answer();
+    refuse = true;
+    now = NOW + VALUE_REUSE_MS;
+    await first.answer();
+    const calls = withValue.calls.length;
+    const heldPaint = cardOf(await first.firstPaint(), "deepseek");
+    expect(heldPaint.fields["balance"]).toEqual({ state: "value", value: { amount: 11.25, currency: "USD" } });
+    expect(heldPaint.hold).toEqual({ kind: "rate_limited", until });
+    expect(withValue.calls).toHaveLength(calls);
+
+    // No read ever succeeded, so the card shows the rate-limit reason.
+    const never = fakeFetch({ [DEEPSEEK_BALANCE_URL]: { status: 429 } });
+    const second = serviceOf({ catalog, fetch: never.fetch, now: () => NOW + VALUE_REUSE_MS });
+    await second.answer();
+    const neverCalls = never.calls.length;
+    const emptyPaint = cardOf(await second.firstPaint(), "deepseek");
+    expect(emptyPaint.fields["balance"]).toEqual({ state: "error", reason: "rate limited" });
+    expect(emptyPaint.hold).toMatchObject({ kind: "rate_limited" });
+    expect(never.calls).toHaveLength(neverCalls);
+  });
+
   it("treats a value received ten minutes ago as not there", async () => {
     let now = NOW;
     const remote = fakeFetch(readerReplies());

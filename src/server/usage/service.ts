@@ -559,8 +559,14 @@ export class UsageService {
     return this.#fetcher(providerId)?.subscriptionWithApiKey === true ? "subscription" : "prepaid";
   }
 
-  /** The external value of one provider, from the cache, a call, or the reason there is none. */
-  async #external(providerId: string, shape: UsageShape, models: UsageModels, now: number): Promise<ExternalOutcome> {
+  /**
+   * The value choice that `#external` and `#heldExternal` share, from memory only.
+   *
+   * It answers the outcome when memory decides: a reader of another shape, a value
+   * held inside the reuse window, or the rate-limit hold. It answers `null` when
+   * only a call can tell, and each caller then calls or says the value is pending.
+   */
+  #heldChoice(providerId: string, shape: UsageShape, now: number): ExternalOutcome | null {
     const fetcher = this.#fetcher(providerId);
     // A reader that speaks about another shape fills nothing here, and is not called.
     if (fetcher === undefined || fetcher.shape !== shape) return NOTHING;
@@ -580,6 +586,16 @@ export class UsageService {
         ? { values: null, receivedAt: null, reason: RATE_LIMITED_REASON, hold }
         : { values: held.values, receivedAt: held.receivedAt, reason: null, hold };
     }
+    return null;
+  }
+
+  /** The external value of one provider, from the cache, a call, or the reason there is none. */
+  async #external(providerId: string, shape: UsageShape, models: UsageModels, now: number): Promise<ExternalOutcome> {
+    const choice = this.#heldChoice(providerId, shape, now);
+    if (choice !== null) return choice;
+    // `#heldChoice` answers a miss only for a provider that has a reader.
+    const fetcher = this.#fetcher(providerId);
+    if (fetcher === undefined) return NOTHING;
     return await this.#call(providerId, fetcher, models, now);
   }
 
@@ -592,24 +608,9 @@ export class UsageService {
    * would show, minus the call nobody has made yet.
    */
   #heldExternal(providerId: string, shape: UsageShape, now: number): ExternalOutcome {
-    const fetcher = this.#fetcher(providerId);
-    // A reader that speaks about another shape fills nothing here, as in `answer()`.
-    if (fetcher === undefined || fetcher.shape !== shape) return NOTHING;
-
-    const held = this.#values.get(providerId);
-    const blockedUntil = this.#blockedUntil.get(providerId);
-    const hold: HoldCause | null =
-      blockedUntil !== undefined && blockedUntil > now ? { kind: "rate_limited", until: blockedUntil } : null;
-
-    if (held !== undefined && now - held.receivedAt < VALUE_REUSE_MS) {
-      return { values: held.values, receivedAt: held.receivedAt, reason: null, hold };
-    }
-    if (hold !== null) {
-      return held === undefined
-        ? { values: null, receivedAt: null, reason: RATE_LIMITED_REASON, hold }
-        : { values: held.values, receivedAt: held.receivedAt, reason: null, hold };
-    }
-    return { values: null, receivedAt: null, reason: null, hold: null, pending: true };
+    return (
+      this.#heldChoice(providerId, shape, now) ?? { values: null, receivedAt: null, reason: null, hold: null, pending: true }
+    );
   }
 
   /**
