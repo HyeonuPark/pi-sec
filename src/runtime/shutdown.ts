@@ -60,7 +60,9 @@ export const realTimers: ShutdownTimers = {
 /**
  * Run the steps in order, then release. Resolves with the exit code once the
  * steps and the release are done. When the deadline passes first, it logs the
- * step that is still running, releases, and calls `exit` with the same code.
+ * step that is still running, gives the release the fallback time, and calls
+ * `exit` with the same code. The release runs under the deadline too: if it is
+ * still running when the deadline passes, `exit` runs without it.
  */
 export async function runShutdown(options: ShutdownOptions): Promise<number> {
   const { code, log, timers } = options;
@@ -89,21 +91,36 @@ export async function runShutdown(options: ShutdownOptions): Promise<number> {
   })();
 
   const first = await Promise.race([sequence, deadline]);
-  const release = async (): Promise<void> => {
+  const release = async (): Promise<"released"> => {
     try {
       await options.release();
     } catch (error) {
       log.error("shutdown error", { step: "release", error });
     }
+    return "released";
   };
   if (first === "deadline") {
     log.error("shutdown deadline passed", { step: pending, code });
-    await release();
+    // The release gets the fallback time, and then the process ends whether it
+    // finished or not: a release that never ends must not keep the process alive.
+    let fallbackHandle: unknown;
+    const late = new Promise<"late">((resolve) => {
+      fallbackHandle = timers.setTimer(() => resolve("late"), options.exitFallbackMs ?? EXIT_FALLBACK_MS);
+    });
+    const outcome = await Promise.race([release(), late]);
+    if (outcome === "late") log.error("shutdown release did not end", { code });
+    else timers.clearTimer(fallbackHandle);
+    options.exit(code);
+    return code;
+  }
+  // The deadline stays armed while the release runs.
+  const outcome = await Promise.race([release(), deadline]);
+  if (outcome === "deadline") {
+    log.error("shutdown deadline passed", { step: "release", code });
     options.exit(code);
     return code;
   }
   timers.clearTimer(deadlineHandle);
-  await release();
   log.info("pi-sec stopped", { code });
   // Whatever a dependency forgot to unref would keep the loop alive for good.
   timers.setTimer(() => options.exit(code), options.exitFallbackMs ?? EXIT_FALLBACK_MS);

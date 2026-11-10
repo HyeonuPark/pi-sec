@@ -137,4 +137,47 @@ describe("the shutdown sequence", () => {
     expect(order).toEqual(["runtime", "released"]);
     expect(log.lines.map((line) => line.message)).toEqual(["shutdown error", "runtime closed", "pi-sec stopped"]);
   });
+
+  it("ends the process at the deadline when the release never ends after the steps", async () => {
+    const clock = fakeClock();
+    const log = recorder();
+    const exits: number[] = [];
+    const result = runShutdown({
+      code: 75,
+      log,
+      timers: clock,
+      exit: (code) => void exits.push(code),
+      steps: [done("server", "server closed")],
+      release: () => new Promise<void>(() => undefined),
+    });
+    await clock.advance(SHUTDOWN_DEADLINE_MS - 1);
+    expect(exits).toEqual([]);
+    await clock.advance(1);
+    expect(await result).toBe(75);
+    expect(exits).toEqual([75]);
+    expect(log.lines.map((line) => line.message)).toEqual(["server closed", "shutdown deadline passed"]);
+    expect(log.lines[1]?.fields).toMatchObject({ step: "release", code: 75 });
+    await clock.advance(EXIT_FALLBACK_MS);
+    expect(exits).toEqual([75]);
+  });
+
+  it("ends the process when the release never ends after the deadline passed", async () => {
+    const clock = fakeClock();
+    const log = recorder();
+    const exits: number[] = [];
+    const result = runShutdown({
+      code: 75,
+      log,
+      timers: clock,
+      exit: (code) => void exits.push(code),
+      steps: [{ name: "runtime", run: () => new Promise<void>(() => undefined), done: "runtime closed" }],
+      release: () => new Promise<void>(() => undefined),
+    });
+    await clock.advance(SHUTDOWN_DEADLINE_MS);
+    expect(exits).toEqual([]);
+    await clock.advance(EXIT_FALLBACK_MS);
+    expect(await result).toBe(75);
+    expect(exits).toEqual([75]);
+    expect(log.lines.map((line) => line.message)).toEqual(["shutdown deadline passed", "shutdown release did not end"]);
+  });
 });
